@@ -17,6 +17,8 @@ import androidx.compose.ui.unit.dp
 import me.foxtails.lakehead.core.designsystem.NavigationControlButton
 import me.foxtails.lakehead.core.designsystem.NavigationControlPill
 import me.foxtails.lakehead.core.model.AppIdentity
+import me.foxtails.lakehead.core.model.ItemId
+import me.foxtails.lakehead.core.model.LogicalPosition
 import me.foxtails.lakehead.core.navigation.LauncherDestination
 import me.foxtails.lakehead.feature.allapps.AllAppsScreen
 import me.foxtails.lakehead.feature.allapps.AllAppsViewState
@@ -54,6 +56,7 @@ internal fun LauncherShell(
     onLaunchApp: (AppIdentity) -> Unit,
     onAddToHome: (AppIdentity) -> Unit,
     onRequestDefaultHome: () -> Unit,
+    onMoveTile: (ItemId, LogicalPosition) -> Unit = { _, _ -> },
     modifier: Modifier = Modifier,
     initialDestination: LauncherDestination = LauncherDestination.HOME,
     viewportStyle: HomeCanvasViewportStyle = HomeCanvasViewportStyle(),
@@ -69,6 +72,7 @@ internal fun LauncherShell(
                 onRequestDefaultHome = onRequestDefaultHome,
                 modifier = Modifier.fillMaxSize(),
                 viewportStyle = viewportStyle,
+                onMoveTile = onMoveTile,
             )
 
             LauncherDestination.ALL_APPS -> AllAppsScreen(

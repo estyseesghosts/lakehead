@@ -167,6 +167,11 @@ class MainActivity : ComponentActivity() {
                     }
                 },
                 onRequestDefaultHome = ::requestDefaultHome,
+                onMoveTile = { itemId, position ->
+                    lifecycleScope.launch {
+                        routeLoader.commitMove(itemId, position)
+                    }
+                },
                 viewportStyle = routeViewportStyle,
             )
         }

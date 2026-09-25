@@ -16,6 +16,8 @@ import me.foxtails.lakehead.core.designsystem.OverlayFocusPolicy
 import me.foxtails.lakehead.core.designsystem.OverlayLayer
 import me.foxtails.lakehead.core.designsystem.VerticalFrameAnchor
 import me.foxtails.lakehead.core.model.AppIdentity
+import me.foxtails.lakehead.core.model.ItemId
+import me.foxtails.lakehead.core.model.LogicalPosition
 
 /**
  * Read-only viewport-aware canvas for one persisted home.
@@ -32,6 +34,9 @@ import me.foxtails.lakehead.core.model.AppIdentity
  *   exactly one truthful `home-role-request` layer above the canvas (the existing
  *   HOME-role callback) with [OverlayFocusPolicy.LEAVE_FOCUS_UNCHANGED], at least 48dp
  *   touch target, explicit description/anchor/insets, and no fake destinations.
+ * - Move editing is transient presentation state owned by [HomeCanvasGrid]: [onMoveTile]
+ *   reports a drag-committed [ItemId] and [LogicalPosition] to the caller, which owns
+ *   persistence. This composable performs no writes itself.
  */
 @Composable
 fun HomeCanvas(
@@ -42,6 +47,7 @@ fun HomeCanvas(
     modifier: Modifier = Modifier,
     overscanRows: Long = 1L,
     viewportStyle: HomeCanvasViewportStyle = HomeCanvasViewportStyle(),
+    onMoveTile: (ItemId, LogicalPosition) -> Unit = { _, _ -> },
 ) {
     require(overscanRows >= 0L) { "overscanRows must be non-negative" }
     when (state) {
@@ -84,6 +90,7 @@ fun HomeCanvas(
                         overscanRows = overscanRows,
                         viewportStyle = viewportStyle,
                         modifier = Modifier.fillMaxSize(),
+                        onMoveTile = onMoveTile,
                     )
                 },
                 overlays = listOf(roleLayer),

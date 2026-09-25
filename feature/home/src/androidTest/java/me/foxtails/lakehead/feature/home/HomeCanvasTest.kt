@@ -13,10 +13,12 @@ import androidx.compose.ui.test.hasStateDescription
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
+import androidx.compose.ui.test.onNode
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeUp
 import androidx.compose.ui.unit.dp
@@ -335,21 +337,40 @@ class HomeCanvasTest {
     }
 
     @Test
-    fun tiles_exposeNoLongClickAction() {
+    fun tiles_launchableExposesLongClick_unavailableDoesNot() {
         val tiles = listOf(
-            tile("a", personal, "No Gesture App", column = 0, row = 0),
+            tile("a", personal, "Movable App", column = 0, row = 0),
             tile("b", work, null, column = 1, row = 0),
         )
         setCanvas(loaded(tiles))
         composeRule.waitForIdle()
 
-        listOf("No Gesture App", "Unavailable app").forEach { label ->
-            val node = composeRule.onNodeWithText(label).fetchSemanticsNode()
-            assertFalse(
-                "$label must expose no long-click action",
-                node.config.contains(SemanticsActions.OnLongClick),
-            )
-        }
+        val launchable = composeRule.onNodeWithText("Movable App").fetchSemanticsNode()
+        assertTrue(
+            "launchable tile must expose a long-click action to enter move mode",
+            launchable.config.contains(SemanticsActions.OnLongClick),
+        )
+        val unavailable = composeRule.onNodeWithText("Unavailable app").fetchSemanticsNode()
+        assertFalse(
+            "unavailable tile must expose no long-click action",
+            unavailable.config.contains(SemanticsActions.OnLongClick),
+        )
+    }
+
+    @Test
+    fun longPressLaunchable_entersMoveMode_withSelectedStateDescription() {
+        val tiles = listOf(tile("a", personal, "Movable App", column = 0, row = 0))
+        setCanvas(loaded(tiles))
+        composeRule.waitForIdle()
+
+        composeRule.onNodeWithText("Movable App")
+            .performSemanticsAction(SemanticsActions.OnLongClick) { it() }
+        composeRule.waitForIdle()
+
+        composeRule.onNode(hasStateDescription("Moving Movable App, row 0 column 0"))
+            .assertIsDisplayed()
+        composeRule.onNodeWithTag(MOVE_CANDIDATE_OVERLAY_TAG, useUnmergedTree = true)
+            .assertExists()
     }
 
     // ---- Sparse distant rows ----

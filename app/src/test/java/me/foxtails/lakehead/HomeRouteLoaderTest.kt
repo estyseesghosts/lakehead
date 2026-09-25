@@ -217,6 +217,115 @@ class HomeRouteLoaderTest {
     }
 
     @Test
+    fun commitMoveDispatchesToIOAndReloadsOnAccepted() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val moveResult = MutationResult.Accepted(
+            me.foxtails.lakehead.core.grid.GridRules.Result.Accepted(
+                listOf(me.foxtails.lakehead.core.grid.GridPlacement(ItemId("tile-a"), me.foxtails.lakehead.core.grid.GridPosition(2, 3), me.foxtails.lakehead.core.grid.GridSpan(1, 1)))
+            )
+        )
+        var loadCount = 0
+        val repository = FakeRepository { _, _, _ ->
+            loadCount++
+            if (loadCount == 1) {
+                LoadResult.Loaded(listOf(placement("tile-a", appA)))
+            } else {
+                LoadResult.Loaded(listOf(placement("tile-a", appA, ItemAvailability.AVAILABLE)))
+            }
+        }
+        repository.moveAction = { _, _, _, _, _ -> moveResult }
+        val loader = loader(repository, dispatcher)
+        loader.start(this)
+        advanceUntilIdle()
+        assertTrue(loader.state.value is HomeRenderState.Loaded)
+        val readsBefore = repository.reads
+
+        val result = loader.commitMove(ItemId("tile-a"), LogicalPosition(2, 3))
+        advanceUntilIdle()
+
+        assertSame(moveResult, result)
+        assertEquals(1, repository.moveCalls.size)
+        assertEquals(requestedHome, repository.moveCalls[0].first)
+        assertEquals(ItemId("tile-a"), repository.moveCalls[0].second)
+        assertEquals(LogicalPosition(2, 3), repository.moveCalls[0].third)
+        // Reload triggers a new repository read
+        assertTrue("Expected reload after accepted move", repository.reads > readsBefore)
+        loader.stop()
+    }
+
+    @Test
+    fun commitMoveDoesNotReloadOnRejected() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val rejected = MutationResult.Rejected(
+            me.foxtails.lakehead.core.grid.GridRules.Result.Rejected(
+                me.foxtails.lakehead.core.grid.GridRules.Rejection.COLLISION
+            )
+        )
+        val repository = FakeRepository { _, _, _ ->
+            LoadResult.Loaded(listOf(placement("tile-a", appA)))
+        }
+        repository.moveAction = { _, _, _, _, _ -> rejected }
+        val loader = loader(repository, dispatcher)
+        loader.start(this)
+        advanceUntilIdle()
+        assertTrue(loader.state.value is HomeRenderState.Loaded)
+        val readsBefore = repository.reads
+
+        val result = loader.commitMove(ItemId("tile-a"), LogicalPosition(2, 3))
+        advanceUntilIdle()
+
+        assertSame(rejected, result)
+        assertEquals(1, repository.moveCalls.size)
+        assertEquals("Rejected move must not trigger reload", readsBefore, repository.reads)
+        loader.stop()
+    }
+
+    @Test
+    fun commitMoveDoesNotReloadOnNotFound() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val repository = FakeRepository { _, _, _ ->
+            LoadResult.Loaded(listOf(placement("tile-a", appA)))
+        }
+        repository.moveAction = { _, _, _, _, _ -> MutationResult.NotFound }
+        val loader = loader(repository, dispatcher)
+        loader.start(this)
+        advanceUntilIdle()
+        val readsBefore = repository.reads
+
+        val result = loader.commitMove(ItemId("tile-a"), LogicalPosition(2, 3))
+        advanceUntilIdle()
+
+        assertTrue(result is MutationResult.NotFound)
+        assertEquals("NotFound move must not trigger reload", readsBefore, repository.reads)
+        loader.stop()
+    }
+
+    @Test
+    fun commitMovePassesViewportBoundsToRepository() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        var capturedColumns = -1
+        var capturedRows = -1
+        val repository = FakeRepository { _, _, _ ->
+            LoadResult.Loaded(listOf(placement("tile-a", appA)))
+        }
+        repository.moveAction = { _, _, _, columns, rows ->
+            capturedColumns = columns
+            capturedRows = rows
+            MutationResult.NotFound
+        }
+        val loader = loader(repository, dispatcher)
+        loader.start(this)
+        advanceUntilIdle()
+
+        loader.commitMove(ItemId("tile-a"), LogicalPosition(1, 1))
+        advanceUntilIdle()
+
+        assertEquals(6, capturedColumns)
+        assertEquals(4096, capturedRows)
+        loader.stop()
+    }
+
+    @Test
     fun decodedIconSnapshotIsImmutableBoundedAndUsesInjectedDecoder() {
         val imageA = "decoded-image"
         var decoded = 0
@@ -305,6 +414,10 @@ class HomeRouteLoaderTest {
     ) : HomePlacementRepository {
         var mutations = 0
         var reads = 0
+        var moveCalls = mutableListOf<Triple<HomeId, ItemId, LogicalPosition>>()
+        var moveAction: (HomeId, ItemId, LogicalPosition, Int, Int) -> MutationResult = { _, _, _, _, _ ->
+            error("loader must not write")
+        }
         override fun load(homeId: HomeId, columns: Int, rows: Int): LoadResult {
             reads++
             return read(homeId, columns, rows)
@@ -314,7 +427,9 @@ class HomeRouteLoaderTest {
             mutations++; error("loader must not write")
         }
         override fun move(homeId: HomeId, itemId: ItemId, position: LogicalPosition, columns: Int, rows: Int): MutationResult {
-            mutations++; error("loader must not write")
+            mutations++
+            moveCalls += Triple(homeId, itemId, position)
+            return moveAction(homeId, itemId, position, columns, rows)
         }
         override fun resize(homeId: HomeId, itemId: ItemId, span: LogicalSpan, columns: Int, rows: Int): MutationResult {
             mutations++; error("loader must not write")

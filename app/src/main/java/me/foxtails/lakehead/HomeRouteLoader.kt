@@ -18,9 +18,12 @@ import kotlinx.coroutines.withContext
 import me.foxtails.lakehead.core.model.AppIdentity
 import me.foxtails.lakehead.core.model.AppPlacement
 import me.foxtails.lakehead.core.model.HomeId
+import me.foxtails.lakehead.core.model.ItemId
 import me.foxtails.lakehead.core.model.LauncherAppEntry
+import me.foxtails.lakehead.core.model.LogicalPosition
 import me.foxtails.lakehead.data.repository.HomePlacementRepository
 import me.foxtails.lakehead.data.repository.LoadResult
+import me.foxtails.lakehead.data.repository.MutationResult
 import me.foxtails.lakehead.feature.home.HomeAppMetadata
 import me.foxtails.lakehead.feature.home.HomeRenderProjection
 import me.foxtails.lakehead.feature.home.HomeRenderState
@@ -118,6 +121,31 @@ internal class HomeRouteLoader(
                 currentEntries to catalogueGeneration
             }
             refreshCatalogueProjection(catalogueSnapshot.first, catalogueSnapshot.second)
+        }
+    }
+
+    /**
+     * Commits a drag-finished tile move on the IO dispatcher and reloads on success.
+     *
+     * Callers must be in a coroutine scope (typically `lifecycleScope`).
+     * The repository write is synchronous (Room transaction) and is wrapped in
+     * `withContext(Dispatchers.IO)` so the caller never blocks the main thread.
+     * Only [MutationResult.Accepted] triggers a reload — rejected or cancelled
+     * writes persist nothing.
+     */
+    suspend fun commitMove(itemId: ItemId, position: LogicalPosition): MutationResult {
+        return withContext(ioDispatcher) {
+            val result = repository.move(
+                homeId = homeId,
+                itemId = itemId,
+                position = position,
+                columns = viewport.columnsBound,
+                rows = viewport.rowsBound,
+            )
+            if (result is MutationResult.Accepted) {
+                reload()
+            }
+            result
         }
     }
 

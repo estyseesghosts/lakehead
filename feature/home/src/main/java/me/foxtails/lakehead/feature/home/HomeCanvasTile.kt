@@ -11,13 +11,14 @@ import me.foxtails.lakehead.core.designsystem.AppTile
 import me.foxtails.lakehead.core.designsystem.AppTileState
 import me.foxtails.lakehead.core.grid.GridSpan
 import me.foxtails.lakehead.core.model.AppIdentity
+import me.foxtails.lakehead.core.model.ItemId
 
 /**
  * Maps one [HomeRenderTile] to the reusable [AppTile] primitive.
  *
  * Presentation only: the caller supplies the already-decoded [iconBitmap] (or null when no
  * snapshot was supplied). This composable performs no decode, catalogue/platform lookup,
- * database access, or gesture handling beyond a plain click.
+ * database access, or gesture handling beyond click and move-entry long-press.
  *
  * - Label falls back to `"Unavailable app"` when the tile has no joined metadata label.
  * - Span comes directly from the persisted tile; legality stays owned by `core:grid`.
@@ -25,7 +26,11 @@ import me.foxtails.lakehead.core.model.AppIdentity
  *   `Image(bitmap = ..., contentDescription = null)` when present, otherwise label-only.
  * - Click dispatches the tile's exact [AppIdentity] only when [HomeRenderTile.isLaunchable];
  *   unavailable tiles expose a no-op click and `stateDescription = "Unavailable"`.
- * - [onLongClick] is always null: D4-D6 gestures are explicitly out of scope.
+ * - Long-press on a launchable tile calls [onEnterMove] to enter transient move mode;
+ *   unavailable tiles expose no long-click action.
+ * - When [isMoveActive] and this tile's id matches [activeItemId], the tile renders the
+ *   caller-driven [AppTileState.isSelected] border and announces
+ *   `stateDescription = "Moving <label>, row R column C"`.
  */
 @Composable
 internal fun HomeCanvasTile(
@@ -33,18 +38,26 @@ internal fun HomeCanvasTile(
     iconBitmap: ImageBitmap?,
     onLaunchApp: (AppIdentity) -> Unit,
     modifier: Modifier = Modifier,
+    isMoveActive: Boolean = false,
+    activeItemId: ItemId? = null,
+    onEnterMove: (HomeRenderTile) -> Unit = {},
 ) {
     val rawLabel = tile.label
     val label = if (rawLabel.isNullOrBlank()) UNAVAILABLE_LABEL else rawLabel
-    val tileModifier = if (tile.isLaunchable) {
-        modifier
-    } else {
-        modifier.semantics { stateDescription = UNAVAILABLE_STATE_DESCRIPTION }
+    val isMoving = isMoveActive && tile.itemId == activeItemId
+    val tileModifier = when {
+        isMoving -> modifier.semantics {
+            stateDescription =
+                "Moving $label, row ${tile.position.row} column ${tile.position.column}"
+        }
+        !tile.isLaunchable -> modifier.semantics { stateDescription = UNAVAILABLE_STATE_DESCRIPTION }
+        else -> modifier
     }
     AppTile(
         state = AppTileState(
             label = label,
             span = GridSpan(tile.span.columns, tile.span.rows),
+            isSelected = isMoving,
         ),
         onClick = {
             if (tile.isLaunchable) {
@@ -64,7 +77,11 @@ internal fun HomeCanvasTile(
             null
         },
         contentDescription = null,
-        onLongClick = null,
+        onLongClick = if (tile.isLaunchable) {
+            { onEnterMove(tile) }
+        } else {
+            null
+        },
     )
 }
 

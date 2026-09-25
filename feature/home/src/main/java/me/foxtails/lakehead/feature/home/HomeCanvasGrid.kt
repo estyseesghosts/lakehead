@@ -1,16 +1,33 @@
 package me.foxtails.lakehead.feature.home
 
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.border
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.dp
+import me.foxtails.lakehead.core.designsystem.AppTileDefaults
 import me.foxtails.lakehead.core.designsystem.SpanChild
 import me.foxtails.lakehead.core.designsystem.SquareCellGeometry
+import me.foxtails.lakehead.core.designsystem.TileBounds
 import me.foxtails.lakehead.core.designsystem.WindowedSpanContainer
 import me.foxtails.lakehead.core.grid.GridPlacement
 import me.foxtails.lakehead.core.grid.GridPosition
@@ -19,6 +36,7 @@ import me.foxtails.lakehead.core.grid.GridSpan
 import me.foxtails.lakehead.core.grid.GridVerticalExtent
 import me.foxtails.lakehead.core.model.AppIdentity
 import me.foxtails.lakehead.core.model.ItemId
+import me.foxtails.lakehead.core.model.LogicalPosition
 
 /**
  * Viewport padding/gap inputs for the home canvas grid, in pixels.
@@ -56,6 +74,12 @@ data class HomeCanvasViewportStyle(
  * - Tiles map to [SpanChild] in persisted order; icons come only from [iconsByIdentity]
  *   via [Map.get] on the exact [AppIdentity]. No decode, catalogue/platform lookup, or
  *   database access occurs in any composable.
+ * - Transient move editing is hoisted here: long-press on a launchable tile enters a
+ *   [MoveEditSession.Active] session, vertical scroll is disabled while active, pointer
+ *   drags update the candidate via [MoveDragMath] with validity from `core:grid`, a
+ *   non-interactive outline marks the candidate, back cancels, and drag end commits via
+ *   [onMoveTile] when the candidate differs from the origin. Persistence itself stays
+ *   with the caller: this grid only reports the committed [ItemId] and [LogicalPosition].
  */
 @Composable
 internal fun HomeCanvasGrid(
@@ -65,6 +89,7 @@ internal fun HomeCanvasGrid(
     overscanRows: Long,
     viewportStyle: HomeCanvasViewportStyle,
     modifier: Modifier = Modifier,
+    onMoveTile: (ItemId, LogicalPosition) -> Unit = { _, _ -> },
 ) {
     require(overscanRows >= 0L) { "overscanRows must be non-negative" }
     if (loaded.tiles.isEmpty()) {
@@ -87,6 +112,13 @@ internal fun HomeCanvasGrid(
         )
         key(loaded.requestedHomeId) {
             val scrollState = rememberScrollState()
+            var moveSession by remember { mutableStateOf<MoveEditSession>(MoveEditSession.Idle) }
+            val columns = loaded.columns.count
+            val rows = loaded.extent.totalScrollableRows.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+            val active = moveSession as? MoveEditSession.Active
+            BackHandler(enabled = active != null) {
+                moveSession = moveSession.cancel()
+            }
             val rowStridePx: Long =
                 geometry.cellSizePx.toLong() + geometry.rowGapPx.toLong()
             val window = visibleWindowFor(
@@ -95,6 +127,9 @@ internal fun HomeCanvasGrid(
                 rowStridePx = rowStridePx,
                 overscanRows = overscanRows,
             )
+            // Logical row origin the windowed container rebases pixel frames around:
+            // content y=0 corresponds to this row.
+            val rowOrigin = window.withOverscan(overscanRows).firstRow
             val minHeightPx = contentMinHeightPx(
                 extent = loaded.extent,
                 cellSizePx = geometry.cellSizePx,
@@ -113,20 +148,86 @@ internal fun HomeCanvasGrid(
                             tile = tile,
                             iconBitmap = iconBitmap,
                             onLaunchApp = onLaunchApp,
+                            isMoveActive = active != null,
+                            activeItemId = active?.itemId,
+                            onEnterMove = { entered ->
+                                moveSession = moveSession.enterIfLaunchable(
+                                    entered,
+                                    loaded.tiles,
+                                    columns,
+                                    rows,
+                                )
+                            },
                         )
                     },
                 )
             }
-            WindowedSpanContainer(
+            // Latest session for drag callbacks: the pointerInput key stays stable for the
+            // session lifetime (item id) so in-flight drags survive candidate recompositions.
+            val sessionState = rememberUpdatedState(moveSession)
+            // Tap on the grid background (outside any tile) cancels an active move session.
+            // Tiles use combinedClickable which consumes their own taps; this handler only
+            // fires for taps on empty grid area.
+            val tapCancelModifier = Modifier.pointerInput(active?.itemId) {
+                if (active?.itemId == null) return@pointerInput
+                detectTapGestures(
+                    onTap = { moveSession = sessionState.value.cancel() },
+                )
+            }
+            val dragModifier = Modifier.pointerInput(active?.itemId, geometry, rowOrigin, columns, rows) {
+                if (active?.itemId == null) return@pointerInput
+                detectDragGestures(
+                    onDrag = { change, _ ->
+                        change.consume()
+                        val cell = MoveDragMath.cellForPixel(
+                            xPx = change.position.x,
+                            yPx = change.position.y + scrollState.value.toFloat(),
+                            cellSizePx = geometry.cellSizePx.toFloat(),
+                            columnGapPx = geometry.columnGapPx.toFloat(),
+                            rowGapPx = geometry.rowGapPx.toFloat(),
+                            windowFirstRow = rowOrigin,
+                        )
+                        moveSession = sessionState.value.updateCandidate(
+                            cell,
+                            loaded.tiles,
+                            columns,
+                            rows,
+                        )
+                    },
+                    onDragEnd = {
+                        val current = sessionState.value as? MoveEditSession.Active
+                        if (current != null && sessionState.value.hasMoved()) {
+                            onMoveTile(current.itemId, current.candidate)
+                        }
+                        moveSession = MoveEditSession.Idle
+                    },
+                    onDragCancel = {
+                        moveSession = MoveEditSession.Idle
+                    },
+                )
+            }
+            Box(
                 modifier = Modifier
-                    .verticalScroll(scrollState)
+                    .verticalScroll(scrollState, enabled = active == null)
+                    .then(tapCancelModifier)
+                    .then(dragModifier)
                     .testTag(HOME_CANVAS_GRID_TAG),
-                children = children,
-                window = window,
-                overscanRows = overscanRows,
-                geometry = geometry,
-                minHeightPx = minHeightPx,
-            )
+            ) {
+                WindowedSpanContainer(
+                    children = children,
+                    window = window,
+                    overscanRows = overscanRows,
+                    geometry = geometry,
+                    minHeightPx = minHeightPx,
+                )
+                if (active != null) {
+                    MoveCandidateOverlay(
+                        active = active,
+                        geometry = geometry,
+                        rowOrigin = rowOrigin,
+                    )
+                }
+            }
         }
     }
 }
@@ -196,3 +297,75 @@ private fun saturatingAdd(value: Long, increment: Long): Long =
 
 /** Test tag on the scrolling canvas grid (testing hook only; no behavior change). */
 internal const val HOME_CANVAS_GRID_TAG: String = "home-canvas-grid"
+
+/** Test tag on the move-candidate validity outline (testing hook only; no behavior change). */
+internal const val MOVE_CANDIDATE_OVERLAY_TAG: String = "move-candidate-overlay"
+
+/**
+ * Non-interactive outline marking the active move candidate cell.
+ *
+ * Position reuses [TileBounds.bounds] for the absolute candidate frame, rebased around the
+ * windowed container's [rowOrigin] via [rebasedOverlayTop] so the outline lands on the same
+ * content coordinates the tiles are placed at. A valid candidate draws a 2dp outline in the
+ * selected border color; any other validity draws the pressed color.
+ */
+@Composable
+private fun MoveCandidateOverlay(
+    active: MoveEditSession.Active,
+    geometry: SquareCellGeometry,
+    rowOrigin: Long,
+    modifier: Modifier = Modifier,
+) {
+    val density = LocalDensity.current
+    val absolute = TileBounds.bounds(
+        position = GridPosition(active.candidate.column, active.candidate.row),
+        span = GridSpan(active.span.columns, active.span.rows),
+        geometry = geometry,
+    )
+    val rowStridePx = geometry.cellSizePx.toLong() + geometry.rowGapPx.toLong()
+    val topPx = rebasedOverlayTop(
+        absoluteTopPx = absolute.top,
+        rowOrigin = rowOrigin,
+        rowStridePx = rowStridePx,
+    )
+    val borderColor = if (active.candidateValidity == CandidateValidity.VALID) {
+        AppTileDefaults.SelectedBorderColor
+    } else {
+        AppTileDefaults.PressedContainerColor
+    }
+    val widthDp = with(density) { absolute.width.toDp() }
+    val heightDp = with(density) { absolute.height.toDp() }
+    Box(
+        modifier = modifier
+            .offset { IntOffset(absolute.left, topPx) }
+            .size(widthDp, heightDp)
+            .border(2.dp, borderColor, AppTileDefaults.TileShape)
+            .testTag(MOVE_CANDIDATE_OVERLAY_TAG),
+    )
+}
+
+/**
+ * Rebases an absolute [TileBounds] top edge into windowed-container content coordinates.
+ *
+ * The container places rows at `(row - origin) * stride`, so the overlay subtracts the same
+ * origin stride from the absolute frame. Results outside [Int] saturate instead of wrapping;
+ * callers treat the outline as best-effort feedback.
+ */
+internal fun rebasedOverlayTop(
+    absoluteTopPx: Int,
+    rowOrigin: Long,
+    rowStridePx: Long,
+): Int {
+    require(absoluteTopPx >= 0) { "absoluteTopPx must be non-negative" }
+    require(rowOrigin >= 0L) { "rowOrigin must be non-negative" }
+    require(rowStridePx > 0L) { "rowStridePx must be positive" }
+    return try {
+        val rebased = Math.subtractExact(
+            absoluteTopPx.toLong(),
+            Math.multiplyExact(rowOrigin, rowStridePx),
+        )
+        rebased.coerceIn(Int.MIN_VALUE.toLong(), Int.MAX_VALUE.toLong()).toInt()
+    } catch (e: ArithmeticException) {
+        Int.MIN_VALUE
+    }
+}
