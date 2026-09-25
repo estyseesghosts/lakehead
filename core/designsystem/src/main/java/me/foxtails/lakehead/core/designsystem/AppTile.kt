@@ -4,17 +4,13 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.defaultMinSize
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.ui.graphics.RectangleShape
-import androidx.compose.foundation.text.BasicText
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
@@ -22,22 +18,19 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
-import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import me.foxtails.lakehead.core.grid.GridSpan
 
 /**
  * Presentation-only state for a small reusable app tile.
  *
- * [label] is the visible, non-blank app name. [span] selects the tile's internal
- * arrangement (wide spans place the icon beside the label; square and tall spans stack
- * the icon above the label) but performs no placement legality, span-support or
- * column-count checks: whether the span may be placed remains owned by `core:grid`.
- * [isSelected] and [isPressed] are caller-owned transient visual states; this tile never
- * derives them from inventory, persistence or its own interaction source.
+ * [label] is never rendered as visible text; it must stay non-blank because it
+ * supplies the tile's accessible name (default `contentDescription`). [span] selects
+ * the icon anchor via [symbolAlignment] but performs no placement legality,
+ * span-support or column-count checks: whether the span may be placed remains owned
+ * by `core:grid`. [isSelected] and [isPressed] are caller-owned transient visual
+ * states; this tile never derives them from inventory, persistence or its own
+ * interaction source.
  */
 data class AppTileState(
     val label: String,
@@ -102,13 +95,22 @@ internal fun resolveTileColors(
 }
 
 /**
- * Small reusable app-tile primitive.
+ * Small reusable icon-only app-tile primitive.
  *
  * Custom Compose Foundation/graphics/text only: no Material product components, no app
  * inventory, database, persistence, navigation or business logic. Callers supply the
- * visible [AppTileState.label], the optional caller-composed [icon] slot, click and
+ * accessibility [AppTileState.label], the optional caller-composed [icon] slot, click and
  * optional long-click callbacks, and an optional [contentDescription] override (which
- * defaults to the label so the tile always has an accessible name).
+ * defaults to the label so the tile always has an accessible name). No text label is
+ * ever rendered on the home-tile path.
+ *
+ * Layout: the outer [Box] is a full-size anchor container (background, selection
+ * border, semantics, click handling only — never centered content). The inner [Box]
+ * fills that container and anchors the [icon] slot via [symbolAlignment]: tall 1x2
+ * tiles bottom-center the symbol, every other span bottom-ends it, so icons are never
+ * centered. A 1x1 tile is full-bleed (no [LauncherDimensions.tilePadding] inset; the
+ * icon slot fills the whole tile), while larger spans keep the tile-padding inset and
+ * the caller's natural symbol size anchored within it.
  *
  * Accessibility: the tile merges descendants into a single focusable node with
  * [Role.Button], the resolved content description, the `selected` flag for
@@ -139,6 +141,7 @@ fun AppTile(
     Box(
         modifier = modifier
             .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+            .fillMaxSize()
             .background(containerColor, AppTileDefaults.TileShape)
             .then(
                 if (state.isSelected) {
@@ -162,44 +165,21 @@ fun AppTile(
                 onLongClick = onLongClick,
                 onClick = onClick,
                 role = Role.Button,
-            )
-            .padding(dimensions.tilePadding),
-        contentAlignment = Alignment.Center,
+            ),
     ) {
-        if (state.span.columns > state.span.rows) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(dimensions.tilePadding, Alignment.CenterHorizontally),
-            ) {
-                if (icon != null) {
-                    icon()
-                }
-                AppTileLabel(state.label, tileColors.content)
-            }
-        } else {
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterVertically),
-            ) {
-                if (icon != null) {
-                    icon()
-                }
-                AppTileLabel(state.label, tileColors.content)
+        val isFullBleed = state.span == GridSpan(1, 1)
+        Box(
+            modifier = if (isFullBleed) {
+                Modifier.fillMaxSize()
+            } else {
+                Modifier.fillMaxSize().padding(dimensions.tilePadding)
+            },
+            contentAlignment = symbolAlignment(state.span),
+            propagateMinConstraints = isFullBleed,
+        ) {
+            if (icon != null) {
+                icon()
             }
         }
     }
-}
-
-@Composable
-private fun AppTileLabel(label: String, contentColor: Color) {
-    BasicText(
-        text = label,
-        style = TextStyle(
-            color = contentColor,
-            fontSize = 12.sp,
-            textAlign = TextAlign.Center,
-        ),
-        maxLines = 2,
-        overflow = TextOverflow.Ellipsis,
-    )
 }

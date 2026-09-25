@@ -13,10 +13,9 @@ import androidx.compose.ui.test.hasStateDescription
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
-import androidx.compose.ui.test.onNode
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
-import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTouchInput
@@ -172,14 +171,16 @@ class HomeCanvasTest {
         )
         setCanvas(loaded(tiles))
 
-        composeRule.onNodeWithText("Personal App")
+        composeRule.onNodeWithContentDescription("Personal App")
             .assertIsDisplayed()
             .assert(hasClickAction())
             .assert(SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Button))
-        composeRule.onNodeWithText("Work App")
+        composeRule.onNodeWithText("Personal App").assertDoesNotExist()
+        composeRule.onNodeWithContentDescription("Work App")
             .assertIsDisplayed()
             .assert(hasClickAction())
             .assert(SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Button))
+        composeRule.onNodeWithText("Work App").assertDoesNotExist()
     }
 
     @Test
@@ -191,7 +192,8 @@ class HomeCanvasTest {
         )
         setCanvas(loaded(tiles), onLaunchApp = { emitted = it })
 
-        composeRule.onNodeWithText("Work App").performClick()
+        composeRule.onNodeWithContentDescription("Work App").assertExists().performClick()
+        composeRule.onNodeWithText("Work App").assertDoesNotExist()
 
         composeRule.runOnIdle { assertEquals(work, emitted) }
     }
@@ -215,11 +217,13 @@ class HomeCanvasTest {
         )
         setCanvas(loaded(tiles), onLaunchApp = { emitted = it })
 
-        composeRule.onNodeWithText("Unavailable app").assertIsDisplayed()
-        composeRule.onNodeWithText("Stale App").assertIsDisplayed()
+        composeRule.onNodeWithContentDescription("Unavailable app").assertIsDisplayed()
+        composeRule.onNodeWithText("Unavailable app").assertDoesNotExist()
+        composeRule.onNodeWithContentDescription("Stale App").assertIsDisplayed()
+        composeRule.onNodeWithText("Stale App").assertDoesNotExist()
 
-        composeRule.onNodeWithText("Unavailable app").performClick()
-        composeRule.onNodeWithText("Stale App").performClick()
+        composeRule.onNodeWithContentDescription("Unavailable app").assertExists().performClick()
+        composeRule.onNodeWithContentDescription("Stale App").assertExists().performClick()
         composeRule.runOnIdle { assertEquals(null, emitted) }
 
         composeRule.onAllNodes(hasStateDescription("Unavailable")).assertCountEquals(2)
@@ -241,8 +245,10 @@ class HomeCanvasTest {
                 overscanRows = 1L,
             )
         }
-        composeRule.onNodeWithText("Personal App").assertIsDisplayed()
-        composeRule.onNodeWithText("Work App").assertIsDisplayed()
+        composeRule.onNodeWithContentDescription("Personal App").assertIsDisplayed()
+        composeRule.onNodeWithText("Personal App").assertDoesNotExist()
+        composeRule.onNodeWithContentDescription("Work App").assertIsDisplayed()
+        composeRule.onNodeWithText("Work App").assertDoesNotExist()
 
         val updated = listOf(
             tile("b", work, "Work App v2", column = 1, row = 0),
@@ -250,8 +256,11 @@ class HomeCanvasTest {
         )
         composeRule.runOnIdle { holder.value = updated }
         composeRule.waitForIdle()
-        composeRule.onNodeWithText("Personal App v2").assertIsDisplayed()
-        composeRule.onNodeWithText("Work App v2").assertIsDisplayed()
+        composeRule.onNodeWithContentDescription("Personal App v2").assertIsDisplayed()
+        composeRule.onNodeWithText("Personal App v2").assertDoesNotExist()
+        composeRule.onNodeWithContentDescription("Work App v2").assertIsDisplayed()
+        composeRule.onNodeWithText("Work App v2").assertDoesNotExist()
+        composeRule.onNodeWithContentDescription("Personal App").assertDoesNotExist()
         composeRule.onNodeWithText("Personal App").assertDoesNotExist()
     }
 
@@ -272,7 +281,8 @@ class HomeCanvasTest {
 
         val tiles = listOf(tile("a", personal, "Narrow App", column = 0, row = 0))
         setCanvas(loaded(tiles, columns = 1))
-        composeRule.onNodeWithText("Narrow App").assertIsDisplayed()
+        composeRule.onNodeWithContentDescription("Narrow App").assertIsDisplayed()
+        composeRule.onNodeWithText("Narrow App").assertDoesNotExist()
     }
 
     @Test
@@ -282,8 +292,10 @@ class HomeCanvasTest {
             tile("b", work, "Six B", column = 5, row = 0),
         )
         setCanvas(loaded(tiles, columns = 6))
-        composeRule.onNodeWithText("Six A").assertIsDisplayed()
-        composeRule.onNodeWithText("Six B").assertIsDisplayed()
+        composeRule.onNodeWithContentDescription("Six A").assertIsDisplayed()
+        composeRule.onNodeWithText("Six A").assertDoesNotExist()
+        composeRule.onNodeWithContentDescription("Six B").assertIsDisplayed()
+        composeRule.onNodeWithText("Six B").assertDoesNotExist()
     }
 
     @Test
@@ -302,7 +314,8 @@ class HomeCanvasTest {
             tile("a", personal, "Wide App", column = 7, row = 0, spanColumns = 1, spanRows = 1),
         )
         setCanvas(loaded(tiles, columns = 8))
-        composeRule.onNodeWithText("Wide App").assertIsDisplayed()
+        composeRule.onNodeWithContentDescription("Wide App").assertIsDisplayed()
+        composeRule.onNodeWithText("Wide App").assertDoesNotExist()
     }
 
     // ---- Overlay: request/focus/target, no fakes ----
@@ -320,7 +333,8 @@ class HomeCanvasTest {
         composeRule.onNodeWithText("All Apps").assertDoesNotExist()
 
         // Background canvas stays in the merged accessibility tree (no focus trap).
-        composeRule.onNodeWithText("Overlay App").assertIsDisplayed()
+        composeRule.onNodeWithContentDescription("Overlay App").assertIsDisplayed()
+        composeRule.onNodeWithText("Overlay App").assertDoesNotExist()
         composeRule.onNodeWithText(HOME_ROLE_DESCRIPTION).assertIsDisplayed()
 
         // At least 48dp interactive target, derived from runtime density.
@@ -346,12 +360,12 @@ class HomeCanvasTest {
         setCanvas(loaded(tiles))
         composeRule.waitForIdle()
 
-        val launchable = composeRule.onNodeWithText("Movable App").fetchSemanticsNode()
+        val launchable = composeRule.onNodeWithContentDescription("Movable App").fetchSemanticsNode()
         assertTrue(
             "launchable tile must expose a long-click action to enter move mode",
             launchable.config.contains(SemanticsActions.OnLongClick),
         )
-        val unavailable = composeRule.onNodeWithText("Unavailable app").fetchSemanticsNode()
+        val unavailable = composeRule.onNodeWithContentDescription("Unavailable app").fetchSemanticsNode()
         assertFalse(
             "unavailable tile must expose no long-click action",
             unavailable.config.contains(SemanticsActions.OnLongClick),
@@ -364,12 +378,13 @@ class HomeCanvasTest {
         setCanvas(loaded(tiles))
         composeRule.waitForIdle()
 
-        composeRule.onNodeWithText("Movable App")
+        composeRule.onNodeWithContentDescription("Movable App")
             .performSemanticsAction(SemanticsActions.OnLongClick) { it() }
         composeRule.waitForIdle()
 
         composeRule.onNode(hasStateDescription("Editing Movable App, row 0 column 0"))
             .assertIsDisplayed()
+        composeRule.onNodeWithText("Movable App").assertDoesNotExist()
         composeRule.onNodeWithTag(MOVE_CANDIDATE_OVERLAY_TAG, useUnmergedTree = true)
             .assertExists()
     }
@@ -380,9 +395,11 @@ class HomeCanvasTest {
         setCanvas(loaded(tiles))
         composeRule.waitForIdle()
 
-        composeRule.onNodeWithText("Resizable App")
+        composeRule.onNodeWithContentDescription("Resizable App")
             .performSemanticsAction(SemanticsActions.OnLongClick) { it() }
         composeRule.waitForIdle()
+
+        composeRule.onNodeWithText("Resizable App").assertDoesNotExist()
 
         // Resize handle should appear at the bottom-right corner of the active tile
         composeRule.onNodeWithTag(RESIZE_HANDLE_TAG, useUnmergedTree = true)
@@ -413,8 +430,10 @@ class HomeCanvasTest {
             ),
         )
 
-        composeRule.onNodeWithText("Near App").assertIsDisplayed()
+        composeRule.onNodeWithContentDescription("Near App").assertIsDisplayed()
+        composeRule.onNodeWithText("Near App").assertDoesNotExist()
         // Large empty gap produces no row allocation: distant tile is not composed yet.
+        composeRule.onNodeWithContentDescription("Distant App").assertDoesNotExist()
         composeRule.onNodeWithText("Distant App").assertDoesNotExist()
 
         // Scroll the canvas grid directly; the distant placement must render when it
@@ -427,13 +446,13 @@ class HomeCanvasTest {
                 .performTouchInput { swipeUp() }
             composeRule.waitForIdle()
             nearExists = try {
-                composeRule.onNodeWithText("Near App").assertExists()
+                composeRule.onNodeWithContentDescription("Near App").assertExists()
                 true
             } catch (e: AssertionError) {
                 false
             }
             farExists = try {
-                composeRule.onNodeWithText("Distant App").assertExists()
+                composeRule.onNodeWithContentDescription("Distant App").assertExists()
                 true
             } catch (e: AssertionError) {
                 false
@@ -457,8 +476,10 @@ class HomeCanvasTest {
         )
         setCanvas(loaded(tiles), icons = mapOf(personal to bitmap))
 
-        composeRule.onNodeWithText("Icon App").assertIsDisplayed()
-        composeRule.onNodeWithText("Label Only App").assertIsDisplayed()
+        composeRule.onNodeWithContentDescription("Icon App").assertIsDisplayed()
+        composeRule.onNodeWithContentDescription("Label Only App").assertIsDisplayed()
+        composeRule.onNodeWithText("Icon App").assertDoesNotExist()
+        composeRule.onNodeWithText("Label Only App").assertDoesNotExist()
         // The icon slot is decorative (contentDescription=null); presence is verified by tag.
         composeRule.onAllNodesWithTag(HOME_TILE_ICON_TAG, useUnmergedTree = true).assertCountEquals(1)
         composeRule.onNodeWithTag(HOME_TILE_ICON_TAG, useUnmergedTree = true).assertExists()

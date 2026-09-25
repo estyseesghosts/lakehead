@@ -3,7 +3,7 @@ package me.foxtails.lakehead.core.designsystem
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.SemanticsActions
@@ -31,6 +31,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
+import kotlin.math.abs
 
 /**
  * Focused composition tests for the C2 [AppTile] primitive: label, optional icon slot,
@@ -53,15 +54,18 @@ class AppTileTest {
     val composeRule = createComposeRule()
 
     @Test
-    fun labelTextIsVisible() {
+    fun labelIsAccessibilityNameOnly() {
         composeRule.setContent {
-            AppTile(
-                state = AppTileState(label = "Calendar", span = GridSpan(1, 1)),
-                onClick = {},
-            )
+            LauncherTheme {
+                AppTile(
+                    state = AppTileState(label = "Calendar", span = GridSpan(1, 1)),
+                    onClick = {},
+                )
+            }
         }
 
-        composeRule.onNodeWithText("Calendar").assertExists()
+        composeRule.onNodeWithContentDescription("Calendar").assertExists()
+        composeRule.onNodeWithText("Calendar").assertDoesNotExist()
     }
 
     @Test
@@ -103,63 +107,103 @@ class AppTileTest {
     @Test
     fun absentIconComposesLabelOnly() {
         composeRule.setContent {
-            AppTile(
-                state = AppTileState(label = "Calendar", span = GridSpan(1, 1)),
-                onClick = {},
-                icon = null,
-            )
+            LauncherTheme {
+                AppTile(
+                    state = AppTileState(label = "Calendar", span = GridSpan(1, 1)),
+                    onClick = {},
+                    icon = null,
+                )
+            }
         }
 
         composeRule.onNodeWithTag("tile-icon", useUnmergedTree = true).assertDoesNotExist()
-        composeRule.onNodeWithText("Calendar").assertExists()
+        composeRule.onNodeWithContentDescription("Calendar").assertExists()
+        composeRule.onNodeWithText("Calendar").assertDoesNotExist()
     }
 
     @Test
-    fun wideSpanArrangesIconBesideLabel() {
+    fun wideSpanAnchorsIconBottomEnd() {
         composeRule.setContent {
-            AppTile(
-                state = AppTileState(label = "Calendar", span = GridSpan(2, 1)),
-                onClick = {},
-                icon = { Box(Modifier.testTag("tile-icon").size(24.dp)) },
-            )
+            LauncherTheme {
+                Box(Modifier.size(320.dp, 160.dp)) {
+                    AppTile(
+                        state = AppTileState(label = "Calendar", span = GridSpan(2, 1)),
+                        onClick = {},
+                        icon = { Box(Modifier.testTag("tile-icon").size(24.dp)) },
+                    )
+                }
+            }
         }
         composeRule.waitForIdle()
 
-        val iconCenter = centerInRoot(composeRule.onNodeWithTag("tile-icon", useUnmergedTree = true))
-        val labelCenter = centerInRoot(composeRule.onNodeWithText("Calendar", useUnmergedTree = true))
-        assertTrue("wide span must place the icon left of the label", iconCenter.x < labelCenter.x)
+        val tileBounds = boundsInRoot(composeRule.onNodeWithContentDescription("Calendar"))
+        val iconBounds = boundsInRoot(composeRule.onNodeWithTag("tile-icon", useUnmergedTree = true))
+        assertTrue(
+            "2x1 span must anchor the icon to the tile end " +
+                "(tileCenterX=${tileBounds.center.x} iconCenterX=${iconBounds.center.x})",
+            iconBounds.center.x > tileBounds.center.x,
+        )
+        assertTrue(
+            "2x1 span must anchor the icon to the tile bottom " +
+                "(tileCenterY=${tileBounds.center.y} iconCenterY=${iconBounds.center.y})",
+            iconBounds.center.y > tileBounds.center.y,
+        )
+        assertIconInsideTile(tileBounds, iconBounds)
     }
 
     @Test
-    fun tallSpanArrangesIconAboveLabel() {
+    fun tallSpanCentersIconHorizontally() {
         composeRule.setContent {
-            AppTile(
-                state = AppTileState(label = "Calendar", span = GridSpan(1, 2)),
-                onClick = {},
-                icon = { Box(Modifier.testTag("tile-icon").size(24.dp)) },
-            )
+            LauncherTheme {
+                Box(Modifier.size(160.dp, 320.dp)) {
+                    AppTile(
+                        state = AppTileState(label = "Calendar", span = GridSpan(1, 2)),
+                        onClick = {},
+                        icon = { Box(Modifier.testTag("tile-icon").size(24.dp)) },
+                    )
+                }
+            }
         }
         composeRule.waitForIdle()
 
-        val iconCenter = centerInRoot(composeRule.onNodeWithTag("tile-icon", useUnmergedTree = true))
-        val labelCenter = centerInRoot(composeRule.onNodeWithText("Calendar", useUnmergedTree = true))
-        assertTrue("tall span must place the icon above the label", iconCenter.y < labelCenter.y)
+        val tileBounds = boundsInRoot(composeRule.onNodeWithContentDescription("Calendar"))
+        val iconBounds = boundsInRoot(composeRule.onNodeWithTag("tile-icon", useUnmergedTree = true))
+        assertTrue(
+            "1x2 span must x-center the icon " +
+                "(tileCenterX=${tileBounds.center.x} iconCenterX=${iconBounds.center.x})",
+            abs(iconBounds.center.x - tileBounds.center.x) <= 1f,
+        )
+        assertIconInsideTile(tileBounds, iconBounds)
     }
 
     @Test
-    fun squareSpanArrangesIconAboveLabel() {
+    fun largeSquareSpanAnchorsIconBottomEnd() {
         composeRule.setContent {
-            AppTile(
-                state = AppTileState(label = "Calendar", span = GridSpan(1, 1)),
-                onClick = {},
-                icon = { Box(Modifier.testTag("tile-icon").size(24.dp)) },
-            )
+            LauncherTheme {
+                Box(Modifier.size(320.dp, 320.dp)) {
+                    AppTile(
+                        state = AppTileState(label = "Calendar", span = GridSpan(2, 2)),
+                        onClick = {},
+                        icon = { Box(Modifier.testTag("tile-icon").size(24.dp)) },
+                    )
+                }
+            }
         }
         composeRule.waitForIdle()
 
-        val iconCenter = centerInRoot(composeRule.onNodeWithTag("tile-icon", useUnmergedTree = true))
-        val labelCenter = centerInRoot(composeRule.onNodeWithText("Calendar", useUnmergedTree = true))
-        assertTrue("square span must place the icon above the label", iconCenter.y < labelCenter.y)
+        val tileBounds = boundsInRoot(composeRule.onNodeWithContentDescription("Calendar"))
+        val iconBounds = boundsInRoot(composeRule.onNodeWithTag("tile-icon", useUnmergedTree = true))
+        assertTrue(
+            "2x2 span must anchor the icon to the tile end " +
+                "(tileCenterX=${tileBounds.center.x} iconCenterX=${iconBounds.center.x})",
+            iconBounds.center.x > tileBounds.center.x,
+        )
+        assertTrue(
+            "2x2 span must anchor the icon to the tile bottom " +
+                "(tileCenterY=${tileBounds.center.y} iconCenterY=${iconBounds.center.y})",
+            iconBounds.center.y > tileBounds.center.y,
+        )
+        assertIconInsideTile(tileBounds, iconBounds)
     }
 
     @Test
@@ -316,13 +360,26 @@ class AppTileTest {
         }
     }
 
-    private fun centerInRoot(interaction: SemanticsNodeInteraction): Offset {
+    private fun boundsInRoot(interaction: SemanticsNodeInteraction): Rect {
         val node = interaction.fetchSemanticsNode()
         val position = node.positionInRoot
         val size = node.size
-        return Offset(
-            x = position.x + size.width / 2f,
-            y = position.y + size.height / 2f,
+        return Rect(
+            left = position.x,
+            top = position.y,
+            right = position.x + size.width,
+            bottom = position.y + size.height,
+        )
+    }
+
+    private fun assertIconInsideTile(tileBounds: Rect, iconBounds: Rect) {
+        assertTrue(
+            "anchored icon must stay inside the tile " +
+                "(tile=$tileBounds icon=$iconBounds)",
+            iconBounds.left >= tileBounds.left - 1f &&
+                iconBounds.top >= tileBounds.top - 1f &&
+                iconBounds.right <= tileBounds.right + 1f &&
+                iconBounds.bottom <= tileBounds.bottom + 1f,
         )
     }
 }

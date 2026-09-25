@@ -1,12 +1,12 @@
 package me.foxtails.lakehead.feature.home
 
-import androidx.compose.foundation.Image
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
+import me.foxtails.lakehead.core.designsystem.AppSymbol
 import me.foxtails.lakehead.core.designsystem.AppTile
 import me.foxtails.lakehead.core.designsystem.AppTileState
 import me.foxtails.lakehead.core.grid.GridSpan
@@ -67,9 +67,8 @@ internal fun HomeCanvasTile(
         modifier = tileModifier,
         icon = if (iconBitmap != null) {
             {
-                Image(
+                AppSymbol(
                     bitmap = iconBitmap,
-                    contentDescription = null,
                     modifier = Modifier.testTag(HOME_TILE_ICON_TAG),
                 )
             }
