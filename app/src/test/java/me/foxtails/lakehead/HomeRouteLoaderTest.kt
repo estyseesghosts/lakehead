@@ -322,5 +322,8 @@ class HomeRouteLoaderTest {
         override fun remove(homeId: HomeId, itemId: ItemId): RemoveResult {
             mutations++; error("loader must not write")
         }
+        override fun ensureHome(homeId: HomeId): Boolean {
+            mutations++; error("loader must not write")
+        }
     }
 }

@@ -242,6 +242,38 @@ class RoomHomePlacementRepositoryTest {
         }
     }
 
+    @Test fun ensureHomeCreatesRowSoLoadReturnsEmptyNotNotFound() {
+        val homeId = HomeId("new-home")
+        assertEquals(LoadResult.NotFound, repository.load(homeId, 6, 10))
+        assertTrue(repository.ensureHome(homeId))
+        val loaded = repository.load(homeId, 6, 10)
+        assertTrue(loaded is LoadResult.Loaded)
+        assertEquals(emptyList<AppPlacement>(), (loaded as LoadResult.Loaded).placements)
+    }
+
+    @Test fun ensureHomeOnExistingHomeIsIdempotent() {
+        val homeId = HomeId("existing")
+        seedHome(homeId.value)
+        val beforeCount = dao.homeCount()
+        assertTrue(repository.ensureHome(homeId))
+        assertEquals(beforeCount, dao.homeCount())
+        assertTrue(repository.ensureHome(homeId))
+        assertEquals(beforeCount, dao.homeCount())
+    }
+
+    @Test fun ensureHomeThenPlaceSucceedsInsteadOfNotFound() {
+        val homeId = HomeId("fresh")
+        val itemId = ItemId("item")
+        val identity = identity()
+        assertEquals(
+            MutationResult.NotFound,
+            repository.place(homeId, itemId, identity, LogicalPosition(0, 0), LogicalSpan(1, 1), 6, 10),
+        )
+        assertTrue(repository.ensureHome(homeId))
+        val result = repository.place(homeId, itemId, identity, LogicalPosition(0, 0), LogicalSpan(1, 1), 6, 10)
+        assertTrue(result is MutationResult.Accepted)
+    }
+
     private fun seedHome(id: String) = dao.insertHome(HomeEntity(id))
 
     private fun seed(value: AppPlacement) {

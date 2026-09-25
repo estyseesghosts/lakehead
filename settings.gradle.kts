@@ -15,4 +15,4 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "ProtoLaunch"
-include(":app", ":core:model", ":core:navigation", ":core:grid", ":core:designsystem", ":platform:launcherapps", ":feature:home", ":fixtures:launchable", ":data:database", ":data:repository")
+include(":app", ":core:model", ":core:navigation", ":core:grid", ":core:designsystem", ":platform:launcherapps", ":feature:home", ":feature:allapps", ":fixtures:launchable", ":data:database", ":data:repository")

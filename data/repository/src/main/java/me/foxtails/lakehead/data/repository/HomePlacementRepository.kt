@@ -11,6 +11,7 @@ import me.foxtails.lakehead.core.model.ItemAvailability
 import me.foxtails.lakehead.core.model.ItemId
 import me.foxtails.lakehead.core.model.LogicalPosition
 import me.foxtails.lakehead.core.model.LogicalSpan
+import me.foxtails.lakehead.data.database.HomeEntity
 import me.foxtails.lakehead.data.database.toDomain
 import me.foxtails.lakehead.data.database.toEntity
 
@@ -34,6 +35,9 @@ interface HomePlacementRepository {
     fun resize(homeId: HomeId, itemId: ItemId, span: LogicalSpan, columns: Int, rows: Int): MutationResult
 
     fun remove(homeId: HomeId, itemId: ItemId): RemoveResult
+
+    /** Ensures a home row exists for the given HomeId. Creates it if absent. Returns true. */
+    fun ensureHome(homeId: HomeId): Boolean
 }
 
 sealed interface LoadResult {
@@ -163,6 +167,15 @@ class RoomHomePlacementRepository(
         if (target.homeId != homeId.value) return@runInTransaction RemoveResult.WrongHome
         dao.deletePlacement(itemId.value)
         RemoveResult.Removed
+    }
+
+    override fun ensureHome(homeId: HomeId): Boolean = database.runInTransaction<Boolean> {
+        if (dao.home(homeId.value) != null) {
+            true
+        } else {
+            dao.insertHome(HomeEntity(homeId.value))
+            true
+        }
     }
 
     private fun edit(
