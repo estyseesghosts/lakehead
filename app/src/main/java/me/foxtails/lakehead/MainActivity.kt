@@ -14,6 +14,7 @@ import androidx.lifecycle.lifecycleScope
 import androidx.room.Room
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import me.foxtails.lakehead.core.designsystem.LauncherTheme
 import me.foxtails.lakehead.core.grid.GridRowWindow
 import me.foxtails.lakehead.core.model.HomeId
 import me.foxtails.lakehead.data.database.PlacementDatabase
@@ -145,6 +146,7 @@ class MainActivity : ComponentActivity() {
         val routeViewportStyle = homeViewportStyle
         val productionAppLauncher = appLauncher
         setContent {
+            LauncherTheme {
             val homeState by routeLoader.state.collectAsState()
             val homeIcons by routeLoader.icons.collectAsState()
             val allAppsState by allAppsLoader.state.collectAsState()
@@ -179,6 +181,7 @@ class MainActivity : ComponentActivity() {
                 },
                 viewportStyle = routeViewportStyle,
             )
+            }
         }
     }
 
