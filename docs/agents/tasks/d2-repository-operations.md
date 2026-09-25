@@ -58,7 +58,8 @@ This slice is repository contract and operations only. Explicitly defer:
 - D3 viewport-aware Home rendering and presentation state.
 - D4 move UI/gesture editing and D5 resize UI editing.
 - D6 remove/reset UI behavior, catalogue synchronization, and availability refresh policy.
-- Folder placement/membership, shortcuts, widgets, built-ins, and tile configuration.
+- Folder placement/membership, shortcuts, widgets, built-ins, and tile configuration (`TileAppearance`, `ConfiguredShortcut` slots per `docs/grid.md` — explicit future migration, no D2 contract change).
+- Grid legality generalization to the open span set (B1 follow-up; D2 keeps passing the grid result through unchanged).
 - Home creation, Home selection, transfer/migration between Homes, or adding more Home behavior.
 - Flow/observation and app-catalogue synchronization.
 

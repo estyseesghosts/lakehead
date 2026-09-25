@@ -325,6 +325,96 @@ class HomeRouteLoaderTest {
         loader.stop()
     }
 
+    // ---- commitResize ----
+
+    @Test
+    fun commitResizeDispatchesToIOAndReloadsOnAccepted() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val resizeResult = MutationResult.Accepted(
+            me.foxtails.lakehead.core.grid.GridRules.Result.Accepted(
+                listOf(me.foxtails.lakehead.core.grid.GridPlacement(ItemId("tile-a"), me.foxtails.lakehead.core.grid.GridPosition(0, 0), me.foxtails.lakehead.core.grid.GridSpan(2, 2)))
+            )
+        )
+        var loadCount = 0
+        val repository = FakeRepository { _, _, _ ->
+            loadCount++
+            if (loadCount == 1) {
+                LoadResult.Loaded(listOf(placement("tile-a", appA)))
+            } else {
+                LoadResult.Loaded(listOf(placement("tile-a", appA, ItemAvailability.AVAILABLE)))
+            }
+        }
+        repository.resizeAction = { _, _, _, _, _ -> resizeResult }
+        val loader = loader(repository, dispatcher)
+        loader.start(this)
+        advanceUntilIdle()
+        assertTrue(loader.state.value is HomeRenderState.Loaded)
+        val readsBefore = repository.reads
+
+        val result = loader.commitResize(ItemId("tile-a"), LogicalSpan(2, 2))
+        advanceUntilIdle()
+
+        assertSame(resizeResult, result)
+        assertEquals(1, repository.resizeCalls.size)
+        assertEquals(requestedHome, repository.resizeCalls[0].homeId)
+        assertEquals(ItemId("tile-a"), repository.resizeCalls[0].itemId)
+        assertEquals(LogicalSpan(2, 2), repository.resizeCalls[0].span)
+        assertTrue("Expected reload after accepted resize", repository.reads > readsBefore)
+        loader.stop()
+    }
+
+    @Test
+    fun commitResizeDoesNotReloadOnRejected() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val rejected = MutationResult.Rejected(
+            me.foxtails.lakehead.core.grid.GridRules.Result.Rejected(
+                me.foxtails.lakehead.core.grid.GridRules.Rejection.COLLISION
+            )
+        )
+        val repository = FakeRepository { _, _, _ ->
+            LoadResult.Loaded(listOf(placement("tile-a", appA)))
+        }
+        repository.resizeAction = { _, _, _, _, _ -> rejected }
+        val loader = loader(repository, dispatcher)
+        loader.start(this)
+        advanceUntilIdle()
+        assertTrue(loader.state.value is HomeRenderState.Loaded)
+        val readsBefore = repository.reads
+
+        val result = loader.commitResize(ItemId("tile-a"), LogicalSpan(2, 2))
+        advanceUntilIdle()
+
+        assertSame(rejected, result)
+        assertEquals(1, repository.resizeCalls.size)
+        assertEquals("Rejected resize must not trigger reload", readsBefore, repository.reads)
+        loader.stop()
+    }
+
+    @Test
+    fun commitResizePassesViewportBoundsToRepository() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        var capturedColumns = -1
+        var capturedRows = -1
+        val repository = FakeRepository { _, _, _ ->
+            LoadResult.Loaded(listOf(placement("tile-a", appA)))
+        }
+        repository.resizeAction = { _, _, _, columns, rows ->
+            capturedColumns = columns
+            capturedRows = rows
+            MutationResult.NotFound
+        }
+        val loader = loader(repository, dispatcher)
+        loader.start(this)
+        advanceUntilIdle()
+
+        loader.commitResize(ItemId("tile-a"), LogicalSpan(2, 2))
+        advanceUntilIdle()
+
+        assertEquals(6, capturedColumns)
+        assertEquals(4096, capturedRows)
+        loader.stop()
+    }
+
     @Test
     fun decodedIconSnapshotIsImmutableBoundedAndUsesInjectedDecoder() {
         val imageA = "decoded-image"
@@ -418,6 +508,11 @@ class HomeRouteLoaderTest {
         var moveAction: (HomeId, ItemId, LogicalPosition, Int, Int) -> MutationResult = { _, _, _, _, _ ->
             error("loader must not write")
         }
+        data class ResizeCall(val homeId: HomeId, val itemId: ItemId, val span: LogicalSpan, val columns: Int, val rows: Int)
+        var resizeCalls = mutableListOf<ResizeCall>()
+        var resizeAction: (HomeId, ItemId, LogicalSpan, Int, Int) -> MutationResult = { _, _, _, _, _ ->
+            error("loader must not write")
+        }
         override fun load(homeId: HomeId, columns: Int, rows: Int): LoadResult {
             reads++
             return read(homeId, columns, rows)
@@ -432,7 +527,9 @@ class HomeRouteLoaderTest {
             return moveAction(homeId, itemId, position, columns, rows)
         }
         override fun resize(homeId: HomeId, itemId: ItemId, span: LogicalSpan, columns: Int, rows: Int): MutationResult {
-            mutations++; error("loader must not write")
+            mutations++
+            resizeCalls += ResizeCall(homeId, itemId, span, columns, rows)
+            return resizeAction(homeId, itemId, span, columns, rows)
         }
         override fun remove(homeId: HomeId, itemId: ItemId): RemoveResult {
             mutations++; error("loader must not write")

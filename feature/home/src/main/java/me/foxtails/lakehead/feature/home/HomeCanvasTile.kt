@@ -26,11 +26,11 @@ import me.foxtails.lakehead.core.model.ItemId
  *   `Image(bitmap = ..., contentDescription = null)` when present, otherwise label-only.
  * - Click dispatches the tile's exact [AppIdentity] only when [HomeRenderTile.isLaunchable];
  *   unavailable tiles expose a no-op click and `stateDescription = "Unavailable"`.
- * - Long-press on a launchable tile calls [onEnterMove] to enter transient move mode;
+ * - Long-press on a launchable tile calls [onEnterEdit] to enter transient edit mode;
  *   unavailable tiles expose no long-click action.
- * - When [isMoveActive] and this tile's id matches [activeItemId], the tile renders the
+ * - When [isEditActive] and this tile's id matches [activeItemId], the tile renders the
  *   caller-driven [AppTileState.isSelected] border and announces
- *   `stateDescription = "Moving <label>, row R column C"`.
+ *   `stateDescription = "Editing <label>, row R column C"`.
  */
 @Composable
 internal fun HomeCanvasTile(
@@ -38,17 +38,17 @@ internal fun HomeCanvasTile(
     iconBitmap: ImageBitmap?,
     onLaunchApp: (AppIdentity) -> Unit,
     modifier: Modifier = Modifier,
-    isMoveActive: Boolean = false,
+    isEditActive: Boolean = false,
     activeItemId: ItemId? = null,
-    onEnterMove: (HomeRenderTile) -> Unit = {},
+    onEnterEdit: (HomeRenderTile) -> Unit = {},
 ) {
     val rawLabel = tile.label
     val label = if (rawLabel.isNullOrBlank()) UNAVAILABLE_LABEL else rawLabel
-    val isMoving = isMoveActive && tile.itemId == activeItemId
+    val isEditing = isEditActive && tile.itemId == activeItemId
     val tileModifier = when {
-        isMoving -> modifier.semantics {
+        isEditing -> modifier.semantics {
             stateDescription =
-                "Moving $label, row ${tile.position.row} column ${tile.position.column}"
+                "Editing $label, row ${tile.position.row} column ${tile.position.column}"
         }
         !tile.isLaunchable -> modifier.semantics { stateDescription = UNAVAILABLE_STATE_DESCRIPTION }
         else -> modifier
@@ -57,7 +57,7 @@ internal fun HomeCanvasTile(
         state = AppTileState(
             label = label,
             span = GridSpan(tile.span.columns, tile.span.rows),
-            isSelected = isMoving,
+            isSelected = isEditing,
         ),
         onClick = {
             if (tile.isLaunchable) {
@@ -78,7 +78,7 @@ internal fun HomeCanvasTile(
         },
         contentDescription = null,
         onLongClick = if (tile.isLaunchable) {
-            { onEnterMove(tile) }
+            { onEnterEdit(tile) }
         } else {
             null
         },

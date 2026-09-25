@@ -1,6 +1,6 @@
 # ProtoLaunch comprehensive implementation plan
 
-This roadmap is the corrected architecture plan produced by agent `three`, reconciled with the newer app-test result. Phase A / 0B and Phase B (B1–B3) are complete; the next implementation slice is C1 geometry/layout primitives in `:core:designsystem`.
+This roadmap is the corrected architecture plan produced by agent `three`, reconciled with the newer app-test result. Phase A / 0B, Phase B (B1–B3), Phase C design primitives, Phase D D1–D3 persisted Home rendering, and the navigation shell + flat All Apps + add-to-home slice are complete and device-verified; the next slice is TBD. `docs/grid.md` plus `docs/grid/` photos are the visual/interaction authority for the Home grid, symbols, app list, and hit regions and supersede the older fixed span examples wherever they conflict.
 
 ## 1. Verified current baseline
 
@@ -59,7 +59,7 @@ The user-visible catalogue and live package mutation are implemented; Phase A / 
 When documents disagree, use this order:
 
 1. `AGENTS.md` for workflow, module ownership, and state boundaries.
-2. `docs/architecture.md`, `docs/design.md`, and `docs/platform-capabilities.md` for stable contracts.
+2. `docs/architecture.md`, `docs/design.md`, `docs/grid.md` (+ `docs/grid/` photos), `docs/navbar.md`, and `docs/platform-capabilities.md` for stable contracts. Where older span examples conflict, `docs/grid.md` governs: spans are generic positive integers, not a closed enum.
 3. `docs/first_draft.md` for engineering sequence and milestone gates.
 4. `docs/launcher_report.md` for detailed product behavior and target experience.
 5. Current source, tests, and device evidence for what actually exists.
@@ -83,7 +83,7 @@ A future Home selector can change which `homeId` is active, but Home itself rema
 
 ### Normal placement never auto-compacts
 
-Ordinary Home editing preserves holes and unrelated tile positions. Moving one tile cannot silently rearrange the rest of the Home.
+Ordinary Home editing preserves holes and unrelated tile positions. Moving one tile cannot silently rearrange the rest of the Home. Empty cells are transparent wallpaper, not placeholders; grid lines are never rendered; tiles never auto-sort, pack toward top-left, require complete rows, or fill empty space (see `docs/grid.md` acceptance criteria 1–8).
 
 Only generated projections such as:
 
@@ -115,7 +115,7 @@ Do not persist:
 
 ### Expanded app tiles are not widgets
 
-Custom 2×1, 1×2, 2×2, and 4×2 app tiles remain launcher-owned content. A real Android widget later uses `AppWidgetHostView` through a separate platform owner.
+Custom 2×1, 1×2, 2×2, and 4×2 app tiles remain launcher-owned content, extended by the `docs/grid.md` open span set (3×2, 4×3, 3×3 as valid examples — generic integer dimensions, never a `SMALL`/`MEDIUM`/`LARGE` enum). A real Android widget later uses `AppWidgetHostView` through a separate platform owner.
 
 ### Permissioned data is introduced with its feature
 
@@ -348,7 +348,7 @@ The required full device pass and static validation passed. Phase B (B1–B3) is
 
 ## B1 — Coordinate, span, and collision model
 
-**Status: complete.** The durable B1 contract and evidence are recorded in [`docs/agents/tasks/b1-grid-coordinates.md`](agents/tasks/b1-grid-coordinates.md) and [`state-logs/handoffs/2026-09-24-b1-grid-complete.md`](../state-logs/handoffs/2026-09-24-b1-grid-complete.md).
+**Status: complete as a phase-limited gate; generic-span generalization is open.** The durable B1 contract and evidence are recorded in [`docs/agents/tasks/b1-grid-coordinates.md`](agents/tasks/b1-grid-coordinates.md) and [`state-logs/handoffs/2026-09-24-b1-grid-complete.md`](../state-logs/handoffs/2026-09-24-b1-grid-complete.md).
 
 Implement:
 
@@ -359,6 +359,8 @@ Implement:
 - Collision checks.
 - Move legality.
 - Resize legality.
+
+`GridSpan` already represents generic positive integers, but `GridRules` currently rejects anything outside the B1 set with `UNSUPPORTED_SPAN`. Per `docs/grid.md`, legality must generalize to bounds + rectangle collision for the open span set (3×2, 4×3, 3×3 as valid examples) before F3 claims tiles beyond the B1 set; renderable-size policy then moves to UI/editing slices. Persistence already stores generic dimensions and needs no migration for this change.
 
 ### Tests
 
@@ -438,8 +440,12 @@ Do not implement every component named in the report at once.
 Small contract for:
 
 - Label.
-- Optional icon slot.
+- Optional icon slot (pre-resolved symbol snapshot only; source resolution, normalization, and caching stay in `:platform:launcherapps`).
 - Span.
+- Symbol placement rule: bottom-right except 1×2 bottom-center, expressed generically.
+- Separate hit targets from the start: `TileBody` / `AppLaunchButton` / `ShortcutSlot` (`Body` and `AppSymbol` both launch today so the body can later open the notification surface without geometry rework).
+- Shortcut slots render only configured shortcuts (default empty, no placeholder controls).
+- Semantic `TileColorRole.Normal/Accent` resolved to dynamic colors; never persisted as RGB.
 - Selected/pressed state.
 - Accessibility semantics.
 
@@ -490,8 +496,8 @@ Persist:
 - Stable item identity.
 - Item type.
 - Logical column and row.
-- Span.
-- Logical tile configuration.
+- Span (generic positive integers; the B1 allowlist is legality policy, not the stored model).
+- Logical tile configuration (future `TileAppearance` color role + `ConfiguredShortcut` slots via explicit migration when their slice lands; D1 adds no speculative fields).
 
 No framework objects or pixels.
 
@@ -517,6 +523,8 @@ Implement:
 - Replace transaction safely.
 - Future `homeId` support without migrating the same item between Homes.
 
+Repository delegates all legality to `:core:grid` and preserves unrelated rows/order/holes on every op. When grid legality generalizes per the B1 note above, D2 needs no contract change: it keeps passing through the grid result unchanged.
+
 ## D3 — Viewport-aware Home rendering
 
 **Owners:**
@@ -534,6 +542,9 @@ Requirements:
 - Only visible and near-visible items composed.
 - Sparse distant rows do not allocate every intervening row.
 - App labels/icons resolve outside recomposition.
+- Dedicated absolute-coordinate layout from logical cells (never `LazyVerticalGrid`, never `Column { Row { } }`); shared gap/padding/symbol tokens so a multi-cell tile is exactly its cells plus internal gaps.
+
+D3 is read-only presentation: it does not yet claim the `docs/grid.md` tile content contracts (symbol bottom-right/1×2 bottom-center rule, `Body`/`AppSymbol`/`Shortcut` hit separation, `TileColorRole` theming, configured shortcut slots). Those land with the tile primitive and editing slices.
 
 ## D4 — Basic move editing
 
@@ -658,7 +669,7 @@ Prerequisites: stable `homeId` and completed folders.
 
 ## F3 — Expanded custom app tiles
 
-Prerequisites: resizing, shortcut/content contracts, tile configuration persistence.
+Prerequisites: resizing, shortcut/content contracts, tile configuration persistence, and the B1 generic-span generalization above.
 
 Implement incrementally:
 
@@ -666,8 +677,9 @@ Implement incrementally:
 2. 1×2.
 3. 2×2.
 4. 4×2.
+5. Grid.md open-set examples: 3×2, 3×3, 4×3 (generic dimensions, not a second enum).
 
-These are launcher-owned surfaces, not Android widgets.
+These are launcher-owned surfaces, not Android widgets. Each step keeps `Body`/`AppSymbol`/`Shortcut` hit separation and the generic symbol-placement rule intact.
 
 ## F4 — Filtered packing projection
 
@@ -726,7 +738,14 @@ Manual category overrides require a separate data owner.
 
 ## G2 — Alphabetical/list mode
 
-The same inventory can switch to a list representation through a downward gesture or control.
+The same inventory can switch to a list representation through a downward gesture or control. It follows the `docs/grid.md` app-list contract, which the current flat All Apps list does not yet meet:
+
+- Uniform row geometry: symbol left, name beside it, configured shortcuts right; no app-derived row colors, icon backgrounds, or card styling.
+- One shared symbol pipeline with Home tiles (monochrome > foreground > legacy + normalization + cache).
+- Sibling hit targets: launch region vs each shortcut region are separate, never nested clickables.
+- Shortcut regions appear only for configured shortcuts.
+
+Plus:
 
 - Accessible scrolling.
 - Stable locale-aware sorting.
@@ -1254,21 +1273,20 @@ Also run relevant module and instrumentation tests.
 
 # 4. Immediate next slices
 
-The next independently reviewable sequence is:
+Completed and device-verified: Phase A / 0B, Phase B (B1–B3 legality/extent/adaptation), Phase C tile/geometry/overlay primitives (initial), Phase D D1–D3 (schema, repository, viewport-aware rendering + app migration), and the navigation shell + flat All Apps + add-to-home slice (`885082b`). The flat All Apps list is a stepping stone: it does not yet meet the `docs/grid.md` list contract (uniform rows, sibling hit targets, shared symbols, configured-shortcuts-only).
 
-1. **C1 — Initial design-system geometry primitives** (`:core:designsystem`)
-2. **C2 — App tile primitive**
-3. **C3 — Floating overlay/control primitive**
-4. **D1 — Logical placement schema**
-5. **D2 — Placement repository**
-6. **D3 — Viewport-aware Home rendering**
-7. **D4 — Move editing**
-8. **D5 — Resize editing**
-9. **D6 — Remove/reset**
-10. **E1 — Folder persistence**
-11. **E2 — Floating folder presentation**
+Candidate next sequence (confirm with user before starting):
 
-Phase A / 0B and all of Phase B (B1–B3) are complete. C1 is the immediate next slice; C1 and later slices remain open. A5 settings persistence remains a user-approved deferral and is not implementation work. Do not mark any later phase complete until its own gate is met.
+1. **Grid legality generalization** — bounds + collision for the open span set (B1 follow-up; unblocks F3 beyond 4×2).
+2. **D4 — Move editing** (long-press, valid/invalid/cancel, holes preserved, restart).
+3. **D5 — Resize editing** (supported transitions first, then open-set sizes).
+4. **D6 — Remove/reset** (user removal vs missing-app unavailability).
+5. **Tile content slice** — `Body`/`AppSymbol`/`Shortcut` hit separation, generic symbol placement, `TileColorRole` theming, configured shortcut slots, shared symbol pipeline hardening.
+6. **App-list contract slice** — bring the flat list into `docs/grid.md` compliance.
+7. **E1 — Folder persistence**
+8. **E2 — Floating folder presentation**
+
+A5 settings persistence remains a user-approved deferral and is not implementation work. Do not mark any later phase complete until its own gate is met.
 
 ---
 

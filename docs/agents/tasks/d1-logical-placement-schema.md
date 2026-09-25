@@ -67,7 +67,7 @@ Use independently keyed `HomeId` terminology. A Home is its own vertical canvas;
 - Placement legality, supported-span policy, collisions, movement, packing, vertical extent, and viewport adaptation — `:core:grid`.
 - Repository operations and their public domain contract — D2.
 - Home rendering, viewport behavior, and UI state — D3.
-- Shortcuts, folders, widgets, built-ins, tile-specific configuration, and folder membership.
+- Shortcuts, folders, widgets, built-ins, tile-specific configuration (`TileAppearance` color role, `ConfiguredShortcut` slots), and folder membership. Per `docs/grid.md`, these arrive via explicit migration in their owning slice, not speculative D1 fields.
 - Whether tile configuration is per Home, folder scoping/membership semantics, profile removal/recreation identity semantics, and any Home migration/selection behavior. Do not resolve these by adding speculative schema fields in D1; raise them to the owning future slice.
 - Catalogue synchronization or Android profile/framework objects in the database.
 

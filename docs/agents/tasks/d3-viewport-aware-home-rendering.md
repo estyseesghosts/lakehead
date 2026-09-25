@@ -23,7 +23,8 @@ Keep the platform/backend catalogue contract intact: `AppCatalogue`, `LauncherAp
 Do not implement or imply:
 
 - D4 move/edit gestures, D5 resize, or D6 remove/reset.
-- Folders, widgets, shortcuts, expanded/custom span app content, or other tile kinds beyond D1's `APP` placements.
+- Folders, widgets, shortcuts, expanded/custom span app content beyond current rendering, tile appearance roles, configured shortcut slots, `Body`/`AppSymbol`/`Shortcut` hit separation, generic symbol-placement rule, and dynamic-color theming — `docs/grid.md` tile content contracts deferred to the tile primitive and editing slices; D3 claims read-only presentation only.
+- Other tile kinds beyond D1's `APP` placements.
 - All Apps, search, global navigation, or fake News/Message Center/All Apps destinations.
 - A catalogue-list fallback/duplicate in the production Home body; the platform catalogue itself remains intact for metadata and future All Apps use.
 - Home creation, default-Home behavior, selection UI/state, placement provisioning, catalogue-to-placement synchronization, or D2 Flow/observation changes.

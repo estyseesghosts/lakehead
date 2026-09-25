@@ -1,7 +1,7 @@
 ---
 description: Fixes narrowly scoped defects or bounded refactors and validates the affected slice.
 mode: subagent
-model: openai/gpt-6-luna#high
+model: commandcode/xiaomi/mimo-v2.5-pro
 permissions:
   - action: subagent
     resource: "*"

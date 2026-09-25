@@ -1,7 +1,7 @@
 ---
 description: Implements bounded Android launcher integrations behind platform contracts.
 mode: subagent
-model: openai/gpt-6-luna#high
+model: commandcode/xiaomi/mimo-v2.5-pro
 permissions:
   - action: subagent
     resource: "*"

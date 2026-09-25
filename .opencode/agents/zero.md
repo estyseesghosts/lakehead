@@ -1,7 +1,7 @@
 ---
 description: Read-only mapper of ProtoLaunch modules, symbols, callers and ownership.
 mode: subagent
-model: opencode-go/mimo-v2.6-flash
+model: opencode-go/muse-spark-1.3-contributor
 permissions:
   - action: "*"
     resource: "*"

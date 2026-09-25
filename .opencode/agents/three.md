@@ -1,7 +1,7 @@
 ---
 description: Read-only reviewer of module dependencies, state ownership and launcher architecture.
 mode: subagent
-model: commandcode/meta/muse-spark-1.3-contributor#xhigh
+model: opencode-go/muse-spark-1.3-contributor#high
 permissions:
   - action: "*"
     resource: "*"

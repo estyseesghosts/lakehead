@@ -1,7 +1,7 @@
 ---
 description: Implements custom Compose launcher primitives and bounded feature presentation.
 mode: subagent
-model: commandcode/meta/muse-spark-1.3-contributor#high
+model: opencode-go/muse-spark-1.3-contributor#high
 permissions:
   - action: subagent
     resource: "*"

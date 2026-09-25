@@ -24,6 +24,7 @@ import androidx.compose.ui.test.swipeUp
 import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import me.foxtails.lakehead.core.designsystem.SquareCellGeometry
+import me.foxtails.lakehead.core.designsystem.RESIZE_HANDLE_TAG
 import me.foxtails.lakehead.core.grid.GridColumns
 import me.foxtails.lakehead.core.grid.GridRowWindow
 import me.foxtails.lakehead.core.grid.GridVerticalExtent
@@ -367,10 +368,34 @@ class HomeCanvasTest {
             .performSemanticsAction(SemanticsActions.OnLongClick) { it() }
         composeRule.waitForIdle()
 
-        composeRule.onNode(hasStateDescription("Moving Movable App, row 0 column 0"))
+        composeRule.onNode(hasStateDescription("Editing Movable App, row 0 column 0"))
             .assertIsDisplayed()
         composeRule.onNodeWithTag(MOVE_CANDIDATE_OVERLAY_TAG, useUnmergedTree = true)
             .assertExists()
+    }
+
+    @Test
+    fun longPressLaunchable_showsResizeHandle() {
+        val tiles = listOf(tile("a", personal, "Resizable App", column = 0, row = 0))
+        setCanvas(loaded(tiles))
+        composeRule.waitForIdle()
+
+        composeRule.onNodeWithText("Resizable App")
+            .performSemanticsAction(SemanticsActions.OnLongClick) { it() }
+        composeRule.waitForIdle()
+
+        // Resize handle should appear at the bottom-right corner of the active tile
+        composeRule.onNodeWithTag(RESIZE_HANDLE_TAG, useUnmergedTree = true)
+            .assertExists()
+        // Handle should meet 48dp minimum touch target
+        val handleSize = composeRule
+            .onNodeWithTag(RESIZE_HANDLE_TAG, useUnmergedTree = true)
+            .fetchSemanticsNode().size
+        val minTouchPx = with(composeRule.density) { 48.dp.roundToPx() }
+        composeRule.runOnIdle {
+            assertTrue("resize handle width ${handleSize.width} must meet 48dp ($minTouchPx px)", handleSize.width >= minTouchPx)
+            assertTrue("resize handle height ${handleSize.height} must meet 48dp ($minTouchPx px)", handleSize.height >= minTouchPx)
+        }
     }
 
     // ---- Sparse distant rows ----

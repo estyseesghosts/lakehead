@@ -172,6 +172,11 @@ class MainActivity : ComponentActivity() {
                         routeLoader.commitMove(itemId, position)
                     }
                 },
+                onResizeTile = { itemId, span ->
+                    lifecycleScope.launch {
+                        routeLoader.commitResize(itemId, span)
+                    }
+                },
                 viewportStyle = routeViewportStyle,
             )
         }

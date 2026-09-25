@@ -21,6 +21,7 @@ import me.foxtails.lakehead.core.model.HomeId
 import me.foxtails.lakehead.core.model.ItemId
 import me.foxtails.lakehead.core.model.LauncherAppEntry
 import me.foxtails.lakehead.core.model.LogicalPosition
+import me.foxtails.lakehead.core.model.LogicalSpan
 import me.foxtails.lakehead.data.repository.HomePlacementRepository
 import me.foxtails.lakehead.data.repository.LoadResult
 import me.foxtails.lakehead.data.repository.MutationResult
@@ -94,9 +95,6 @@ internal class HomeRouteLoader(
         val routeScope = scope ?: return
         val requestGeneration = ++generation
         loadJob?.cancel()
-        mutableState.value = HomeRenderProjection.loading(homeId)
-        placements = null
-        notFound = false
         loadJob = routeScope.launch {
             val result = withContext(ioDispatcher) {
                 repository.load(homeId, viewport.columnsBound, viewport.rowsBound)
@@ -139,6 +137,31 @@ internal class HomeRouteLoader(
                 homeId = homeId,
                 itemId = itemId,
                 position = position,
+                columns = viewport.columnsBound,
+                rows = viewport.rowsBound,
+            )
+            if (result is MutationResult.Accepted) {
+                reload()
+            }
+            result
+        }
+    }
+
+    /**
+     * Commits a drag-finished tile resize on the IO dispatcher and reloads on success.
+     *
+     * Callers must be in a coroutine scope (typically `lifecycleScope`).
+     * The repository write is synchronous (Room transaction) and is wrapped in
+     * `withContext(Dispatchers.IO)` so the caller never blocks the main thread.
+     * Only [MutationResult.Accepted] triggers a reload — rejected or cancelled
+     * writes persist nothing.
+     */
+    suspend fun commitResize(itemId: ItemId, span: LogicalSpan): MutationResult {
+        return withContext(ioDispatcher) {
+            val result = repository.resize(
+                homeId = homeId,
+                itemId = itemId,
+                span = span,
                 columns = viewport.columnsBound,
                 rows = viewport.rowsBound,
             )

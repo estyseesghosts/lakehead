@@ -1,7 +1,7 @@
 ---
 description: Inspects Git state, stages requested paths and makes explicitly requested commits.
 mode: subagent
-model: commandcode/meta/muse-spark-1.3-contributor#low
+model: commandcode/xiaomi/mimo-v2.5
 permissions:
   - action: "*"
     resource: "*"

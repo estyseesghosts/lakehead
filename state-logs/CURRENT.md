@@ -1,9 +1,8 @@
 # Current execution state
-- Phase: Phase A / 0B, Phase B (B1–B3), C1–C4, D1–D3 complete; D4 not started.
-- Active objective: D3 is complete and committed. Next is D4 (move/edit gestures) — read the task spec before starting.
-- Owner: D4 owner must read the D4 task spec, inspect the D3 codebase state, and begin implementation.
-- Task: D3 [`docs/agents/tasks/d3-viewport-aware-home-rendering.md`](../docs/agents/tasks/d3-viewport-aware-home-rendering.md) is COMPLETE. D4 task spec TBD in [`docs/agents/tasks/`](../docs/agents/tasks/).
-- Latest handoff: [`handoffs/2026-09-24-d3-complete.md`](handoffs/2026-09-24-d3-complete.md). Prior D3 handoffs: [`handoffs/2026-09-24-d3-sparse-evidence-uncommitted.md`](handoffs/2026-09-24-d3-sparse-evidence-uncommitted.md), [`handoffs/2026-09-24-d3-seeded-device-evidence-complete.md`](handoffs/2026-09-24-d3-seeded-device-evidence-complete.md), [`handoffs/2026-09-24-d3-app-migration-committed.md`](handoffs/2026-09-24-d3-app-migration-committed.md), [`handoffs/2026-09-24-d3-app-migration-complete.md`](handoffs/2026-09-24-d3-app-migration-complete.md), [`handoffs/2026-09-24-d3-feature-ui-sliced-complete.md`](handoffs/2026-09-24-d3-feature-ui-sliced-complete.md), and [`handoffs/2026-09-24-d3-viewport-aware-home-rendering-started.md`](handoffs/2026-09-24-d3-viewport-aware-home-rendering-started.md).
-- Commit history: D3 migration `dfa4fec85617dda4d2c585adca4afd9dab97516c`; seeded-device test `e810f6d5ffd05fc53a4560fb4f9fd02e9f4a1eee`; state commit `afa27d8c4549b6274a218834947e4ff2fac1d691`; latest state commit `00d045f4c3925c1da73bf1c6a6df8bc546ba828f`; sparse/overlay evidence `c3b51a0`.
-- Device verification: SM-G986W (Samsung Galaxy S20+), API 13, serial R5CN70E2SGV. All 4 seeded device tests PASS. Manual accessibility checks UNVERIFIED.
-- Exact next operation: locate or create the D4 task spec in `docs/agents/tasks/`, read it, and begin D4 implementation. D3 is green and committed; D4 may start.
+- Phase: D5 resize editing — partially working, move overlay offset bug when scrolled.
+- Active objective: Fix move candidate overlay scroll offset + flicker on commit.
+- Owner: Next orchestrator.
+- Commit history: `885082b` (S4 shell+wiring), `9b2b6a7` (B4 span legality), `0b30a34` (D4 move editing). D5 not yet committed — all changes are uncommitted.
+- Latest handoff: [`handoffs/2026-09-25-d5-resize-partial.md`](handoffs/2026-09-25-d5-resize-partial.md).
+- Device: SM-G986W (Samsung Galaxy S20+), API 33, serial R5CN70E2SGV. APK installed (latest clean build).
+- Exact next operation: Fix the move candidate overlay scroll offset (blue outline ~200px below finger when scrolled). Then fix the flicker/flash on commit (Loading interstitial). Then device-verify, run all 9 validation commands, commit D5.

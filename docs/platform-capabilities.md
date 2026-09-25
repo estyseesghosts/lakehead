@@ -4,6 +4,7 @@
 | --- | --- | --- |
 | Default launcher | HOME intent filter, `RoleManager.ROLE_HOME` request on API 29+ | `:app` entry + platform gateway (slice 0B) |
 | Installed activities and profiles | `LauncherApps.getActivityList`, `UserManager` accessible profiles, `LauncherApps.Callback` | `:platform:launcherapps` (0B) |
+| App symbols | Adaptive monochrome layer preferred, then adaptive foreground, then legacy fallback; bounds/padding normalization, tinting, bounded `AppIdentity`-keyed snapshot cache off the UI thread, invalidated with catalogue callbacks | `:platform:launcherapps` icon boundary (future `platform:symbols` split only when justified) |
 | Launch and shortcuts | `LauncherApps.startMainActivity`, launcher shortcut host access, shortcut query/launch | `:platform:launcherapps` / planned `:platform:shortcuts` |
 | Widgets | `AppWidgetHost`, widget ID binding/configuration, hosted `AppWidgetHostView` | planned `:platform:widgets` |
 | Notifications | User-enabled `NotificationListenerService`; capture normalized arrivals/removals, not an imagined complete history | planned `:platform:notifications` |

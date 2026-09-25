@@ -46,3 +46,7 @@ Provide a pure, framework-free model for non-negative grid coordinates, positive
 - B2 vertical extent / working margin or viewport calculations.
 - B3 column-count adaptation.
 - Rendering, persistence, Android, or Compose integration.
+
+## Grid.md follow-up (open, not part of B1 gate)
+
+`docs/grid.md` supersedes the B1 closed span set: spans are generic positive integer dimensions (3×2, 4×3, 3×3 as valid examples, never a `SMALL`/`MEDIUM`/`LARGE` enum). `GridSpan` representation is already generic; `GridRules` legality still rejects non-B1 dimensions with `UNSUPPORTED_SPAN`. A future slice must generalize legality to bounds + rectangle collision and move renderable-size policy to UI/editing (D5/F3). Persistence needs no migration for this change. Do not claim open-set spans work until source, tests, and validation for that slice pass.
