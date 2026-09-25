@@ -67,8 +67,16 @@ class LauncherAppsIconSnapshotRefresher(
     }
 }
 
-/** Small Android adapter; callers invoke it through the refresher's IO-dispatched API. */
-class LauncherAppsIconActivityLookup(context: Context) : LauncherAppIconLookup {
+/**
+ * Small Android adapter; callers invoke it through the refresher's IO-dispatched API.
+ *
+ * @param sourceResolver classifies raw icon drawables into the best symbol source
+ *   (monochrome / adaptive foreground / legacy). Defaults to a production instance.
+ */
+class LauncherAppsIconActivityLookup(
+    context: Context,
+    private val sourceResolver: AppSymbolSourceResolver = AppSymbolSourceResolver(),
+) : LauncherAppIconLookup {
     private val launcherApps: LauncherApps
     private val profileTokens: ProfileTokenAdapter
 
@@ -90,6 +98,7 @@ class LauncherAppsIconActivityLookup(context: Context) : LauncherAppIconLookup {
             launcherApps.getActivityList(identity.component.packageName, user)
                 .firstOrNull { it.componentName == component }
                 ?.getBadgedIcon(0)
+                ?.let { sourceResolver.resolve(it).drawable }
                 ?.let(::DrawableLauncherAppIcon)
         } catch (_: SecurityException) {
             null
