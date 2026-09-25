@@ -1,0 +1,18 @@
+pluginManagement {
+    repositories {
+        google()
+        mavenCentral()
+        gradlePluginPortal()
+    }
+}
+
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+
+rootProject.name = "ProtoLaunch"
+include(":app", ":core:model", ":core:grid", ":core:designsystem", ":platform:launcherapps", ":feature:home", ":fixtures:launchable", ":data:database", ":data:repository")
