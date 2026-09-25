@@ -10,7 +10,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
@@ -56,7 +56,7 @@ object AppTileDefaults {
     /** `stateDescription` announced when [AppTileState.isPressed] is true. */
     const val PressedStateDescription = "Pressed"
 
-    val TileShape = RoundedCornerShape(12.dp)
+    val TileShape = RectangleShape
 }
 
 /**
