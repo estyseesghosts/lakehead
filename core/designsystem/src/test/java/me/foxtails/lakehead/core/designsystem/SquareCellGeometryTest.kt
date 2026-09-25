@@ -68,6 +68,22 @@ class SquareCellGeometryTest {
     }
 
     @Test
+    fun fiveColumnProductionMirrorDerivesExpectedCell() {
+        // Production mirror: (1080 - 2 * 24 - 4 * 24) / 5 = 936 / 5 = 187 remainder 1.
+        val five = SquareCellGeometry.fromViewport(
+            availableWidthPx = 1080,
+            horizontalPaddingPx = 24,
+            columnGapPx = 24,
+            columnCount = 5,
+        )
+
+        assertEquals(5, five.columnCount)
+        assertEquals(187, five.cellSizePx)
+        val remainder = 1080 - 2 * 24 - 4 * 24 - 5 * five.cellSizePx
+        assertEquals(1, remainder)
+    }
+
+    @Test
     fun countsAboveFiveDeriveCells() {
         // Eight columns: (1080 - 2 * 24 - 7 * 8) / 8 = 976 / 8 = 122.
         val eight = SquareCellGeometry.fromViewport(

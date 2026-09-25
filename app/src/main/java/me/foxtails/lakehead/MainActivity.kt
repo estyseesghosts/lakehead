@@ -82,7 +82,7 @@ class MainActivity : ComponentActivity() {
         val viewportHeight = metrics.heightPixels.coerceAtLeast(1)
         val horizontalPaddingPx = (8f * density).toInt()
         val gapPx = (8f * density).toInt()
-        val minimumCellPx = (48f * density).toInt().coerceAtLeast(1)
+        val minimumCellPx = (60f * density).toInt().coerceAtLeast(1)
         val viewportRows = (viewportHeight / minimumCellPx).toLong().coerceAtLeast(1)
         HomeRouteLoader(
             homeId = PRODUCTION_HOME_ID,

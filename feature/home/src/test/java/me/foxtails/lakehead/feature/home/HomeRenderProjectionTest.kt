@@ -352,6 +352,50 @@ class HomeRenderProjectionTest {
         assertEquals(expected, HomeRenderProjection.adaptColumns(wide))
     }
 
+    @Test
+    fun adaptColumns_productionMirrorFiveColumnScaleUp() {
+        // Production mirror: W=1080, inset=0, padding=24, gap=24, min=180 → 5.
+        // Effective content = 1080 - 0 - 2 * 24 = 1032;
+        // floor((1032 + 24) / (180 + 24)) = floor(1056 / 204) = 5.
+        val expectedFive = GridViewportAdaptation.columnsFor(1080, 0, 24, 24, 180)
+        assertEquals(GridColumns(5), expectedFive)
+        val five = inputs(
+            viewportWidthPx = 1080,
+            horizontalInsetPx = 0,
+            horizontalPaddingPx = 24,
+            columnGapPx = 24,
+            minimumCellWidthPx = 180,
+        )
+        assertEquals(expectedFive, HomeRenderProjection.adaptColumns(five))
+        assertEquals(5, HomeRenderProjection.adaptColumns(five).count)
+
+        // Narrow production mirror: W=500 → 2.
+        // Effective content = 500 - 48 = 452; floor((452 + 24) / 204) = 2.
+        val expectedNarrow = GridViewportAdaptation.columnsFor(500, 0, 24, 24, 180)
+        assertEquals(GridColumns(2), expectedNarrow)
+        val narrow = inputs(
+            viewportWidthPx = 500,
+            horizontalInsetPx = 0,
+            horizontalPaddingPx = 24,
+            columnGapPx = 24,
+            minimumCellWidthPx = 180,
+        )
+        assertEquals(expectedNarrow, HomeRenderProjection.adaptColumns(narrow))
+
+        // Wide production mirror: W=3000 → 14.
+        // Effective content = 3000 - 48 = 2952; floor((2952 + 24) / 204) = 14.
+        val expectedWide = GridViewportAdaptation.columnsFor(3000, 0, 24, 24, 180)
+        assertEquals(GridColumns(14), expectedWide)
+        val wide = inputs(
+            viewportWidthPx = 3000,
+            horizontalInsetPx = 0,
+            horizontalPaddingPx = 24,
+            columnGapPx = 24,
+            minimumCellWidthPx = 180,
+        )
+        assertEquals(expectedWide, HomeRenderProjection.adaptColumns(wide))
+    }
+
     // ---- measureExtent: floor, margin, oracle ----
 
     @Test
