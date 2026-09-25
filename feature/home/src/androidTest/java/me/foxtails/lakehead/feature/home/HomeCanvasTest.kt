@@ -527,6 +527,70 @@ class HomeCanvasTest {
         composeRule.onNodeWithTag(HOME_TILE_ICON_TAG, useUnmergedTree = true).assertExists()
     }
 
+    // ---- D3 shortcut placeholders (visual-only, inert) ----
+
+    @Test
+    fun defaultCanvas_showsNoShortcutPlaceholders() {
+        val tiles = listOf(tile("a", personal, "Plain App", column = 0, row = 0))
+        setCanvas(loaded(tiles))
+
+        composeRule.onAllNodesWithContentDescription("Shortcut placeholder 1").assertCountEquals(0)
+        composeRule.onAllNodesWithContentDescription("Shortcut placeholder 2").assertCountEquals(0)
+    }
+
+    @Test
+    fun homeCanvasTile_forwardsPlaceholders_asTwoInertNodes() {
+        var launched: AppIdentity? = null
+        composeRule.setContent {
+            HomeCanvasTile(
+                tile = tile(
+                    "wide",
+                    personal,
+                    "Wide App",
+                    column = 0,
+                    row = 0,
+                    spanColumns = 2,
+                    spanRows = 1,
+                ),
+                iconBitmap = null,
+                onLaunchApp = { launched = it },
+                shortcutPlaceholders = 2,
+            )
+        }
+        composeRule.waitForIdle()
+
+        // Pass-through renders exactly two distinct placeholder nodes.
+        composeRule.onAllNodesWithContentDescription("Shortcut placeholder 1").assertCountEquals(1)
+        composeRule.onAllNodesWithContentDescription("Shortcut placeholder 2").assertCountEquals(1)
+        val placeholders = listOf("Shortcut placeholder 1", "Shortcut placeholder 2")
+            .map { composeRule.onNodeWithContentDescription(it).fetchSemanticsNode() }
+        composeRule.runOnIdle {
+            placeholders.forEach { node ->
+                assertFalse(
+                    "shortcut placeholder must expose no click action",
+                    node.config.contains(SemanticsActions.OnClick),
+                )
+                assertFalse(
+                    "shortcut placeholder must expose no long-click action",
+                    node.config.contains(SemanticsActions.OnLongClick),
+                )
+                assertFalse(
+                    "shortcut placeholder must not be a button",
+                    node.config.contains(SemanticsProperties.Role),
+                )
+            }
+        }
+
+        // Existing Body/Symbol separation still passes; placeholders trigger neither.
+        val regions = composeRule.onAllNodesWithContentDescription("Wide App")
+        regions.assertCountEquals(2)
+        regions[0].assertExists().performClick()
+        composeRule.runOnIdle { assertEquals(personal, launched) }
+        composeRule.runOnIdle { launched = null }
+        regions[1].assertExists().performClick()
+        composeRule.runOnIdle { assertEquals(personal, launched) }
+    }
+
     // ---- Ownership/purity evidence ----
 
     @Test

@@ -33,6 +33,9 @@ import me.foxtails.lakehead.core.model.ItemId
  * - When [isEditActive] and this tile's id matches [activeItemId], the tile renders the
  *   caller-driven [AppTileState.isSelected] border and announces
  *   `stateDescription = "Editing <label>, row R column C"`.
+ * - [shortcutPlaceholders] forwards test/mock-only visual placeholder dots to
+ *   [AppTile] (default 0 renders none); no shortcut inventory, platform wiring or
+ *   slot click handling lives here.
  */
 @Composable
 internal fun HomeCanvasTile(
@@ -43,6 +46,7 @@ internal fun HomeCanvasTile(
     isEditActive: Boolean = false,
     activeItemId: ItemId? = null,
     onEnterEdit: (HomeRenderTile) -> Unit = {},
+    shortcutPlaceholders: Int = 0,
 ) {
     val rawLabel = tile.label
     val label = if (rawLabel.isNullOrBlank()) UNAVAILABLE_LABEL else rawLabel
@@ -89,6 +93,7 @@ internal fun HomeCanvasTile(
         } else {
             null
         },
+        shortcutPlaceholders = shortcutPlaceholders,
     )
 }
 

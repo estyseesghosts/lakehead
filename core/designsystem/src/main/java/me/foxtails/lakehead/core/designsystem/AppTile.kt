@@ -5,12 +5,14 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.material3.MaterialTheme
@@ -117,9 +119,11 @@ internal fun resolveTileColors(
  *   Body-only `onLongClick`, [Role.Button]) with `semantics(mergeDescendants = true)`.
  * - AppLaunchButton: [Box.clickable] (`onClick = onSymbolClick`, [Role.Button])
  *   wrapping the [icon] slot, with `semantics(mergeDescendants = true)`.
- * - ShortcutSlot [Row]: empty visual-only strip in this slice (no glyphs, no
- *   clickable, never focusable); a trailing sibling so order stays Body → Symbol →
- *   slots when D3 adds placeholder glyphs.
+ * - ShortcutSlot [Row]: visual-only bottom strip of neutral placeholder dots
+ *   (`shortcutPlaceholders` count, default 0 renders none): non-clickable, never
+ *   focusable, no [Role.Button]; each dot is a distinct semantics node
+ *   ("Shortcut placeholder i+1"). A trailing sibling so order stays Body → Symbol →
+ *   slots.
  *
  * A 1x1 tile is full-bleed (no [LauncherDimensions.tilePadding] inset; the tile
  * background fills the whole cell) while the symbol hit region stays icon-sized
@@ -142,6 +146,9 @@ internal fun resolveTileColors(
  * @param onSymbolClick invoked from AppLaunchButton.
  * @param onLongClick when null TileBody exposes no long-click action; AppLaunchButton
  * never exposes one.
+ * @param shortcutPlaceholders test/mock-only count of visual-only neutral-dot
+ * shortcut glyphs in the ShortcutSlot strip (default 0, so 1x1 tiles show none).
+ * Glyphs are inert: no click/long-click handling and no text labels.
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -154,12 +161,16 @@ fun AppTile(
     contentDescription: String? = null,
     symbolContentDescription: String? = null,
     onLongClick: (() -> Unit)? = null,
+    shortcutPlaceholders: Int = 0,
 ) {
     require(contentDescription == null || contentDescription.isNotBlank()) {
         "contentDescription must be null or non-blank"
     }
     require(symbolContentDescription == null || symbolContentDescription.isNotBlank()) {
         "symbolContentDescription must be null or non-blank"
+    }
+    require(shortcutPlaceholders >= 0) {
+        "shortcutPlaceholders must be >= 0"
     }
     val resolvedDescription = contentDescription ?: state.label
     val resolvedSymbolDescription = symbolContentDescription ?: resolvedDescription
@@ -244,13 +255,28 @@ fun AppTile(
                 }
             }
         }
-        // ShortcutSlot row: empty visual-only strip (D3 adds placeholder glyphs here).
-        // No glyphs, no clickable, never focusable.
+        // ShortcutSlot row: visual-only bottom strip of neutral placeholder dots.
+        // No clickable, never focusable, no Role.Button; each dot keeps its own
+        // semantics node ("Shortcut placeholder i+1"), so the strip itself must not
+        // merge descendants. Dots stay ~12-16dp visual glyphs and never force a 48dp
+        // per-slot target, so 1x1 tiles (default 0, renders none) stay full-bleed.
+        val placeholderTint = MaterialTheme.colorScheme.outlineVariant
         Row(
             modifier = Modifier
                 .align(Alignment.BottomStart)
-                .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
-                .semantics(mergeDescendants = true) {},
-        ) {}
+                .padding(dimensions.tilePadding),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            repeat(shortcutPlaceholders) { index ->
+                Box(
+                    modifier = Modifier
+                        .size(14.dp)
+                        .background(placeholderTint, CircleShape)
+                        .semantics {
+                            this.contentDescription = "Shortcut placeholder ${index + 1}"
+                        },
+                )
+            }
+        }
     }
 }

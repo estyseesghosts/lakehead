@@ -474,6 +474,86 @@ class AppTileTest {
         }
     }
 
+    @Test
+    fun defaultShowsNoShortcutPlaceholders() {
+        composeRule.setContent {
+            LauncherTheme {
+                AppTile(
+                    state = AppTileState(label = "Calendar", span = GridSpan(1, 1)),
+                    onBodyClick = {}, onSymbolClick = {},
+                )
+            }
+        }
+
+        composeRule.onAllNodesWithContentDescription("Shortcut placeholder 1").assertCountEquals(0)
+        composeRule.onAllNodesWithContentDescription("Shortcut placeholder 2").assertCountEquals(0)
+    }
+
+    @Test
+    fun negativeShortcutPlaceholdersRejected() {
+        assertThrows(IllegalArgumentException::class.java) {
+            composeRule.setContent {
+                AppTile(
+                    state = AppTileState(label = "Calendar", span = GridSpan(1, 1)),
+                    onBodyClick = {}, onSymbolClick = {},
+                    shortcutPlaceholders = -1,
+                )
+            }
+        }
+    }
+
+    @Test
+    fun wideSpanPlaceholders_areTwoDistinctInertNodes_bodySymbolUnaffected() {
+        var bodyClicks = 0
+        var symbolClicks = 0
+        composeRule.setContent {
+            LauncherTheme {
+                Box(Modifier.size(320.dp, 160.dp)) {
+                    AppTile(
+                        state = AppTileState(label = "Calendar", span = GridSpan(2, 1)),
+                        onBodyClick = { bodyClicks++ },
+                        onSymbolClick = { symbolClicks++ },
+                        shortcutPlaceholders = 2,
+                    )
+                }
+            }
+        }
+        composeRule.waitForIdle()
+
+        // Exactly two distinct placeholder nodes, one per slot.
+        composeRule.onAllNodesWithContentDescription("Shortcut placeholder 1").assertCountEquals(1)
+        composeRule.onAllNodesWithContentDescription("Shortcut placeholder 2").assertCountEquals(1)
+        val placeholders = listOf("Shortcut placeholder 1", "Shortcut placeholder 2")
+            .map { composeRule.onNodeWithContentDescription(it).fetchSemanticsNode() }
+        composeRule.runOnIdle {
+            placeholders.forEach { node ->
+                assertFalse(
+                    "shortcut placeholder must expose no click action",
+                    node.config.contains(SemanticsActions.OnClick),
+                )
+                assertFalse(
+                    "shortcut placeholder must expose no long-click action",
+                    node.config.contains(SemanticsActions.OnLongClick),
+                )
+                assertFalse(
+                    "shortcut placeholder must not be a button",
+                    node.config.contains(SemanticsProperties.Role),
+                )
+            }
+        }
+
+        // Existing Body/Symbol separation still passes: two Role.Button regions route
+        // to exactly one callback each, so placeholders trigger neither.
+        val regions = composeRule.onAllNodesWithContentDescription("Calendar")
+        regions.assertCountEquals(2)
+        regions[0].assert(hasClickAction()).performClick()
+        regions[1].assert(hasClickAction()).performClick()
+        composeRule.runOnIdle {
+            assertEquals(1, bodyClicks)
+            assertEquals(1, symbolClicks)
+        }
+    }
+
     private fun boundsInRoot(interaction: SemanticsNodeInteraction): Rect {
         val node = interaction.fetchSemanticsNode()
         val position = node.positionInRoot
