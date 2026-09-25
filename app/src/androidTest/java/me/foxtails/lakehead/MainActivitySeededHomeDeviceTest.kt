@@ -3,8 +3,11 @@ package me.foxtails.lakehead
 import android.content.Context
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.swipeUp
 import androidx.room.Room
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -145,6 +148,74 @@ class MainActivitySeededHomeDeviceTest {
         }
     }
 
+    @Test
+    fun sparsePlacementsScrollToDistantRowWhileHomeRoleOverlayStaysPresent() {
+        cleanDatabase()
+        val catalogueEntries = discoverCatalogue()
+        val entries = catalogueEntries
+            .filter { candidate -> catalogueEntries.count { it.label == candidate.label } == 1 }
+            .distinctBy { it.identity }
+            .take(2)
+        assertTrue("Device catalogue needs two real launchable identities", entries.size == 2)
+        val nearEntry = entries[0]
+        val distantEntry = entries[1]
+        assertTrue(
+            "Sparse test needs distinct near/distant labels",
+            nearEntry.label != distantEntry.label,
+        )
+        seedHome(
+            listOf(
+                placement("sparse-near", nearEntry.identity, 0, ItemAvailability.AVAILABLE, row = 0),
+                placement("sparse-far", distantEntry.identity, 0, ItemAvailability.AVAILABLE, row = 16),
+            ),
+        )
+
+        val scenario = launchMainActivity()
+        try {
+            awaitActivityCatalogue(scenario, entries.mapTo(mutableSetOf()) { it.identity })
+            waitForText(nearEntry.label)
+            composeRule.waitUntil(timeoutMillis = 30_000) {
+                composeRule.onAllNodesWithText(distantEntry.label).fetchSemanticsNodes().isEmpty()
+            }
+            waitForText("Set ProtoLaunch as default home")
+
+            var distantVisible = false
+            repeat(10) {
+                if (distantVisible) return@repeat
+                composeRule.onNodeWithTag("home-canvas-grid", useUnmergedTree = true)
+                    .performTouchInput { swipeUp() }
+                composeRule.waitForIdle()
+                distantVisible = try {
+                    composeRule.waitUntil(timeoutMillis = 5_000) {
+                        composeRule.onAllNodesWithText(distantEntry.label)
+                            .fetchSemanticsNodes().isNotEmpty()
+                    }
+                    true
+                } catch (e: AssertionError) {
+                    composeRule.onAllNodesWithText(distantEntry.label)
+                        .fetchSemanticsNodes().isNotEmpty()
+                }
+            }
+            assertTrue("Sparse distant placement must scroll into view", distantVisible)
+            val nearStillVisible = composeRule.onAllNodesWithText(nearEntry.label)
+                .fetchSemanticsNodes().isNotEmpty()
+            val distantNowVisible = composeRule.onAllNodesWithText(distantEntry.label)
+                .fetchSemanticsNodes().isNotEmpty()
+            assertTrue(
+                "Scroll must move the sparse window (near=$nearStillVisible distant=$distantNowVisible)",
+                !nearStillVisible || distantNowVisible,
+            )
+            waitForText("Set ProtoLaunch as default home")
+            assertEquals(
+                1,
+                composeRule.onAllNodesWithText("Set ProtoLaunch as default home").fetchSemanticsNodes().size,
+            )
+        } finally {
+            scenario.close()
+            cleanDatabase()
+        }
+    }
+
     private fun discoverCatalogue(): List<me.foxtails.lakehead.core.model.LauncherAppEntry> = runBlocking {
         val scope = kotlinx.coroutines.CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
         val catalogue = LauncherAppsAppCatalogue(context, scope)
@@ -213,6 +284,7 @@ class MainActivitySeededHomeDeviceTest {
         identity: AppIdentity,
         column: Int,
         availability: ItemAvailability,
+        row: Int = 0,
     ) = PlacementEntity(
         itemId,
         PRODUCTION_HOME_ID.value,
@@ -221,7 +293,7 @@ class MainActivitySeededHomeDeviceTest {
         identity.component.packageName,
         identity.component.className,
         column,
-        0,
+        row,
         1,
         1,
         availability.name,
