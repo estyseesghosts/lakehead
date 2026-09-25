@@ -12,7 +12,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.LocalContentColor
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -127,6 +130,40 @@ data class NavigationControlGeometry(
 val NavigationControlMinTouchTarget: Dp = 48.dp
 
 /**
+ * Resolved fills for one navigation control button.
+ *
+ * Selected and unselected fills are derived from [MaterialTheme.colorScheme]
+ * per docs/grid.md section 12 so the control follows app theming instead of
+ * fixed dark fills.
+ */
+internal data class NavigationControlColors(
+    val container: Color,
+    val content: Color,
+    val outline: Color,
+)
+
+/** Resolves [NavigationControlColors] for the given [selected] presentation input. */
+@Composable
+internal fun resolveNavigationControlColors(selected: Boolean): NavigationControlColors {
+    // Theming source per docs/grid.md section 12: selected uses the primary
+    // container family, unselected uses the surface-container family.
+    val scheme = MaterialTheme.colorScheme
+    return if (selected) {
+        NavigationControlColors(
+            container = scheme.primaryContainer,
+            content = scheme.onPrimaryContainer,
+            outline = scheme.primary,
+        )
+    } else {
+        NavigationControlColors(
+            container = scheme.surfaceContainerHighest,
+            content = scheme.onSurfaceVariant,
+            outline = scheme.outline,
+        )
+    }
+}
+
+/**
  * One custom-drawn circular navigation control.
  *
  * The circle, pill-compatible border, and minimum touch target are drawn from
@@ -154,8 +191,7 @@ fun NavigationControlButton(
 ) {
     require(contentDescription.isNotBlank()) { "contentDescription must be non-blank" }
 
-    val container = if (selected) Color(0xFF2A2D34) else Color(0xFF17191D)
-    val outline = if (selected) Color(0xFFE8EAED) else Color(0xFF5F6368)
+    val colors = resolveNavigationControlColors(selected)
     Box(
         contentAlignment = Alignment.Center,
         modifier = Modifier
@@ -166,10 +202,10 @@ fun NavigationControlButton(
             .then(modifier)
             .graphicsLayer { alpha = if (enabled) 1f else 0.38f }
             .clip(CircleShape)
-            .background(container)
+            .background(colors.container)
             .border(
                 width = if (selected) 2.dp else 1.dp,
-                color = outline,
+                color = colors.outline,
                 shape = CircleShape,
             )
             .clickable(enabled = enabled, role = Role.Button, onClick = onPress)
@@ -182,8 +218,11 @@ fun NavigationControlButton(
                 this.contentDescription = contentDescription
                 this.selected = selected
             },
-        content = content,
-    )
+    ) {
+        CompositionLocalProvider(LocalContentColor provides colors.content) {
+            content()
+        }
+    }
 }
 
 /**
@@ -208,7 +247,7 @@ fun NavigationControlPill(
     Row(
         modifier = modifier
             .clip(RoundedCornerShape(percent = 50))
-            .background(Color(0xFF101216))
+            .background(MaterialTheme.colorScheme.surfaceContainer)
             .padding(outerPadding),
         horizontalArrangement = Arrangement.spacedBy(buttonGap),
         verticalAlignment = Alignment.CenterVertically,

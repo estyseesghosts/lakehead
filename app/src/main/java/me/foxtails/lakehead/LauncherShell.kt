@@ -15,6 +15,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
 import me.foxtails.lakehead.core.designsystem.NavigationControlButton
 import me.foxtails.lakehead.core.designsystem.NavigationControlPill
@@ -108,6 +109,7 @@ private fun BoxScope.StubContent(label: String) {
         modifier = Modifier
             .fillMaxSize()
             .padding(horizontal = 16.dp, vertical = 24.dp),
+        style = TextStyle(color = MaterialTheme.colorScheme.onBackground),
     )
 }
 
