@@ -1,13 +1,14 @@
 package me.foxtails.lakehead.feature.allapps
 
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.defaultMinSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.text.BasicText
+import androidx.compose.material3.LocalTextStyle
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -18,16 +19,26 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.dp
+import me.foxtails.lakehead.core.designsystem.AppSymbol
+import me.foxtails.lakehead.core.designsystem.LocalLauncherDimensions
 import me.foxtails.lakehead.core.model.AppIdentity
 
 /**
- * One row of the All Apps list.
+ * One row of the All Apps list: a wide 1-tile-high unit.
  *
  * Presentation only: the caller supplies the already-decoded [icon] snapshot (or null when
  * none was supplied) and the row performs no decode, catalogue/platform lookup, or database
- * access. Foundation primitives only (Row/Box/Image/BasicText): no Material `ListItem`,
- * `Card`, or stock components, and no `AppTile` (that primitive is a centered grid tile;
- * this is a full-width list row with a separate launch area and add control).
+ * access. Foundation primitives only (Row/Box/BasicText plus the shared [AppSymbol]):
+ * no Material `ListItem`, `Card`, or stock components, and no `AppTile` (that primitive is
+ * a centered grid tile; this is a full-width list row with a separate launch area and add
+ * control).
+ *
+ * Geometry comes from [LocalLauncherDimensions] (caller wraps the list in `LauncherTheme`):
+ * the outer row pads [horizontal][tilePadding][x2] / [vertical][tilePadding] with a minimum
+ * height of `symbolSize + 2 * tilePadding` (the 1x1 tile height, 56.dp by default); the
+ * inner launch row pads [vertical][tilePadding]; the label starts after
+ * `tilePadding * 1.5f`. Text renders in `onSurface` via a [LocalTextStyle] merge so it
+ * stays theme-adaptive (never a hardcoded black/white).
  *
  * - The launch area (icon + label) is a single merged button node named by [AllAppsEntry.label];
  *   activating it dispatches the exact [AppIdentity] via [onLaunchApp].
@@ -44,15 +55,25 @@ fun AllAppsRow(
     onAddToHome: (AppIdentity) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val dimensions = LocalLauncherDimensions.current
+    val rowMinHeight = dimensions.symbolSize + dimensions.tilePadding * 2
+    val onSurfaceStyle =
+        LocalTextStyle.current.merge(color = MaterialTheme.colorScheme.onSurface)
     Row(
         modifier = modifier
             .testTag(ALL_APPS_ROW_TAG)
-            .padding(horizontal = 16.dp, vertical = 4.dp),
+            .fillMaxWidth()
+            .defaultMinSize(minHeight = rowMinHeight)
+            .padding(
+                horizontal = dimensions.tilePadding * 2,
+                vertical = dimensions.tilePadding,
+            ),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Row(
             modifier = Modifier
                 .weight(1f)
+                .defaultMinSize(minHeight = 48.dp)
                 .semantics(mergeDescendants = true) {
                     contentDescription = entry.label
                 }
@@ -60,26 +81,25 @@ fun AllAppsRow(
                     role = Role.Button,
                     onClick = { onLaunchApp(entry.identity) },
                 )
-                .padding(vertical = 12.dp),
+                .padding(vertical = dimensions.tilePadding),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             if (icon != null) {
-                Image(
+                AppSymbol(
                     bitmap = icon,
-                    contentDescription = null,
-                    modifier = Modifier
-                        .testTag(ALL_APPS_ICON_TAG)
-                        .size(40.dp),
+                    modifier = Modifier.testTag(ALL_APPS_ICON_TAG),
                 )
             }
             BasicText(
                 text = entry.label,
-                modifier = Modifier.padding(start = 12.dp),
+                style = onSurfaceStyle,
+                modifier = Modifier.padding(start = dimensions.tilePadding * 1.5f),
             )
         }
         if (entry.alreadyOnHome) {
             BasicText(
                 text = ADDED_MARKER_TEXT,
+                style = onSurfaceStyle,
                 modifier = Modifier
                     .padding(horizontal = 12.dp, vertical = 12.dp)
                     .semantics {
@@ -101,7 +121,10 @@ fun AllAppsRow(
                     .padding(horizontal = 12.dp, vertical = 12.dp),
                 contentAlignment = Alignment.Center,
             ) {
-                BasicText(text = ADD_ACTION_TEXT)
+                BasicText(
+                    text = ADD_ACTION_TEXT,
+                    style = onSurfaceStyle,
+                )
             }
         }
     }

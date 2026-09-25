@@ -3,15 +3,22 @@ package me.foxtails.lakehead.feature.allapps
 import android.graphics.Bitmap
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.assertHeightIsAtLeast
+import androidx.compose.ui.test.assertHeightIsEqualTo
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertWidthIsEqualTo
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.unit.dp
+import me.foxtails.lakehead.core.designsystem.LauncherTheme
 import me.foxtails.lakehead.core.model.AppIdentity
 import me.foxtails.lakehead.core.model.ComponentIdentity
 import me.foxtails.lakehead.core.model.ProfileId
@@ -57,12 +64,14 @@ class AllAppsScreenTest {
         onAddToHome: (AppIdentity) -> Unit = {},
     ) {
         composeRule.setContent {
-            AllAppsScreen(
-                state = state,
-                icons = icons,
-                onLaunchApp = onLaunchApp,
-                onAddToHome = onAddToHome,
-            )
+            LauncherTheme {
+                AllAppsScreen(
+                    state = state,
+                    icons = icons,
+                    onLaunchApp = onLaunchApp,
+                    onAddToHome = onAddToHome,
+                )
+            }
         }
     }
 
@@ -233,6 +242,51 @@ class AllAppsScreenTest {
         composeRule.onNodeWithText("Label Only App").assertIsDisplayed()
         // The icon slot is decorative (contentDescription=null); presence is verified by tag.
         composeRule.onAllNodesWithTag(ALL_APPS_ICON_TAG, useUnmergedTree = true).assertCountEquals(1)
+    }
+
+    @Test
+    fun row_meetsOneByOneTileHeight_withAccessibleLaunchArea() {
+        // Default tokens: symbolSize 40.dp + 2 * tilePadding 8.dp = 56.dp (the 1x1 tile height).
+        setScreen(AllAppsViewState.Loaded(listOf(entry(personal, "Personal App"))))
+
+        composeRule.onNodeWithTag(ALL_APPS_ROW_TAG, useUnmergedTree = true)
+            .assertIsDisplayed()
+            .assertHeightIsAtLeast(56.dp)
+        composeRule.onNodeWithContentDescription("Personal App")
+            .assertIsDisplayed()
+            .assertHeightIsAtLeast(48.dp)
+        composeRule.onNodeWithContentDescription("Add Personal App to Home")
+            .assertIsDisplayed()
+            .assertHeightIsAtLeast(48.dp)
+    }
+
+    @Test
+    fun icon_usesSharedSymbolSize() {
+        val bitmap = Bitmap.createBitmap(32, 32, Bitmap.Config.ARGB_8888).asImageBitmap()
+        setScreen(
+            AllAppsViewState.Loaded(listOf(entry(personal, "Icon App"))),
+            icons = mapOf(personal to bitmap),
+        )
+
+        // Shared AppSymbol renders at the token symbolSize (40.dp by default).
+        composeRule.onNodeWithTag(ALL_APPS_ICON_TAG, useUnmergedTree = true)
+            .assertIsDisplayed()
+            .assertWidthIsEqualTo(40.dp)
+            .assertHeightIsEqualTo(40.dp)
+    }
+
+    @Test
+    fun launchAndAdd_keepButtonRoles_withUnchangedDescriptions() {
+        setScreen(AllAppsViewState.Loaded(listOf(entry(personal, "Personal App"))))
+
+        val launchRole = composeRule.onNodeWithContentDescription("Personal App")
+            .assertIsDisplayed()
+            .fetchSemanticsNode().config[SemanticsProperties.Role]
+        assertEquals(Role.Button, launchRole)
+        val addRole = composeRule.onNodeWithContentDescription("Add Personal App to Home")
+            .assertIsDisplayed()
+            .fetchSemanticsNode().config[SemanticsProperties.Role]
+        assertEquals(Role.Button, addRole)
     }
 
     @Test
