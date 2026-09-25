@@ -13,12 +13,12 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.lifecycle.lifecycleScope
 import androidx.room.Room
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import me.foxtails.lakehead.core.grid.GridRowWindow
 import me.foxtails.lakehead.core.model.HomeId
 import me.foxtails.lakehead.data.database.PlacementDatabase
 import me.foxtails.lakehead.data.repository.HomePlacementRepository
 import me.foxtails.lakehead.data.repository.RoomHomePlacementRepository
-import me.foxtails.lakehead.feature.home.HomeCanvas
 import me.foxtails.lakehead.feature.home.HomeCanvasViewportStyle
 import me.foxtails.lakehead.feature.home.HomeViewportInputs
 import me.foxtails.lakehead.platform.launcherapps.AppLauncher
@@ -62,6 +62,11 @@ class MainActivity : ComponentActivity() {
             BitmapFactory.decodeByteArray(png, 0, png.size)?.asImageBitmap()
         }
     }
+    private val decodedAllAppsIcons by lazy(LazyThreadSafetyMode.NONE) {
+        DecodedHomeIconCache(maxEntries = 64) { png ->
+            BitmapFactory.decodeByteArray(png, 0, png.size)?.asImageBitmap()
+        }
+    }
     private val homeViewportStyle by lazy(LazyThreadSafetyMode.NONE) {
         HomeCanvasViewportStyle(
             horizontalPaddingPx = (16f * resources.displayMetrics.density).toInt(),
@@ -100,6 +105,28 @@ class MainActivity : ComponentActivity() {
             ioDispatcher = Dispatchers.IO,
         )
     }
+    private val allAppsRouteLoader: AllAppsRouteLoader by lazy(LazyThreadSafetyMode.NONE) {
+        AllAppsRouteLoader(
+            homeId = PRODUCTION_HOME_ID,
+            repository = placementRepository,
+            catalogue = appCatalogue,
+            iconRefresher = iconRefresher,
+            encodedIcons = iconSnapshots,
+            decodedIcons = decodedAllAppsIcons,
+            columnsBound = 6,
+            rowsBound = 4096,
+            ioDispatcher = Dispatchers.IO,
+        )
+    }
+    private val addToHomeCoordinator: AddToHomeCoordinator by lazy(LazyThreadSafetyMode.NONE) {
+        AddToHomeCoordinator(
+            homeId = PRODUCTION_HOME_ID,
+            repository = placementRepository,
+            columns = 6,
+            rows = 4096,
+            ioDispatcher = Dispatchers.IO,
+        )
+    }
 
     internal var appLauncherForTest: AppLauncher? = null
 
@@ -113,16 +140,31 @@ class MainActivity : ComponentActivity() {
         // loader constructs the Room repository/database and platform icon wiring here, while its
         // actual reads and refresh work remain lifecycle-scoped and off the composition path.
         val routeLoader = homeRouteLoader
+        val allAppsLoader = allAppsRouteLoader
+        val coordinator = addToHomeCoordinator
         val routeViewportStyle = homeViewportStyle
         val productionAppLauncher = appLauncher
         setContent {
             val homeState by routeLoader.state.collectAsState()
-            val icons by routeLoader.icons.collectAsState()
-            HomeCanvas(
-                state = homeState,
-                iconsByIdentity = icons,
+            val homeIcons by routeLoader.icons.collectAsState()
+            val allAppsState by allAppsLoader.state.collectAsState()
+            val allAppsIconsMap by allAppsLoader.icons.collectAsState()
+            LauncherShell(
+                homeState = homeState,
+                homeIcons = homeIcons,
+                allAppsState = allAppsState,
+                allAppsIcons = allAppsIconsMap,
                 onLaunchApp = { identity ->
                     (appLauncherForTest ?: productionAppLauncher).launch(identity)
+                },
+                onAddToHome = { identity ->
+                    lifecycleScope.launch(Dispatchers.IO) {
+                        val result = coordinator.add(identity)
+                        if (result is AddToHomeResult.Added) {
+                            routeLoader.reload()
+                            allAppsLoader.refreshHomeMembership()
+                        }
+                    }
                 },
                 onRequestDefaultHome = ::requestDefaultHome,
                 viewportStyle = routeViewportStyle,
@@ -134,9 +176,11 @@ class MainActivity : ComponentActivity() {
         super.onStart()
         appCatalogue.start()
         homeRouteLoader.start(lifecycleScope)
+        allAppsRouteLoader.start(lifecycleScope)
     }
 
     override fun onStop() {
+        allAppsRouteLoader.stop()
         homeRouteLoader.stop()
         appCatalogue.stop()
         super.onStop()
