@@ -132,7 +132,7 @@ sealed interface HomeRenderState {
      * Pure projection of the persisted placements for [requestedHomeId].
      *
      * @param tiles projected tiles in persisted placement order.
-     * @param columns adapted column count; six is only the normal-phone reference result.
+     * @param columns adapted column count; five is only the normal-phone reference result.
      * @param extent vertical extent measured from the persisted placements.
      * @param window visible rows extended by the requested overscan.
      */

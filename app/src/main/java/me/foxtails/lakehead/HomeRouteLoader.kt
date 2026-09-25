@@ -207,7 +207,7 @@ internal class HomeRouteLoader(
 /** Finite repository bounds and explicit normal-phone visual inputs (not a responsive policy). */
 internal data class HomeRouteViewport(
     val inputs: HomeViewportInputs,
-    val columnsBound: Int = 6,
+    val columnsBound: Int = 5,
     val rowsBound: Int = 4096,
 ) {
     init { require(columnsBound > 0 && rowsBound > 0) }

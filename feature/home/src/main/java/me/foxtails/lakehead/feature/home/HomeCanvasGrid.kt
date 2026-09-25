@@ -69,7 +69,7 @@ data class HomeCanvasViewportStyle(
  *
  * - Geometry comes from `BoxWithConstraints`/density measured width/height plus
  *   [SquareCellGeometry.fromViewport] with the loaded state's adapted
- *   `columns.count` used exactly (six is only the normal-phone reference, never a clamp).
+ *   `columns.count` used exactly (five is only the normal-phone reference, never a clamp).
  * - Transient scroll state is keyed by the loaded `requestedHomeId` so each home keeps its
  *   own position and a home switch resets scrolling.
  * - The visible [GridRowWindow] is derived from the scroll offset, measured viewport height,

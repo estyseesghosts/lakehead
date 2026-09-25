@@ -6,12 +6,12 @@ import org.junit.Test
 
 class GridViewportAdaptationTest {
     @Test
-    fun normalPhoneUsesSixColumnBaseline() {
+    fun normalPhoneUsesFiveColumnBaseline() {
         assertEquals(
-            GridColumns(6),
-            GridViewportAdaptation.columnsFor(viewportWidthPx = 600, minimumCellWidthPx = 100),
+            GridColumns(5),
+            GridViewportAdaptation.columnsFor(viewportWidthPx = 500, minimumCellWidthPx = 100),
         )
-        assertEquals(6, GridColumns.NORMAL_PHONE_REFERENCE_COUNT)
+        assertEquals(5, GridColumns.NORMAL_PHONE_REFERENCE_COUNT)
     }
 
     @Test
@@ -152,7 +152,7 @@ class GridViewportAdaptationTest {
         assertIllegalArgument { GridColumns(-1) }
         assertEquals(GridColumns(1), GridColumns(1))
         assertEquals(GridColumns(5), GridColumns(5))
-        assertEquals(GridColumns(6), GridColumns(GridColumns.NORMAL_PHONE_REFERENCE_COUNT))
+        assertEquals(GridColumns(5), GridColumns(GridColumns.NORMAL_PHONE_REFERENCE_COUNT))
     }
 
     private fun assertIllegalArgument(block: () -> Unit) {

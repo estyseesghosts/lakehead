@@ -6,7 +6,7 @@ object GridViewportAdaptation {
      * Chooses columns using the exact formula
      * `max(1, floor((effectiveContentWidth + columnGapPx) / (minimumCellWidthPx + columnGapPx)))`,
      * where `effectiveContentWidth = viewportWidthPx - horizontalInsetPx - 2 * horizontalPaddingPx`.
-     * Six columns is a normal-phone reference result, not a minimum; narrower viewports may return
+     * Five columns is a normal-phone reference result, not a minimum; narrower viewports may return
      * fewer columns and wider viewports may return more, without an arbitrary maximum.
      *
      * Pixel values and resources are resolved by callers outside `core:grid`. The returned count

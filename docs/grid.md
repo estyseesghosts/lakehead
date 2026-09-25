@@ -9,7 +9,7 @@ The white-grid mockup shows the **placement coordinate system only**.
 The grid itself MUST NOT be visible in normal use.
 
 - The screen is divided into uniform logical cells.
-- On a normal phone, the mockup uses **six columns**.
+- On a normal phone, the mockup uses **five columns**.
 - Rows continue vertically as required.
 - Empty cells are transparent. They show wallpaper/background, not empty tile placeholders.
 - There are no visible grid lines.
@@ -66,7 +66,7 @@ Collision detection should also operate on rectangles rather than known tile typ
 
 All cells and tiles must share the same spacing system.
 
-For six columns:
+For five columns:
 
 ```kotlin
 cellWidth =
@@ -834,7 +834,7 @@ The implementation is correct when all of these are true:
 
 1. Empty grid cells are invisible.
 2. Grid lines are not rendered.
-3. Six logical columns fit across the normal phone layout shown.
+3. Five logical columns fit across the normal phone layout shown.
 4. Tiles may leave arbitrary empty space.
 5. Tiles do not automatically re-order or compact.
 6. Tile spans are generic integer dimensions, not a hardcoded size enum.

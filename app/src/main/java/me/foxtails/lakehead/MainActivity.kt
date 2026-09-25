@@ -100,7 +100,7 @@ class MainActivity : ComponentActivity() {
                     viewportRows = viewportRows,
                     visibleRows = GridRowWindow(0L, viewportRows),
                 ),
-                columnsBound = 6,
+                columnsBound = 5,
                 rowsBound = 4096,
             ),
             ioDispatcher = Dispatchers.IO,
@@ -114,7 +114,7 @@ class MainActivity : ComponentActivity() {
             iconRefresher = iconRefresher,
             encodedIcons = iconSnapshots,
             decodedIcons = decodedAllAppsIcons,
-            columnsBound = 6,
+            columnsBound = 5,
             rowsBound = 4096,
             ioDispatcher = Dispatchers.IO,
         )
@@ -123,7 +123,7 @@ class MainActivity : ComponentActivity() {
         AddToHomeCoordinator(
             homeId = PRODUCTION_HOME_ID,
             repository = placementRepository,
-            columns = 6,
+            columns = 5,
             rows = 4096,
             ioDispatcher = Dispatchers.IO,
         )

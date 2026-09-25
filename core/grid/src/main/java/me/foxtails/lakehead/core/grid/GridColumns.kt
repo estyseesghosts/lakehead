@@ -8,6 +8,6 @@ data class GridColumns(val count: Int) {
 
     companion object {
         /** Normal-phone reference count; this is not a minimum. */
-        const val NORMAL_PHONE_REFERENCE_COUNT: Int = 6
+        const val NORMAL_PHONE_REFERENCE_COUNT: Int = 5
     }
 }

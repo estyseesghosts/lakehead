@@ -18,7 +18,7 @@ import me.foxtails.lakehead.core.model.ItemAvailability
  *
  * Every helper delegates column, extent, and window policy to `core:grid` and performs no
  * platform, data, Compose, or Android access. Column adaptation returns the
- * [GridViewportAdaptation.columnsFor] count unchanged; six is only the normal-phone reference
+ * [GridViewportAdaptation.columnsFor] count unchanged; five is only the normal-phone reference
  * result, never a minimum or clamp.
  */
 object HomeRenderProjection {

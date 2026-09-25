@@ -43,7 +43,7 @@ internal class AllAppsRouteLoader(
     private val iconRefresher: LauncherAppsIconSnapshotRefresher,
     private val encodedIcons: AppIconSnapshotCache,
     private val decodedIcons: DecodedHomeIconCache<ImageBitmap>,
-    private val columnsBound: Int = 6,
+    private val columnsBound: Int = 5,
     private val rowsBound: Int = 4096,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) {

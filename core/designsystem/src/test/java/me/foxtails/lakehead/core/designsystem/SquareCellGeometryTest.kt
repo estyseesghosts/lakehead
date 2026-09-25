@@ -12,8 +12,8 @@ import org.junit.Test
 class SquareCellGeometryTest {
 
     @Test
-    fun referenceCountIsSixButNeverAMinimum() {
-        assertEquals(6, SquareCellGeometry.NORMAL_PHONE_REFERENCE_COLUMN_COUNT)
+    fun referenceCountIsFiveButNeverAMinimum() {
+        assertEquals(5, SquareCellGeometry.NORMAL_PHONE_REFERENCE_COLUMN_COUNT)
         assertEquals(
             GridColumns.NORMAL_PHONE_REFERENCE_COUNT,
             SquareCellGeometry.NORMAL_PHONE_REFERENCE_COLUMN_COUNT,
@@ -29,7 +29,7 @@ class SquareCellGeometryTest {
     }
 
     @Test
-    fun countsBelowSixDeriveCells() {
+    fun countsBelowFiveDeriveCells() {
         // Two columns: (1080 - 2 * 48 - 1 * 12) / 2 = 972 / 2 = 486.
         val two = SquareCellGeometry.fromViewport(
             availableWidthPx = 1080,
@@ -52,28 +52,23 @@ class SquareCellGeometryTest {
     }
 
     @Test
-    fun sixColumnPhoneReferenceMatchesSixCellGeometry() {
-        val generalized = SquareCellGeometry.fromViewport(
+    fun fiveColumnPhoneReferenceDerivesExpectedCell() {
+        // Five columns: (1080 - 2 * 48 - 4 * 12) / 5 = 936 / 5 = 187 remainder 1.
+        val five = SquareCellGeometry.fromViewport(
             availableWidthPx = 1080,
             horizontalPaddingPx = 48,
             columnGapPx = 12,
-            columns = GridColumns(6),
-        )
-        val sixCell = SixCellGeometry.fromViewport(
-            availableWidthPx = 1080,
-            horizontalPaddingPx = 48,
-            columnGapPx = 12,
+            columns = GridColumns(5),
         )
 
-        assertEquals(6, generalized.columnCount)
-        assertEquals(sixCell.cellSizePx, generalized.cellSizePx)
-        assertEquals(sixCell.columnGapPx, generalized.columnGapPx)
-        assertEquals(sixCell.rowGapPx, generalized.rowGapPx)
-        assertEquals(154, generalized.cellSizePx)
+        assertEquals(5, five.columnCount)
+        assertEquals(187, five.cellSizePx)
+        val remainder = 1080 - 2 * 48 - 4 * 12 - 5 * five.cellSizePx
+        assertEquals(1, remainder)
     }
 
     @Test
-    fun countsAboveSixDeriveCells() {
+    fun countsAboveFiveDeriveCells() {
         // Eight columns: (1080 - 2 * 24 - 7 * 8) / 8 = 976 / 8 = 122.
         val eight = SquareCellGeometry.fromViewport(
             availableWidthPx = 1080,
@@ -116,7 +111,7 @@ class SquareCellGeometryTest {
         val cases = listOf(
             Case(1080, 48, 12, 2),
             Case(1000, 16, 11, 4),
-            Case(1080, 48, 12, 6),
+            Case(1080, 48, 12, 5),
             Case(720, 24, 8, 3),
             Case(1440, 64, 16, 10),
             Case(1080, 0, 0, 8),
@@ -235,13 +230,22 @@ class SquareCellGeometryTest {
     }
 
     @Test
-    fun tileBoundsParityAtSixColumnReference() {
-        val generalized = SquareCellGeometry.fromViewport(1080, 48, 12, columnCount = 6)
-        val sixCell = SixCellGeometry.fromViewport(1080, 48, 12)
+    fun tileBoundsParityAtFiveColumnReference() {
+        // Five-column reference: derived geometry matches an explicitly constructed
+        // equivalent (SixCellGeometry stays a legacy fixed-six baseline and is no
+        // longer the reference, so parity against it is obsolete here).
+        val derived = SquareCellGeometry.fromViewport(1080, 48, 12, columnCount = 5)
+        assertEquals(187, derived.cellSizePx)
+        val manual = SquareCellGeometry(
+            columnCount = 5,
+            cellSizePx = 187,
+            columnGapPx = 12,
+            rowGapPx = 12,
+        )
 
         assertEquals(
-            TileBounds.bounds(GridPosition(2, 1), GridSpan(2, 1), sixCell),
-            TileBounds.bounds(GridPosition(2, 1), GridSpan(2, 1), generalized),
+            TileBounds.bounds(GridPosition(2, 1), GridSpan(2, 1), manual),
+            TileBounds.bounds(GridPosition(2, 1), GridSpan(2, 1), derived),
         )
     }
 

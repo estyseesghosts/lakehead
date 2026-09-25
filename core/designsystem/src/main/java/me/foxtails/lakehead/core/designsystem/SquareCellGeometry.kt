@@ -13,7 +13,7 @@ import me.foxtails.lakehead.core.grid.GridColumns
  * adaptation belong to `core:grid`; this type only converts a viewport width and a
  * supplied column count into square cell and gap pixels and measures span extents.
  *
- * Six is only the normal-phone reference arrangement (see
+ * Five is only the normal-phone reference arrangement (see
  * [NORMAL_PHONE_REFERENCE_COLUMN_COUNT], which matches
  * [GridColumns.NORMAL_PHONE_REFERENCE_COUNT]); it is never a lower bound. Narrower
  * viewports may use fewer positive columns and wider viewports may use more.

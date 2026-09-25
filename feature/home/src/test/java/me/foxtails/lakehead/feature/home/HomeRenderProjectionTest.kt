@@ -305,21 +305,21 @@ class HomeRenderProjectionTest {
         }
     }
 
-    // ---- adaptColumns: oracle + six/narrow/wide ----
+    // ---- adaptColumns: oracle + five/narrow/wide ----
 
     @Test
-    fun adaptColumns_matchesGridOracle_normalSix() {
-        val six = inputs(
+    fun adaptColumns_matchesGridOracle_normalFive() {
+        val five = inputs(
             viewportWidthPx = 1080,
             horizontalInsetPx = 0,
             horizontalPaddingPx = 0,
             columnGapPx = 12,
-            minimumCellWidthPx = 160,
+            minimumCellWidthPx = 200,
         )
-        val expected = GridViewportAdaptation.columnsFor(1080, 0, 0, 12, 160)
-        assertEquals(GridColumns(6), expected)
-        assertEquals(expected, HomeRenderProjection.adaptColumns(six))
-        assertEquals(6, HomeRenderProjection.adaptColumns(six).count)
+        val expected = GridViewportAdaptation.columnsFor(1080, 0, 0, 12, 200)
+        assertEquals(GridColumns(5), expected)
+        assertEquals(expected, HomeRenderProjection.adaptColumns(five))
+        assertEquals(5, HomeRenderProjection.adaptColumns(five).count)
     }
 
     @Test

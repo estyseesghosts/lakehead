@@ -37,7 +37,7 @@ sealed interface AddToHomeResult {
 internal class AddToHomeCoordinator(
     private val homeId: HomeId,
     private val repository: HomePlacementRepository,
-    private val columns: Int = 6,
+    private val columns: Int = 5,
     private val rows: Int = 4096,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) {
