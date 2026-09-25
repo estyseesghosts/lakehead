@@ -1,5 +1,6 @@
 package me.foxtails.lakehead
 
+import android.app.Activity
 import android.os.Bundle
 import android.app.role.RoleManager
 import android.content.Context
@@ -10,6 +11,9 @@ import androidx.activity.compose.setContent
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.lifecycleScope
 import androidx.room.Room
 import kotlinx.coroutines.Dispatchers
@@ -137,6 +141,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        enterImmersiveMode()
         // Resolve all lazy app-side dependencies before composition starts. In particular, the
         // loader constructs the Room repository/database and platform icon wiring here, while its
         // actual reads and refresh work remain lifecycle-scoped and off the composition path.
@@ -199,10 +204,36 @@ class MainActivity : ComponentActivity() {
         super.onStop()
     }
 
+    override fun onResume() {
+        super.onResume()
+        enterImmersiveMode()
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) {
+            enterImmersiveMode()
+        }
+    }
+
     private fun requestDefaultHome() {
         val roleManager = getSystemService(Context.ROLE_SERVICE) as RoleManager
         if (roleManager.isRoleAvailable(RoleManager.ROLE_HOME)) {
             requestHomeRole.launch(roleManager.createRequestRoleIntent(RoleManager.ROLE_HOME))
         }
+    }
+}
+
+private fun Activity.enterImmersiveMode() {
+    WindowCompat.setDecorFitsSystemWindows(window, false)
+
+    WindowCompat.getInsetsController(
+        window,
+        window.decorView,
+    ).apply {
+        systemBarsBehavior =
+            WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+
+        hide(WindowInsetsCompat.Type.systemBars())
     }
 }
