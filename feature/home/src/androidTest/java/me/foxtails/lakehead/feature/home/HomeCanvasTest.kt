@@ -549,7 +549,7 @@ class HomeCanvasTest {
                     "Wide App",
                     column = 0,
                     row = 0,
-                    spanColumns = 2,
+                    spanColumns = 3,
                     spanRows = 1,
                 ),
                 iconBitmap = null,
@@ -589,6 +589,33 @@ class HomeCanvasTest {
         composeRule.runOnIdle { launched = null }
         regions[1].assertExists().performClick()
         composeRule.runOnIdle { assertEquals(personal, launched) }
+    }
+
+    @Test
+    fun homeCanvasTile_clampsOverCountPlaceholders_toSpanMax() {
+        composeRule.setContent {
+            HomeCanvasTile(
+                tile = tile(
+                    "square",
+                    personal,
+                    "Square App",
+                    column = 0,
+                    row = 0,
+                    spanColumns = 2,
+                    spanRows = 2,
+                ),
+                iconBitmap = null,
+                onLaunchApp = {},
+                // 2x2 capacity is 1: over-count renders max instead of crashing.
+                shortcutPlaceholders = 4,
+            )
+        }
+        composeRule.waitForIdle()
+
+        composeRule.onAllNodesWithContentDescription("Shortcut placeholder 1").assertCountEquals(1)
+        composeRule.onAllNodesWithContentDescription("Shortcut placeholder 2").assertCountEquals(0)
+        // Body/Symbol separation survives clamping.
+        composeRule.onAllNodesWithContentDescription("Square App").assertCountEquals(2)
     }
 
     // ---- Ownership/purity evidence ----

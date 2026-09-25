@@ -34,7 +34,9 @@ import me.foxtails.lakehead.core.model.ItemId
  *   caller-driven [AppTileState.isSelected] border and announces
  *   `stateDescription = "Editing <label>, row R column C"`.
  * - [shortcutPlaceholders] forwards test/mock-only visual placeholder dots to
- *   [AppTile] (default 0 renders none); no shortcut inventory, platform wiring or
+ *   [AppTile] (default 0 renders none), clamped to
+ *   `0..TileShortcutPolicy.maxShortcutSlots(tile.span)` so over-counts render
+ *   max instead of crashing; no shortcut inventory, platform wiring or
  *   slot click handling lives here.
  */
 @Composable
@@ -51,6 +53,10 @@ internal fun HomeCanvasTile(
     val rawLabel = tile.label
     val label = if (rawLabel.isNullOrBlank()) UNAVAILABLE_LABEL else rawLabel
     val isEditing = isEditActive && tile.itemId == activeItemId
+    // Bottom-edge capacity: the icon occupies one slot, so clamp forwarded
+    // placeholders to 0..max (over-counts render max, never crash).
+    val clampedPlaceholders =
+        shortcutPlaceholders.coerceIn(0, TileShortcutPolicy.maxShortcutSlots(tile.span))
     val tileModifier = when {
         isEditing -> modifier.semantics {
             stateDescription =
@@ -93,7 +99,7 @@ internal fun HomeCanvasTile(
         } else {
             null
         },
-        shortcutPlaceholders = shortcutPlaceholders,
+        shortcutPlaceholders = clampedPlaceholders,
     )
 }
 

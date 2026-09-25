@@ -510,7 +510,8 @@ class AppTileTest {
             LauncherTheme {
                 Box(Modifier.size(320.dp, 160.dp)) {
                     AppTile(
-                        state = AppTileState(label = "Calendar", span = GridSpan(2, 1)),
+                        // 3x1 capacity is columns - 1 = 2, so both dots render.
+                        state = AppTileState(label = "Calendar", span = GridSpan(3, 1)),
                         onBodyClick = { bodyClicks++ },
                         onSymbolClick = { symbolClicks++ },
                         shortcutPlaceholders = 2,
@@ -552,6 +553,56 @@ class AppTileTest {
             assertEquals(1, bodyClicks)
             assertEquals(1, symbolClicks)
         }
+    }
+
+    @Test
+    fun overCountPlaceholders_clampedToSpanMax_neverCrashes() {
+        // 1x1 capacity is 0: over-count renders none instead of crashing.
+        composeRule.setContent {
+            LauncherTheme {
+                AppTile(
+                    state = AppTileState(label = "Calendar", span = GridSpan(1, 1)),
+                    onBodyClick = {}, onSymbolClick = {},
+                    shortcutPlaceholders = 3,
+                )
+            }
+        }
+        composeRule.onAllNodesWithContentDescription("Shortcut placeholder 1").assertCountEquals(0)
+
+        // 2x2 capacity is columns - 1 = 1: over-count renders exactly one dot.
+        composeRule.setContent {
+            LauncherTheme {
+                Box(Modifier.size(320.dp, 320.dp)) {
+                    AppTile(
+                        state = AppTileState(label = "Calendar", span = GridSpan(2, 2)),
+                        onBodyClick = {}, onSymbolClick = {},
+                        shortcutPlaceholders = 5,
+                    )
+                }
+            }
+        }
+        composeRule.waitForIdle()
+        composeRule.onAllNodesWithContentDescription("Shortcut placeholder 1").assertCountEquals(1)
+        composeRule.onAllNodesWithContentDescription("Shortcut placeholder 2").assertCountEquals(0)
+    }
+
+    @Test
+    fun singleColumnCapacity_followsRowsMinusOne() {
+        // 1x2 capacity is rows - 1 = 1: requesting 3 renders exactly one dot.
+        composeRule.setContent {
+            LauncherTheme {
+                Box(Modifier.size(160.dp, 320.dp)) {
+                    AppTile(
+                        state = AppTileState(label = "Calendar", span = GridSpan(1, 2)),
+                        onBodyClick = {}, onSymbolClick = {},
+                        shortcutPlaceholders = 3,
+                    )
+                }
+            }
+        }
+        composeRule.waitForIdle()
+        composeRule.onAllNodesWithContentDescription("Shortcut placeholder 1").assertCountEquals(1)
+        composeRule.onAllNodesWithContentDescription("Shortcut placeholder 2").assertCountEquals(0)
     }
 
     private fun boundsInRoot(interaction: SemanticsNodeInteraction): Rect {

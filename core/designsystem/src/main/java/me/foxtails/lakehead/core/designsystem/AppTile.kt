@@ -148,7 +148,11 @@ internal fun resolveTileColors(
  * never exposes one.
  * @param shortcutPlaceholders test/mock-only count of visual-only neutral-dot
  * shortcut glyphs in the ShortcutSlot strip (default 0, so 1x1 tiles show none).
- * Glyphs are inert: no click/long-click handling and no text labels.
+ * Glyphs are inert: no click/long-click handling and no text labels. The count
+ * is defensively clamped to the bottom-edge capacity for [AppTileState.span]
+ * (the icon occupies one slot: single-column tiles allow `rows - 1`, wider
+ * tiles allow `columns - 1`, coerced to >= 0), so over-counts render max
+ * instead of crashing; negative counts are still rejected.
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -172,6 +176,14 @@ fun AppTile(
     require(shortcutPlaceholders >= 0) {
         "shortcutPlaceholders must be >= 0"
     }
+    // Bottom-edge capacity: the icon occupies one slot, so clamp over-counts to
+    // max for this span (single-column: rows - 1; wider: columns - 1).
+    val maxShortcutSlots = if (state.span.columns == 1) {
+        (state.span.rows - 1).coerceAtLeast(0)
+    } else {
+        (state.span.columns - 1).coerceAtLeast(0)
+    }
+    val renderedPlaceholders = shortcutPlaceholders.coerceAtMost(maxShortcutSlots)
     val resolvedDescription = contentDescription ?: state.label
     val resolvedSymbolDescription = symbolContentDescription ?: resolvedDescription
     val tileColors = resolveTileColors(role = state.colorRole, isPressed = state.isPressed)
@@ -267,7 +279,7 @@ fun AppTile(
                 .padding(dimensions.tilePadding),
             horizontalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            repeat(shortcutPlaceholders) { index ->
+            repeat(renderedPlaceholders) { index ->
                 Box(
                     modifier = Modifier
                         .size(14.dp)
