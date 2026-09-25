@@ -8,6 +8,7 @@ import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.platform.LocalContext
 
 /**
@@ -33,6 +34,7 @@ internal val LauncherFallbackLightColors = lightColorScheme()
 @Composable
 fun LauncherTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
+    dimensions: LauncherDimensions = DefaultLauncherDimensions,
     content: @Composable () -> Unit,
 ) {
     val colorScheme = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -41,8 +43,10 @@ fun LauncherTheme(
     } else {
         if (darkTheme) LauncherFallbackDarkColors else LauncherFallbackLightColors
     }
-    MaterialTheme(
-        colorScheme = colorScheme,
-        content = content,
-    )
+    CompositionLocalProvider(LocalLauncherDimensions provides dimensions) {
+        MaterialTheme(
+            colorScheme = colorScheme,
+            content = content,
+        )
+    }
 }

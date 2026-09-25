@@ -134,6 +134,7 @@ fun AppTile(
     val resolvedDescription = contentDescription ?: state.label
     val tileColors = resolveTileColors(role = state.colorRole, isPressed = state.isPressed)
     val containerColor = tileColors.container
+    val dimensions = LocalLauncherDimensions.current
 
     Box(
         modifier = modifier
@@ -162,13 +163,13 @@ fun AppTile(
                 onClick = onClick,
                 role = Role.Button,
             )
-            .padding(8.dp),
+            .padding(dimensions.tilePadding),
         contentAlignment = Alignment.Center,
     ) {
         if (state.span.columns > state.span.rows) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
+                horizontalArrangement = Arrangement.spacedBy(dimensions.tilePadding, Alignment.CenterHorizontally),
             ) {
                 if (icon != null) {
                     icon()
