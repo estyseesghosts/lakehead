@@ -25,6 +25,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import me.foxtails.lakehead.core.grid.GridSpan
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -279,6 +280,40 @@ class AppTileTest {
             "absent onLongClick must expose no long-click action",
             node.config.contains(SemanticsActions.OnLongClick),
         )
+    }
+
+    @Test
+    fun normalAndAccentResolveToDifferentColorsLight() {
+        var normal: TileColors? = null
+        var accent: TileColors? = null
+        composeRule.setContent {
+            LauncherTheme(darkTheme = false) {
+                normal = resolveTileColors(TileColorRole.Normal, isPressed = false)
+                accent = resolveTileColors(TileColorRole.Accent, isPressed = false)
+            }
+        }
+
+        composeRule.runOnIdle {
+            assertNotEquals(normal!!.container, accent!!.container)
+            assertNotEquals(normal!!.content, accent!!.content)
+        }
+    }
+
+    @Test
+    fun normalAndAccentResolveToDifferentColorsDark() {
+        var normal: TileColors? = null
+        var accent: TileColors? = null
+        composeRule.setContent {
+            LauncherTheme(darkTheme = true) {
+                normal = resolveTileColors(TileColorRole.Normal, isPressed = false)
+                accent = resolveTileColors(TileColorRole.Accent, isPressed = false)
+            }
+        }
+
+        composeRule.runOnIdle {
+            assertNotEquals(normal!!.container, accent!!.container)
+            assertNotEquals(normal!!.content, accent!!.content)
+        }
     }
 
     private fun centerInRoot(interaction: SemanticsNodeInteraction): Offset {

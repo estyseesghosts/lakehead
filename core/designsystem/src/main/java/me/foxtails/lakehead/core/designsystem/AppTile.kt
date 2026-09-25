@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -41,6 +42,7 @@ import me.foxtails.lakehead.core.grid.GridSpan
 data class AppTileState(
     val label: String,
     val span: GridSpan = GridSpan(1, 1),
+    val colorRole: TileColorRole = TileColorRole.Normal,
     val isSelected: Boolean = false,
     val isPressed: Boolean = false,
 ) {
@@ -54,12 +56,49 @@ object AppTileDefaults {
     /** `stateDescription` announced when [AppTileState.isPressed] is true. */
     const val PressedStateDescription = "Pressed"
 
-    val ContainerColor = Color(0xFF1E2126)
-    val SelectedContainerColor = Color(0xFF2C435E)
-    val PressedContainerColor = Color(0xFF101216)
-    val SelectedBorderColor = Color(0xFF8AB4F8)
-    val ContentColor = Color(0xFFFFFFFF)
     val TileShape = RoundedCornerShape(12.dp)
+}
+
+/**
+ * Resolved semantic tile colors for one [TileColorRole].
+ *
+ * @param container tile background (pressed state darkens via alpha).
+ * @param content label/icon tint on [container].
+ * @param selectionBorder outline drawn when the tile is selected.
+ */
+internal data class TileColors(
+    val container: Color,
+    val content: Color,
+    val selectionBorder: Color,
+)
+
+/**
+ * Resolves [role] to Material dynamic colors.
+ *
+ * See `docs/grid.md` section 12: Normal resolves to
+ * `surfaceContainer`/`onSurface`, Accent to `primaryContainer`/`onPrimaryContainer`;
+ * the pressed container is the base at 70% alpha and the selection border is
+ * `scheme.primary`. Only the role is persisted, never these resolved colors.
+ */
+@Composable
+internal fun resolveTileColors(
+    role: TileColorRole,
+    isPressed: Boolean,
+): TileColors {
+    val scheme = MaterialTheme.colorScheme
+    val baseContainer = when (role) {
+        TileColorRole.Normal -> scheme.surfaceContainer
+        TileColorRole.Accent -> scheme.primaryContainer
+    }
+    val baseContent = when (role) {
+        TileColorRole.Normal -> scheme.onSurface
+        TileColorRole.Accent -> scheme.onPrimaryContainer
+    }
+    return TileColors(
+        container = if (isPressed) baseContainer.copy(alpha = 0.7f) else baseContainer,
+        content = baseContent,
+        selectionBorder = scheme.primary,
+    )
 }
 
 /**
@@ -93,11 +132,8 @@ fun AppTile(
         "contentDescription must be null or non-blank"
     }
     val resolvedDescription = contentDescription ?: state.label
-    val containerColor = when {
-        state.isPressed -> AppTileDefaults.PressedContainerColor
-        state.isSelected -> AppTileDefaults.SelectedContainerColor
-        else -> AppTileDefaults.ContainerColor
-    }
+    val tileColors = resolveTileColors(role = state.colorRole, isPressed = state.isPressed)
+    val containerColor = tileColors.container
 
     Box(
         modifier = modifier
@@ -107,7 +143,7 @@ fun AppTile(
                 if (state.isSelected) {
                     Modifier.border(
                         2.dp,
-                        AppTileDefaults.SelectedBorderColor,
+                        tileColors.selectionBorder,
                         AppTileDefaults.TileShape,
                     )
                 } else {
@@ -137,7 +173,7 @@ fun AppTile(
                 if (icon != null) {
                     icon()
                 }
-                AppTileLabel(state.label)
+                AppTileLabel(state.label, tileColors.content)
             }
         } else {
             Column(
@@ -147,18 +183,18 @@ fun AppTile(
                 if (icon != null) {
                     icon()
                 }
-                AppTileLabel(state.label)
+                AppTileLabel(state.label, tileColors.content)
             }
         }
     }
 }
 
 @Composable
-private fun AppTileLabel(label: String) {
+private fun AppTileLabel(label: String, contentColor: Color) {
     BasicText(
         text = label,
         style = TextStyle(
-            color = AppTileDefaults.ContentColor,
+            color = contentColor,
             fontSize = 12.sp,
             textAlign = TextAlign.Center,
         ),

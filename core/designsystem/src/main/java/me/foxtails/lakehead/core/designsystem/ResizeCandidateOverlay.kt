@@ -5,8 +5,8 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.IntOffset
@@ -18,8 +18,7 @@ import me.foxtails.lakehead.core.grid.GridSpan
  * Ghost frame preview during a resize drag.
  *
  * Renders a non-interactive outline at the candidate span position. Valid candidates draw
- * a 2dp outline in [AppTileDefaults.SelectedBorderColor]; invalid candidates draw in
- * [AppTileDefaults.PressedContainerColor].
+ * a 2dp outline in `scheme.primary`; invalid candidates draw in `scheme.error`.
  *
  * Position reuses [TileBounds.bounds] for the absolute candidate frame, rebased via the
  * caller-provided [rowOrigin].
@@ -45,10 +44,11 @@ fun ResizeCandidateOverlay(
         rowOrigin = rowOrigin,
         rowStridePx = rowStridePx,
     )
+    val scheme = MaterialTheme.colorScheme
     val borderColor = if (isValid) {
-        AppTileDefaults.SelectedBorderColor
+        scheme.primary
     } else {
-        AppTileDefaults.PressedContainerColor
+        scheme.error
     }
     val widthDp = with(density) { absolute.width.toDp() }
     val heightDp = with(density) { absolute.height.toDp() }

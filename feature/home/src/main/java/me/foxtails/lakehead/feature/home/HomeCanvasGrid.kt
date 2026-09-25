@@ -19,6 +19,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.PointerInputChange
 import androidx.compose.ui.input.pointer.pointerInput
@@ -517,8 +518,8 @@ internal const val MOVE_CANDIDATE_OVERLAY_TAG: String = "move-candidate-overlay"
  *
  * Position reuses [TileBounds.bounds] for the absolute candidate frame, rebased around the
  * windowed container's [rowOrigin] via [rebasedOverlayTop] so the outline lands on the same
- * content coordinates the tiles are placed at. A valid candidate draws a 2dp outline in the
- * selected border color; any other validity draws the pressed color.
+ * content coordinates the tiles are placed at. A valid candidate draws a 2dp outline in
+ * `scheme.primary`; any other validity draws `scheme.error`.
  */
 @Composable
 private fun MoveCandidateOverlay(
@@ -539,10 +540,11 @@ private fun MoveCandidateOverlay(
         rowOrigin = rowOrigin,
         rowStridePx = rowStridePx,
     )
+    val scheme = MaterialTheme.colorScheme
     val borderColor = if (active.candidateValidity == CandidateValidity.VALID) {
-        AppTileDefaults.SelectedBorderColor
+        scheme.primary
     } else {
-        AppTileDefaults.PressedContainerColor
+        scheme.error
     }
     val widthDp = with(density) { absolute.width.toDp() }
     val heightDp = with(density) { absolute.height.toDp() }
