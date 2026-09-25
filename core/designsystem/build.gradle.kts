@@ -22,6 +22,7 @@ dependencies {
     implementation(platform("androidx.compose:compose-bom:2024.09.00"))
     implementation("androidx.compose.foundation:foundation")
     implementation("androidx.compose.ui:ui")
+    implementation("androidx.compose.material3:material3")
     testImplementation("junit:junit:4.13.2")
 
     androidTestImplementation(platform("androidx.compose:compose-bom:2024.09.00"))
