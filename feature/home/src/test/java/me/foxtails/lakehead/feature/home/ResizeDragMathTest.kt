@@ -139,11 +139,16 @@ class ResizeDragMathTest {
 
     @Test
     fun quantize_exactMatch_returnsSame() {
-        assertEquals(LogicalSpan(1, 1), RenderableSpans.quantize(LogicalSpan(1, 1)))
-        assertEquals(LogicalSpan(2, 1), RenderableSpans.quantize(LogicalSpan(2, 1)))
-        assertEquals(LogicalSpan(1, 2), RenderableSpans.quantize(LogicalSpan(1, 2)))
-        assertEquals(LogicalSpan(2, 2), RenderableSpans.quantize(LogicalSpan(2, 2)))
-        assertEquals(LogicalSpan(4, 2), RenderableSpans.quantize(LogicalSpan(4, 2)))
+        // All 14 allowlist entries must round-trip exactly.
+        val expected = listOf(
+            LogicalSpan(1, 1), LogicalSpan(2, 1), LogicalSpan(1, 2), LogicalSpan(2, 2),
+            LogicalSpan(1, 3), LogicalSpan(2, 3), LogicalSpan(3, 2), LogicalSpan(4, 2),
+            LogicalSpan(5, 2), LogicalSpan(3, 3), LogicalSpan(4, 3), LogicalSpan(5, 3),
+            LogicalSpan(4, 4), LogicalSpan(5, 4),
+        )
+        for (entry in expected) {
+            assertEquals("exact match for ${entry.columns}x${entry.rows}", entry, RenderableSpans.quantize(entry))
+        }
     }
 
     @Test
@@ -153,20 +158,43 @@ class ResizeDragMathTest {
     }
 
     @Test
-    fun quantize_3x2_nearestIs2x2() {
-        // distance to 2x2 = 1; distance to 4x2 = 1; tie → earlier entry (2x2) wins
-        assertEquals(LogicalSpan(2, 2), RenderableSpans.quantize(LogicalSpan(3, 2)))
+    fun quantize_2x4_nearestIs2x3_smallerWins() {
+        // distance to 2x3 = |0|+|1| = 1; distance to 1x3 = |1|+|1| = 2
+        // But 2x3 is exact distance 1, so no tie — just the closest.
+        // Verify it does NOT round up to 3x3 (distance 1+1=2).
+        assertEquals(LogicalSpan(2, 3), RenderableSpans.quantize(LogicalSpan(2, 4)))
     }
 
     @Test
     fun quantize_1x1_clampedFromBelow() {
-        // Anything below smallest → smallest
+        // Anything below smallest → smallest (1x1 is the minimum)
         assertEquals(LogicalSpan(1, 1), RenderableSpans.quantize(LogicalSpan(1, 1)))
     }
 
     @Test
-    fun quantize_5x3_nearestIs4x2() {
-        // distance to 4x2 = 1+1=2; distance to 2x2 = 3+1=4
-        assertEquals(LogicalSpan(4, 2), RenderableSpans.quantize(LogicalSpan(5, 3)))
+    fun quantize_6x5_nearestIs5x4() {
+        // distance to 5x4 = |1|+|1| = 2; distance to 4x4 = |2|+|1| = 3; nearest is 5x4
+        assertEquals(LogicalSpan(5, 4), RenderableSpans.quantize(LogicalSpan(6, 5)))
+    }
+
+    // ---- column-filtered quantize ----
+
+    @Test
+    fun quantize_columnsFiltersOutWiderEntries() {
+        // With columns=4, entries with columns > 4 (i.e. 5x2, 5x3, 5x4) are excluded.
+        // 5x3 → nearest fitting entry: 4x3 distance |1|+|0| = 1.
+        assertEquals(LogicalSpan(4, 3), RenderableSpans.quantize(LogicalSpan(5, 3), columns = 4))
+    }
+
+    @Test
+    fun quantize_columnsNarrowViewport_5x2FilteredTo4x2() {
+        // columns=4: 5x2 → nearest fitting: 4x2 distance 1, 3x2 distance 2. Picks 4x2.
+        assertEquals(LogicalSpan(4, 2), RenderableSpans.quantize(LogicalSpan(5, 2), columns = 4))
+    }
+
+    @Test
+    fun quantize_columns3_excludes4wideAnd5wide() {
+        // columns=3: max allowed width = 3. 4x3 → nearest fitting: 3x3 distance 1.
+        assertEquals(LogicalSpan(3, 3), RenderableSpans.quantize(LogicalSpan(4, 3), columns = 3))
     }
 }

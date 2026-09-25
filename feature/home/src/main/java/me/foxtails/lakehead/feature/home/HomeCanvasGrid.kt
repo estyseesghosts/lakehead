@@ -293,7 +293,7 @@ internal fun HomeCanvasGrid(
                                 rowGapPx = geometry.rowGapPx.toFloat(),
                                 originXPx = originX.toFloat(),
                             )
-                            val quantized = RenderableSpans.quantize(rawSpan)
+                            val quantized = RenderableSpans.quantize(rawSpan, columns)
                             editSession = sessionState.value.updateResizeCandidate(
                                 quantized,
                                 loaded.tiles,
