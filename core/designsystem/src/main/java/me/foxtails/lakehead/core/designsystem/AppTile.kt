@@ -3,11 +3,14 @@ package me.foxtails.lakehead.core.designsystem
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
@@ -95,45 +98,68 @@ internal fun resolveTileColors(
 }
 
 /**
- * Small reusable icon-only app-tile primitive.
+ * Small reusable icon-only app-tile primitive with sibling hit regions.
  *
  * Custom Compose Foundation/graphics/text only: no Material product components, no app
  * inventory, database, persistence, navigation or business logic. Callers supply the
- * accessibility [AppTileState.label], the optional caller-composed [icon] slot, click and
- * optional long-click callbacks, and an optional [contentDescription] override (which
- * defaults to the label so the tile always has an accessible name). No text label is
- * ever rendered on the home-tile path.
+ * accessibility [AppTileState.label], the optional caller-composed [icon] slot, separate
+ * body/symbol click callbacks and an optional Body-only long-click callback, plus
+ * optional [contentDescription]/[symbolContentDescription] overrides (each defaults to
+ * the label so every region always has an accessible name). No text label is ever
+ * rendered on the home-tile path.
  *
- * Layout: the outer [Box] is a full-size anchor container (background, selection
- * border, semantics, click handling only — never centered content). The inner [Box]
- * fills that container and anchors the [icon] slot via [symbolAlignment]: tall 1x2
- * tiles bottom-center the symbol, every other span bottom-ends it, so icons are never
- * centered. A 1x1 tile is full-bleed (no [LauncherDimensions.tilePadding] inset; the
- * icon slot fills the whole tile), while larger spans keep the tile-padding inset and
- * the caller's natural symbol size anchored within it.
+ * Layout: the outer [Box] is a non-clickable anchor container (background and
+ * selection border only). Its children are siblings, never nested clickables, in
+ * TalkBack order:
  *
- * Accessibility: the tile merges descendants into a single focusable node with
- * [Role.Button], the resolved content description, the `selected` flag for
- * [AppTileState.isSelected], and [AppTileDefaults.PressedStateDescription] while
- * [AppTileState.isPressed] is true. Pressed/selected visuals are caller-driven through
+ * - TileBody: full-size [Box.combinedClickable] (`onClick = onBodyClick`,
+ *   Body-only `onLongClick`, [Role.Button]) with `semantics(mergeDescendants = true)`.
+ * - AppLaunchButton: [Box.clickable] (`onClick = onSymbolClick`, [Role.Button])
+ *   wrapping the [icon] slot, with `semantics(mergeDescendants = true)`.
+ * - ShortcutSlot [Row]: empty visual-only strip in this slice (no glyphs, no
+ *   clickable, never focusable); a trailing sibling so order stays Body → Symbol →
+ *   slots when D3 adds placeholder glyphs.
+ *
+ * A 1x1 tile is full-bleed (no [LauncherDimensions.tilePadding] inset; the symbol
+ * region fills the whole tile), while larger spans keep the tile-padding inset with
+ * the caller's natural symbol size anchored via [symbolAlignment]: tall 1x2 tiles
+ * bottom-center the symbol, every other span bottom-ends it, so icons are never
+ * centered.
+ *
+ * Accessibility: TileBody merges descendants into a focusable node with the resolved
+ * content description, the `selected` flag for [AppTileState.isSelected], and
+ * [AppTileDefaults.PressedStateDescription] while [AppTileState.isPressed] is true.
+ * Selected/pressed semantics live on TileBody only; the symbol region exposes only
+ * its own content description. Pressed/selected visuals are caller-driven through
  * state; the tile holds no state and issues no events beyond the supplied callbacks.
  *
- * @param onLongClick when null the tile exposes no long-click action.
+ * @param onBodyClick invoked from TileBody; callers keep it launch-equivalent to
+ * [onSymbolClick] today (Body diverges to a notification surface later per
+ * `docs/grid.md` section 10).
+ * @param onSymbolClick invoked from AppLaunchButton.
+ * @param onLongClick when null TileBody exposes no long-click action; AppLaunchButton
+ * never exposes one.
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun AppTile(
     state: AppTileState,
-    onClick: () -> Unit,
+    onBodyClick: () -> Unit,
+    onSymbolClick: () -> Unit,
     modifier: Modifier = Modifier,
     icon: (@Composable () -> Unit)? = null,
     contentDescription: String? = null,
+    symbolContentDescription: String? = null,
     onLongClick: (() -> Unit)? = null,
 ) {
     require(contentDescription == null || contentDescription.isNotBlank()) {
         "contentDescription must be null or non-blank"
     }
+    require(symbolContentDescription == null || symbolContentDescription.isNotBlank()) {
+        "symbolContentDescription must be null or non-blank"
+    }
     val resolvedDescription = contentDescription ?: state.label
+    val resolvedSymbolDescription = symbolContentDescription ?: resolvedDescription
     val tileColors = resolveTileColors(role = state.colorRole, isPressed = state.isPressed)
     val containerColor = tileColors.container
     val dimensions = LocalLauncherDimensions.current
@@ -153,33 +179,75 @@ fun AppTile(
                 } else {
                     Modifier
                 },
-            )
-            .semantics(mergeDescendants = true) {
-                this.contentDescription = resolvedDescription
-                this.selected = state.isSelected
-                if (state.isPressed) {
-                    this.stateDescription = AppTileDefaults.PressedStateDescription
-                }
-            }
-            .combinedClickable(
-                onLongClick = onLongClick,
-                onClick = onClick,
-                role = Role.Button,
             ),
     ) {
         val isFullBleed = state.span == GridSpan(1, 1)
+        // TileBody: primary hit region; the only region with a long-click action.
         Box(
-            modifier = if (isFullBleed) {
-                Modifier.fillMaxSize()
-            } else {
-                Modifier.fillMaxSize().padding(dimensions.tilePadding)
-            },
-            contentAlignment = symbolAlignment(state.span),
-            propagateMinConstraints = isFullBleed,
-        ) {
-            if (icon != null) {
-                icon()
+            modifier = Modifier
+                .fillMaxSize()
+                .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+                .semantics(mergeDescendants = true) {
+                    this.contentDescription = resolvedDescription
+                    this.selected = state.isSelected
+                    if (state.isPressed) {
+                        this.stateDescription = AppTileDefaults.PressedStateDescription
+                    }
+                }
+                .combinedClickable(
+                    onLongClick = onLongClick,
+                    onClick = onBodyClick,
+                    role = Role.Button,
+                ),
+        )
+        // AppLaunchButton: symbol hit region wrapping the icon slot; a sibling of
+        // TileBody, never nested inside it.
+        if (isFullBleed) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+                    .semantics(mergeDescendants = true) {
+                        this.contentDescription = resolvedSymbolDescription
+                    }
+                    .clickable(
+                        onClick = onSymbolClick,
+                        role = Role.Button,
+                    ),
+                contentAlignment = Alignment.Center,
+                propagateMinConstraints = true,
+            ) {
+                if (icon != null) {
+                    icon()
+                }
+            }
+        } else {
+            Box(
+                modifier = Modifier
+                    .align(symbolAlignment(state.span))
+                    .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+                    .padding(dimensions.tilePadding)
+                    .semantics(mergeDescendants = true) {
+                        this.contentDescription = resolvedSymbolDescription
+                    }
+                    .clickable(
+                        onClick = onSymbolClick,
+                        role = Role.Button,
+                    ),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (icon != null) {
+                    icon()
+                }
             }
         }
+        // ShortcutSlot row: empty visual-only strip (D3 adds placeholder glyphs here).
+        // No glyphs, no clickable, never focusable.
+        Row(
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+                .semantics(mergeDescendants = true) {},
+        ) {}
     }
 }

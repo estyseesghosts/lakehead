@@ -16,6 +16,7 @@ import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasStateDescription
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -59,12 +60,13 @@ class AppTileTest {
             LauncherTheme {
                 AppTile(
                     state = AppTileState(label = "Calendar", span = GridSpan(1, 1)),
-                    onClick = {},
+                    onBodyClick = {}, onSymbolClick = {},
                 )
             }
         }
 
-        composeRule.onNodeWithContentDescription("Calendar").assertExists()
+        // TileBody and AppLaunchButton both default to the label as accessible name.
+        composeRule.onAllNodesWithContentDescription("Calendar").assertCountEquals(2)
         composeRule.onNodeWithText("Calendar").assertDoesNotExist()
     }
 
@@ -84,7 +86,7 @@ class AppTileTest {
             composeRule.setContent {
                 AppTile(
                     state = AppTileState(label = "Calendar", span = GridSpan(1, 1)),
-                    onClick = {},
+                    onBodyClick = {}, onSymbolClick = {},
                     contentDescription = "  ",
                 )
             }
@@ -96,7 +98,7 @@ class AppTileTest {
         composeRule.setContent {
             AppTile(
                 state = AppTileState(label = "Calendar", span = GridSpan(1, 1)),
-                onClick = {},
+                onBodyClick = {}, onSymbolClick = {},
                 icon = { Box(Modifier.testTag("tile-icon").size(24.dp)) },
             )
         }
@@ -110,14 +112,14 @@ class AppTileTest {
             LauncherTheme {
                 AppTile(
                     state = AppTileState(label = "Calendar", span = GridSpan(1, 1)),
-                    onClick = {},
+                    onBodyClick = {}, onSymbolClick = {},
                     icon = null,
                 )
             }
         }
 
         composeRule.onNodeWithTag("tile-icon", useUnmergedTree = true).assertDoesNotExist()
-        composeRule.onNodeWithContentDescription("Calendar").assertExists()
+        composeRule.onAllNodesWithContentDescription("Calendar").assertCountEquals(2)
         composeRule.onNodeWithText("Calendar").assertDoesNotExist()
     }
 
@@ -128,7 +130,7 @@ class AppTileTest {
                 Box(Modifier.size(320.dp, 160.dp)) {
                     AppTile(
                         state = AppTileState(label = "Calendar", span = GridSpan(2, 1)),
-                        onClick = {},
+                        onBodyClick = {}, onSymbolClick = {},
                         icon = { Box(Modifier.testTag("tile-icon").size(24.dp)) },
                     )
                 }
@@ -136,7 +138,8 @@ class AppTileTest {
         }
         composeRule.waitForIdle()
 
-        val tileBounds = boundsInRoot(composeRule.onNodeWithContentDescription("Calendar"))
+        // Tile bounds come from TileBody (index 0: first sibling, full-size region).
+        val tileBounds = boundsInRoot(composeRule.onAllNodesWithContentDescription("Calendar")[0])
         val iconBounds = boundsInRoot(composeRule.onNodeWithTag("tile-icon", useUnmergedTree = true))
         assertTrue(
             "2x1 span must anchor the icon to the tile end " +
@@ -158,7 +161,7 @@ class AppTileTest {
                 Box(Modifier.size(160.dp, 320.dp)) {
                     AppTile(
                         state = AppTileState(label = "Calendar", span = GridSpan(1, 2)),
-                        onClick = {},
+                        onBodyClick = {}, onSymbolClick = {},
                         icon = { Box(Modifier.testTag("tile-icon").size(24.dp)) },
                     )
                 }
@@ -166,7 +169,8 @@ class AppTileTest {
         }
         composeRule.waitForIdle()
 
-        val tileBounds = boundsInRoot(composeRule.onNodeWithContentDescription("Calendar"))
+        // Tile bounds come from TileBody (index 0: first sibling, full-size region).
+        val tileBounds = boundsInRoot(composeRule.onAllNodesWithContentDescription("Calendar")[0])
         val iconBounds = boundsInRoot(composeRule.onNodeWithTag("tile-icon", useUnmergedTree = true))
         assertTrue(
             "1x2 span must x-center the icon " +
@@ -183,7 +187,7 @@ class AppTileTest {
                 Box(Modifier.size(320.dp, 320.dp)) {
                     AppTile(
                         state = AppTileState(label = "Calendar", span = GridSpan(2, 2)),
-                        onClick = {},
+                        onBodyClick = {}, onSymbolClick = {},
                         icon = { Box(Modifier.testTag("tile-icon").size(24.dp)) },
                     )
                 }
@@ -191,7 +195,8 @@ class AppTileTest {
         }
         composeRule.waitForIdle()
 
-        val tileBounds = boundsInRoot(composeRule.onNodeWithContentDescription("Calendar"))
+        // Tile bounds come from TileBody (index 0: first sibling, full-size region).
+        val tileBounds = boundsInRoot(composeRule.onAllNodesWithContentDescription("Calendar")[0])
         val iconBounds = boundsInRoot(composeRule.onNodeWithTag("tile-icon", useUnmergedTree = true))
         assertTrue(
             "2x2 span must anchor the icon to the tile end " +
@@ -207,15 +212,19 @@ class AppTileTest {
     }
 
     @Test
-    fun selectedTileReportsSelected() {
+    fun selectedTileReportsSelectedOnBodyOnly() {
         composeRule.setContent {
             AppTile(
                 state = AppTileState(label = "Calendar", span = GridSpan(1, 1), isSelected = true),
-                onClick = {},
+                onBodyClick = {}, onSymbolClick = {},
             )
         }
 
-        composeRule.onNodeWithContentDescription("Calendar").assertIsSelected()
+        val nodes = composeRule.onAllNodesWithContentDescription("Calendar")
+        nodes.assertCountEquals(2)
+        val selectedCount = nodes.fetchSemanticsNodes()
+            .count { it.config.getOrElse(SemanticsProperties.Selected) { false } }
+        composeRule.runOnIdle { assertEquals("selected flag lives on TileBody only", 1, selectedCount) }
     }
 
     @Test
@@ -223,11 +232,17 @@ class AppTileTest {
         composeRule.setContent {
             AppTile(
                 state = AppTileState(label = "Calendar", span = GridSpan(1, 1)),
-                onClick = {},
+                onBodyClick = {}, onSymbolClick = {},
             )
         }
 
-        composeRule.onNodeWithContentDescription("Calendar").assertIsNotSelected()
+        val nodes = composeRule.onAllNodesWithContentDescription("Calendar")
+        nodes.assertCountEquals(2)
+        assertTrue(
+            "no region selected by default",
+            nodes.fetchSemanticsNodes()
+                .none { it.config.getOrElse(SemanticsProperties.Selected) { false } },
+        )
         composeRule.onAllNodes(hasStateDescription(AppTileDefaults.PressedStateDescription))
             .assertCountEquals(0)
     }
@@ -237,7 +252,7 @@ class AppTileTest {
         composeRule.setContent {
             AppTile(
                 state = AppTileState(label = "Calendar", span = GridSpan(1, 1), isPressed = true),
-                onClick = {},
+                onBodyClick = {}, onSymbolClick = {},
             )
         }
 
@@ -245,45 +260,83 @@ class AppTileTest {
     }
 
     @Test
-    fun clickActionExistsAndInvokesCallback() {
-        var clicks = 0
+    fun bodyAndSymbolClickActionsInvokeDistinctCallbacks() {
+        var bodyClicks = 0
+        var symbolClicks = 0
         composeRule.setContent {
             AppTile(
                 state = AppTileState(label = "Calendar", span = GridSpan(1, 1)),
-                onClick = { clicks++ },
+                onBodyClick = { bodyClicks++ },
+                onSymbolClick = { symbolClicks++ },
             )
         }
 
-        composeRule.onNodeWithContentDescription("Calendar")
-            .assert(hasClickAction())
-            .performClick()
-        composeRule.runOnIdle { assertEquals(1, clicks) }
+        // Two distinct Role.Button nodes share the label; each click routes to exactly
+        // one callback, so (1, 1) totals prove distinct routing regardless of order.
+        val nodes = composeRule.onAllNodesWithContentDescription("Calendar")
+        nodes.assertCountEquals(2)
+        nodes[0].assert(hasClickAction()).performClick()
+        nodes[1].assert(hasClickAction()).performClick()
+        composeRule.runOnIdle {
+            assertEquals(1, bodyClicks)
+            assertEquals(1, symbolClicks)
+        }
     }
 
     @Test
-    fun tileExposesButtonRoleAndDefaultsToLabelDescription() {
+    fun tileExposesButtonRoleOnBothRegionsAndDefaultsToLabelDescription() {
         composeRule.setContent {
             AppTile(
                 state = AppTileState(label = "Calendar", span = GridSpan(1, 1)),
-                onClick = {},
+                onBodyClick = {}, onSymbolClick = {},
             )
         }
 
-        val node = composeRule.onNodeWithContentDescription("Calendar").fetchSemanticsNode()
-        assertEquals(Role.Button, node.config[SemanticsProperties.Role])
+        val nodes = composeRule.onAllNodesWithContentDescription("Calendar")
+        nodes.assertCountEquals(2)
+        nodes.fetchSemanticsNodes().forEach { node ->
+            assertEquals(Role.Button, node.config[SemanticsProperties.Role])
+        }
     }
 
     @Test
-    fun customContentDescriptionOverridesLabel() {
+    fun customContentDescriptionOverridesLabelOnBothRegions() {
         composeRule.setContent {
             AppTile(
                 state = AppTileState(label = "Calendar", span = GridSpan(1, 1)),
-                onClick = {},
+                onBodyClick = {}, onSymbolClick = {},
                 contentDescription = "Open Calendar",
             )
         }
 
-        composeRule.onNodeWithContentDescription("Open Calendar").assertExists()
+        composeRule.onAllNodesWithContentDescription("Open Calendar").assertCountEquals(2)
+    }
+
+    @Test
+    fun customSymbolDescriptionOverridesSymbolNodeOnly() {
+        composeRule.setContent {
+            AppTile(
+                state = AppTileState(label = "Calendar", span = GridSpan(1, 1)),
+                onBodyClick = {}, onSymbolClick = {},
+                symbolContentDescription = "Launch Calendar",
+            )
+        }
+
+        composeRule.onAllNodesWithContentDescription("Calendar").assertCountEquals(1)
+        composeRule.onAllNodesWithContentDescription("Launch Calendar").assertCountEquals(1)
+    }
+
+    @Test
+    fun blankSymbolContentDescriptionOverrideIsRejected() {
+        assertThrows(IllegalArgumentException::class.java) {
+            composeRule.setContent {
+                AppTile(
+                    state = AppTileState(label = "Calendar", span = GridSpan(1, 1)),
+                    onBodyClick = {}, onSymbolClick = {},
+                    symbolContentDescription = "  ",
+                )
+            }
+        }
     }
 
     @Test
@@ -292,18 +345,19 @@ class AppTileTest {
         composeRule.setContent {
             AppTile(
                 state = AppTileState(label = "Calendar", span = GridSpan(1, 1)),
-                onClick = {},
+                onBodyClick = {}, onSymbolClick = {},
                 onLongClick = { longClicks++ },
             )
         }
         composeRule.waitForIdle()
 
-        val node = composeRule.onNodeWithContentDescription("Calendar").fetchSemanticsNode()
-        assertTrue(
-            "supplied onLongClick must expose a long-click action",
-            node.config.contains(SemanticsActions.OnLongClick),
-        )
-        val action = node.config[SemanticsActions.OnLongClick]
+        // Only TileBody exposes the long-click action; AppLaunchButton never does.
+        val nodes = composeRule.onAllNodesWithContentDescription("Calendar")
+        nodes.assertCountEquals(2)
+        val withLongClick = nodes.fetchSemanticsNodes()
+            .filter { it.config.contains(SemanticsActions.OnLongClick) }
+        composeRule.runOnIdle { assertEquals("long-click lives on TileBody only", 1, withLongClick.size) }
+        val action = withLongClick.single().config[SemanticsActions.OnLongClick]
         composeRule.runOnIdle { action.action?.invoke() }
         composeRule.runOnIdle { assertEquals(1, longClicks) }
     }
@@ -313,16 +367,17 @@ class AppTileTest {
         composeRule.setContent {
             AppTile(
                 state = AppTileState(label = "Calendar", span = GridSpan(1, 1)),
-                onClick = {},
+                onBodyClick = {}, onSymbolClick = {},
                 onLongClick = null,
             )
         }
         composeRule.waitForIdle()
 
-        val node = composeRule.onNodeWithContentDescription("Calendar").fetchSemanticsNode()
-        assertFalse(
-            "absent onLongClick must expose no long-click action",
-            node.config.contains(SemanticsActions.OnLongClick),
+        val nodes = composeRule.onAllNodesWithContentDescription("Calendar")
+        nodes.assertCountEquals(2)
+        assertTrue(
+            "absent onLongClick must expose no long-click action on either region",
+            nodes.fetchSemanticsNodes().none { it.config.contains(SemanticsActions.OnLongClick) },
         )
     }
 

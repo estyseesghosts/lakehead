@@ -24,10 +24,12 @@ import me.foxtails.lakehead.core.model.ItemId
  * - Span comes directly from the persisted tile; legality stays owned by `core:grid`.
  * - The icon slot renders the supplied snapshot directly with
  *   `Image(bitmap = ..., contentDescription = null)` when present, otherwise label-only.
- * - Click dispatches the tile's exact [AppIdentity] only when [HomeRenderTile.isLaunchable];
- *   unavailable tiles expose a no-op click and `stateDescription = "Unavailable"`.
- * - Long-press on a launchable tile calls [onEnterEdit] to enter transient edit mode;
- *   unavailable tiles expose no long-click action.
+ * - Body and symbol clicks both dispatch the tile's exact [AppIdentity] only when
+ *   [HomeRenderTile.isLaunchable]; unavailable tiles expose no-op clicks and
+ *   `stateDescription = "Unavailable"`.
+ * - Long-press on a launchable tile calls [onEnterEdit] to enter transient edit mode
+ *   from TileBody only (AppLaunchButton never exposes long-click); unavailable tiles
+ *   expose no long-click action.
  * - When [isEditActive] and this tile's id matches [activeItemId], the tile renders the
  *   caller-driven [AppTileState.isSelected] border and announces
  *   `stateDescription = "Editing <label>, row R column C"`.
@@ -59,7 +61,13 @@ internal fun HomeCanvasTile(
             span = GridSpan(tile.span.columns, tile.span.rows),
             isSelected = isEditing,
         ),
-        onClick = {
+        onBodyClick = {
+            // diverge later: Body→notification surface per grid.md §10; both launch today.
+            if (tile.isLaunchable) {
+                onLaunchApp(tile.appIdentity)
+            }
+        },
+        onSymbolClick = {
             if (tile.isLaunchable) {
                 onLaunchApp(tile.appIdentity)
             }
