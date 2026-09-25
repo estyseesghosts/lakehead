@@ -465,6 +465,54 @@ class HomeCanvasTest {
         }
     }
 
+    @Test
+    fun inEdit_tilesExposeNoClickOrLongClick_andLaunchIsSuppressed() {
+        var launched: AppIdentity? = null
+        val tiles = listOf(
+            tile("a", personal, "Editable App", column = 0, row = 0),
+            tile("b", work, "Other App", column = 1, row = 0),
+        )
+        setCanvas(loaded(tiles), onLaunchApp = { launched = it })
+        composeRule.waitForIdle()
+
+        // Enter edit mode from the first tile's body.
+        composeRule.onAllNodesWithContentDescription("Editable App")[0]
+            .performSemanticsAction(SemanticsActions.OnLongClick) { it() }
+        composeRule.waitForIdle()
+
+        // In-edit: every tile region is inert (no click/long-click) so the
+        // parent drag owns the gesture; taps must not launch.
+        val edited = composeRule.onAllNodesWithContentDescription("Editable App")
+        edited.assertCountEquals(2)
+        composeRule.runOnIdle {
+            edited.fetchSemanticsNodes().forEach { node ->
+                assertFalse(
+                    "in-edit tile must expose no click action",
+                    node.config.contains(SemanticsActions.OnClick),
+                )
+                assertFalse(
+                    "in-edit tile must expose no long-click action",
+                    node.config.contains(SemanticsActions.OnLongClick),
+                )
+            }
+        }
+        val other = composeRule.onAllNodesWithContentDescription("Other App")
+        other.assertCountEquals(2)
+        composeRule.runOnIdle {
+            other.fetchSemanticsNodes().forEach { node ->
+                assertFalse(
+                    "non-active tile must also be inert while editing",
+                    node.config.contains(SemanticsActions.OnClick),
+                )
+                assertFalse(
+                    "non-active tile must expose no re-entry long-click while editing",
+                    node.config.contains(SemanticsActions.OnLongClick),
+                )
+            }
+        }
+        composeRule.runOnIdle { assertEquals(null, launched) }
+    }
+
     // ---- Sparse distant rows ----
 
     @Test

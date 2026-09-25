@@ -29,7 +29,15 @@ import me.foxtails.lakehead.core.model.ItemId
  *   `stateDescription = "Unavailable"`.
  * - Long-press on a launchable tile calls [onEnterEdit] to enter transient edit mode
  *   from TileBody only (AppLaunchButton never exposes long-click); unavailable tiles
- *   expose no long-click action.
+ *   expose no long-click action. Long-press entry is pre-edit only: when
+ *   [isEditActive] is true [onLongClick] is null so the in-edit press-hold-drag
+ *   owns the gesture without child competition.
+ * - While [isEditActive] is true every tile is non-interactive
+ *   (`isInteractionEnabled = false` on [AppTile], so TileBody
+ *   `combinedClickable(enabled = false)` and the symbol `clickable(enabled = false)`
+ *   keep minima/mergeDescendants/[Role]/descriptions/border visuals but strip click
+ *   and long-click actions) and [onBodyClick]/[onSymbolClick] are no-ops, so taps
+ *   during an edit session never launch.
  * - When [isEditActive] and this tile's id matches [activeItemId], the tile renders the
  *   caller-driven [AppTileState.isSelected] border and announces
  *   `stateDescription = "Editing <label>, row R column C"`.
@@ -73,12 +81,13 @@ internal fun HomeCanvasTile(
         ),
         onBodyClick = {
             // diverge later: Body→notification surface per grid.md §10; both launch today.
-            if (tile.isLaunchable) {
+            // In-edit taps are inert so drag gestures win the slop race.
+            if (!isEditActive && tile.isLaunchable) {
                 onLaunchApp(tile.appIdentity)
             }
         },
         onSymbolClick = {
-            if (tile.isLaunchable) {
+            if (!isEditActive && tile.isLaunchable) {
                 onLaunchApp(tile.appIdentity)
             }
         },
@@ -94,12 +103,13 @@ internal fun HomeCanvasTile(
             null
         },
         contentDescription = null,
-        onLongClick = if (tile.isLaunchable) {
+        onLongClick = if (tile.isLaunchable && !isEditActive) {
             { onEnterEdit(tile) }
         } else {
             null
         },
         shortcutPlaceholders = clampedPlaceholders,
+        isInteractionEnabled = !isEditActive,
     )
 }
 

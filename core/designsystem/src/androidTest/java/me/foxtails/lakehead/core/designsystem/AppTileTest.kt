@@ -605,6 +605,50 @@ class AppTileTest {
         composeRule.onAllNodesWithContentDescription("Shortcut placeholder 2").assertCountEquals(0)
     }
 
+    @Test
+    fun disabledInteraction_stripsActions_keepsRoleDescriptionAndMinima() {
+        composeRule.setContent {
+            LauncherTheme {
+                Box(Modifier.size(160.dp)) {
+                    AppTile(
+                        state = AppTileState(label = "Calendar", span = GridSpan(1, 1)),
+                        onBodyClick = {}, onSymbolClick = {},
+                        onLongClick = {},
+                        isInteractionEnabled = false,
+                    )
+                }
+            }
+        }
+        composeRule.waitForIdle()
+
+        // Both regions keep their accessible names but expose no actions.
+        val nodes = composeRule.onAllNodesWithContentDescription("Calendar")
+        nodes.assertCountEquals(2)
+        composeRule.runOnIdle {
+            nodes.fetchSemanticsNodes().forEach { node ->
+                assertFalse(
+                    "disabled tile must expose no click action",
+                    node.config.contains(SemanticsActions.OnClick),
+                )
+                assertFalse(
+                    "disabled tile must expose no long-click action",
+                    node.config.contains(SemanticsActions.OnLongClick),
+                )
+                assertEquals(Role.Button, node.config[SemanticsProperties.Role])
+            }
+        }
+        // Minima survive: both hit regions still meet 48dp.
+        val minTouchPx = with(composeRule.density) { 48.dp.roundToPx() }
+        nodes.fetchSemanticsNodes().forEach { node ->
+            composeRule.runOnIdle {
+                assertTrue(
+                    "disabled region must keep 48dp minima (size=${node.size})",
+                    node.size.width >= minTouchPx && node.size.height >= minTouchPx,
+                )
+            }
+        }
+    }
+
     private fun boundsInRoot(interaction: SemanticsNodeInteraction): Rect {
         val node = interaction.fetchSemanticsNode()
         val position = node.positionInRoot

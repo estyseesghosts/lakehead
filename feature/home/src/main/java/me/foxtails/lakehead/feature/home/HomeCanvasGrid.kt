@@ -28,6 +28,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import me.foxtails.lakehead.core.designsystem.AppTileDefaults
+import me.foxtails.lakehead.core.designsystem.PixelRect
 import me.foxtails.lakehead.core.designsystem.ResizeCandidateOverlay
 import me.foxtails.lakehead.core.designsystem.ResizeHandle
 import me.foxtails.lakehead.core.designsystem.SpanChild
@@ -239,8 +240,6 @@ internal fun HomeCanvasGrid(
                         originX = originX,
                     )
                     val handleSizePx = with(density) { 48.dp.roundToPx() }
-                    val handleLeftPx = originBounds.right - handleSizePx
-                    val handleTopPx = originBounds.bottom - handleSizePx
                     // Hit-test in content-local coords: the pointer position observed
                     // inside the scrolling content (after verticalScroll in the
                     // modifier chain) already includes the scroll offset, so no
@@ -249,12 +248,8 @@ internal fun HomeCanvasGrid(
                     // startPos is the pointer's position at the first observed event
                     // after entering edit mode — effectively the hold position since
                     // the finger is stationary after the long-press.
-                    val absX = startPos.x
-                    val absY = startPos.y
-                    val isOnHandle = absX >= handleLeftPx.toFloat() &&
-                        absX <= (handleLeftPx + handleSizePx).toFloat() &&
-                        absY >= handleTopPx.toFloat() &&
-                        absY <= (handleTopPx + handleSizePx).toFloat()
+                    val startInHandle =
+                        isInHandle(startPos.x, startPos.y, originBounds, handleSizePx)
                     // Wait until the already-pressed pointer moves past touch slop.
                     // Release before slop means no drag (a tap; tapCancel handles it).
                     val touchSlopPx = viewConfiguration.touchSlop
@@ -273,6 +268,17 @@ internal fun HomeCanvasGrid(
                         }
                     }
                     val slopChange = slop ?: return@awaitEachGesture
+                    // Slop-position check: a press that starts on the body but crosses
+                    // slop inside the handle corner still routes to RESIZE, so
+                    // body-vs-handle competition is decided at drag start, not only
+                    // at the hold position.
+                    val slopInHandle = isInHandle(
+                        slopChange.position.x,
+                        slopChange.position.y,
+                        originBounds,
+                        handleSizePx,
+                    )
+                    val isOnHandle = startInHandle || slopInHandle
                     if (isOnHandle) {
                         // RESIZE mode: corner-anchored span updates.
                         editSession = sessionState.value.beginResize()
@@ -330,6 +336,9 @@ internal fun HomeCanvasGrid(
                         }
                     } else {
                         // MOVE mode: pointer position maps to a candidate cell.
+                        // A drag that later enters the fixed handle corner promotes
+                        // live to RESIZE so a body-started press can still resize
+                        // without lifting the finger.
                         val slopCell = MoveDragMath.cellForPixel(
                             xPx = slopChange.position.x,
                             yPx = slopChange.position.y,
@@ -346,11 +355,39 @@ internal fun HomeCanvasGrid(
                             rows,
                         )
                         var current: PointerInputChange = slopChange
-                        while (true) {
+                        var promotedToResize = false
+                        while (!promotedToResize) {
                             val next = awaitDragOrCancellation(current.id) ?: break
                             next.consume()
                             current = next
                             if (sessionState.value as? HomeEditSession.Active == null) break
+                            if (isInHandle(
+                                    next.position.x,
+                                    next.position.y,
+                                    originBounds,
+                                    handleSizePx,
+                                )
+                            ) {
+                                editSession = sessionState.value.beginResize()
+                                val rawSpan = ResizeDragMath.rawSpan(
+                                    pointerXPx = next.position.x,
+                                    pointerYPx = next.position.y,
+                                    originPosition = sessionAtDown.origin,
+                                    cellSizePx = geometry.cellSizePx.toFloat(),
+                                    columnGapPx = geometry.columnGapPx.toFloat(),
+                                    rowGapPx = geometry.rowGapPx.toFloat(),
+                                    originXPx = originX.toFloat(),
+                                )
+                                val quantized = RenderableSpans.quantize(rawSpan, columns)
+                                editSession = sessionState.value.updateResizeCandidate(
+                                    quantized,
+                                    loaded.tiles,
+                                    columns,
+                                    rows,
+                                )
+                                promotedToResize = true
+                                break
+                            }
                             val cell = MoveDragMath.cellForPixel(
                                 xPx = next.position.x,
                                 yPx = next.position.y,
@@ -367,11 +404,64 @@ internal fun HomeCanvasGrid(
                                 rows,
                             )
                         }
-                        val final = sessionState.value as? HomeEditSession.Active
-                        if (final != null && sessionState.value.hasMoved()) {
-                            onMoveTile(final.itemId, final.candidatePosition)
+                        if (promotedToResize) {
+                            // Continue tracking as a resize drag from the promotion point.
+                            while (true) {
+                                val next = awaitDragOrCancellation(current.id) ?: break
+                                next.consume()
+                                current = next
+                                if (sessionState.value as? HomeEditSession.Active == null) break
+                                val rawSpan = ResizeDragMath.rawSpan(
+                                    pointerXPx = next.position.x,
+                                    pointerYPx = next.position.y,
+                                    originPosition = sessionAtDown.origin,
+                                    cellSizePx = geometry.cellSizePx.toFloat(),
+                                    columnGapPx = geometry.columnGapPx.toFloat(),
+                                    rowGapPx = geometry.rowGapPx.toFloat(),
+                                    originXPx = originX.toFloat(),
+                                )
+                                val quantized = RenderableSpans.quantize(rawSpan, columns)
+                                editSession = sessionState.value.updateResizeCandidate(
+                                    quantized,
+                                    loaded.tiles,
+                                    columns,
+                                    rows,
+                                )
+                            }
+                            val final = sessionState.value as? HomeEditSession.Active
+                            if (final != null && sessionState.value.hasResized()) {
+                                onResizeTile(final.itemId, final.candidateSpan)
+                                // Keep session active in MOVE with the committed span as origin.
+                                editSession = HomeEditSession.Active(
+                                    itemId = final.itemId,
+                                    origin = final.origin,
+                                    originSpan = final.candidateSpan,
+                                    candidatePosition = final.origin,
+                                    candidateSpan = final.candidateSpan,
+                                    candidateValidity = CandidateValidity.VALID,
+                                    mode = EditMode.MOVE,
+                                )
+                            } else if (final != null) {
+                                // No change or invalid — snap back, stay in MOVE.
+                                editSession = HomeEditSession.Active(
+                                    itemId = final.itemId,
+                                    origin = final.origin,
+                                    originSpan = final.originSpan,
+                                    candidatePosition = final.origin,
+                                    candidateSpan = final.originSpan,
+                                    candidateValidity = CandidateValidity.VALID,
+                                    mode = EditMode.MOVE,
+                                )
+                            } else {
+                                editSession = HomeEditSession.Idle
+                            }
+                        } else {
+                            val final = sessionState.value as? HomeEditSession.Active
+                            if (final != null && sessionState.value.hasMoved()) {
+                                onMoveTile(final.itemId, final.candidatePosition)
+                            }
+                            editSession = HomeEditSession.Idle
                         }
-                        editSession = HomeEditSession.Idle
                     }
                 }
             }
@@ -592,6 +682,31 @@ private fun MoveCandidateOverlay(
             .border(2.dp, borderColor, AppTileDefaults.TileShape)
             .testTag(MOVE_CANDIDATE_OVERLAY_TAG),
     )
+}
+
+/**
+ * Hit-tests a content-local pointer position against the resize handle corner.
+ *
+ * The handle occupies the bottom-right [handlePx] square of [originBounds]:
+ * `x in [right - handlePx, right]` and `y in [bottom - handlePx, bottom]`
+ * (inclusive). The bounds are the FIXED origin footprint snapshotted at gesture
+ * start, never the live candidate bounds that move during the drag. Pure math,
+ * framework-free, so drag routing stays unit-testable and `core:grid` legality
+ * stays untouched.
+ */
+internal fun isInHandle(
+    x: Float,
+    y: Float,
+    originBounds: PixelRect,
+    handlePx: Int,
+): Boolean {
+    require(handlePx > 0) { "handlePx must be positive" }
+    val handleLeft = originBounds.right - handlePx
+    val handleTop = originBounds.bottom - handlePx
+    return x >= handleLeft.toFloat() &&
+        x <= originBounds.right.toFloat() &&
+        y >= handleTop.toFloat() &&
+        y <= originBounds.bottom.toFloat()
 }
 
 /**

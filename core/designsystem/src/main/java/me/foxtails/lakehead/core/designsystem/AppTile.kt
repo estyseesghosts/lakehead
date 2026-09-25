@@ -153,6 +153,11 @@ internal fun resolveTileColors(
  * (the icon occupies one slot: single-column tiles allow `rows - 1`, wider
  * tiles allow `columns - 1`, coerced to >= 0), so over-counts render max
  * instead of crashing; negative counts are still rejected.
+ * @param isInteractionEnabled when false both hit regions keep their minima,
+ * merged-descendants semantics, [Role.Button], descriptions and border visuals
+ * but expose no click/long-click actions (`enabled = false` on TileBody's
+ * `combinedClickable` and the symbol `clickable`), so in-edit drag gestures win
+ * the slop race. Defaults to true (fully interactive).
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -166,6 +171,7 @@ fun AppTile(
     symbolContentDescription: String? = null,
     onLongClick: (() -> Unit)? = null,
     shortcutPlaceholders: Int = 0,
+    isInteractionEnabled: Boolean = true,
 ) {
     require(contentDescription == null || contentDescription.isNotBlank()) {
         "contentDescription must be null or non-blank"
@@ -221,6 +227,7 @@ fun AppTile(
                     }
                 }
                 .combinedClickable(
+                    enabled = isInteractionEnabled,
                     onLongClick = onLongClick,
                     onClick = onBodyClick,
                     role = Role.Button,
@@ -238,6 +245,7 @@ fun AppTile(
                         this.contentDescription = resolvedSymbolDescription
                     }
                     .clickable(
+                        enabled = isInteractionEnabled,
                         onClick = onSymbolClick,
                         role = Role.Button,
                     ),
@@ -257,6 +265,7 @@ fun AppTile(
                         this.contentDescription = resolvedSymbolDescription
                     }
                     .clickable(
+                        enabled = isInteractionEnabled,
                         onClick = onSymbolClick,
                         role = Role.Button,
                     ),
