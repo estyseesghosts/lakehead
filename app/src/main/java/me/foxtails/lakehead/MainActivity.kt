@@ -70,7 +70,7 @@ class MainActivity : ComponentActivity() {
     }
     private val homeViewportStyle by lazy(LazyThreadSafetyMode.NONE) {
         HomeCanvasViewportStyle(
-            horizontalPaddingPx = (16f * resources.displayMetrics.density).toInt(),
+            horizontalPaddingPx = (8f * resources.displayMetrics.density).toInt(),
             columnGapPx = (8f * resources.displayMetrics.density).toInt(),
             rowGapPx = (8f * resources.displayMetrics.density).toInt(),
         )
@@ -80,7 +80,7 @@ class MainActivity : ComponentActivity() {
         val density = metrics.density
         val viewportWidth = metrics.widthPixels.coerceAtLeast(1)
         val viewportHeight = metrics.heightPixels.coerceAtLeast(1)
-        val horizontalPaddingPx = (16f * density).toInt()
+        val horizontalPaddingPx = (8f * density).toInt()
         val gapPx = (8f * density).toInt()
         val minimumCellPx = (48f * density).toInt().coerceAtLeast(1)
         val viewportRows = (viewportHeight / minimumCellPx).toLong().coerceAtLeast(1)

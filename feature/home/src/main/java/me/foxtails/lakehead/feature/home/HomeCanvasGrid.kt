@@ -121,6 +121,13 @@ internal fun HomeCanvasGrid(
             rowGapPx = viewportStyle.rowGapPx,
             columnCount = loaded.columns.count,
         )
+        // Centered horizontal origin: column 0's left edge, splitting the leftover
+        // (available width minus the grid width) evenly so left/right slack stays
+        // equal within 1px. Geometry formula itself is unchanged.
+        val originX = centeredOriginX(
+            availableWidthPx = availableWidthPx,
+            geometry = geometry,
+        )
         key(loaded.requestedHomeId) {
             val scrollState = rememberScrollState()
             var editSession by remember { mutableStateOf<HomeEditSession>(HomeEditSession.Idle) }
@@ -229,6 +236,7 @@ internal fun HomeCanvasGrid(
                             sessionAtDown.originSpan.rows,
                         ),
                         geometry = geometry,
+                        originX = originX,
                     )
                     val handleSizePx = with(density) { 48.dp.roundToPx() }
                     val handleLeftPx = originBounds.right - handleSizePx
@@ -283,6 +291,7 @@ internal fun HomeCanvasGrid(
                                 cellSizePx = geometry.cellSizePx.toFloat(),
                                 columnGapPx = geometry.columnGapPx.toFloat(),
                                 rowGapPx = geometry.rowGapPx.toFloat(),
+                                originXPx = originX.toFloat(),
                             )
                             val quantized = RenderableSpans.quantize(rawSpan)
                             editSession = sessionState.value.updateResizeCandidate(
@@ -328,6 +337,7 @@ internal fun HomeCanvasGrid(
                             columnGapPx = geometry.columnGapPx.toFloat(),
                             rowGapPx = geometry.rowGapPx.toFloat(),
                             windowFirstRow = rowOrigin,
+                            originXPx = originX.toFloat(),
                         )
                         editSession = sessionState.value.updateMoveCandidate(
                             slopCell,
@@ -348,6 +358,7 @@ internal fun HomeCanvasGrid(
                                 columnGapPx = geometry.columnGapPx.toFloat(),
                                 rowGapPx = geometry.rowGapPx.toFloat(),
                                 windowFirstRow = rowOrigin,
+                                originXPx = originX.toFloat(),
                             )
                             editSession = sessionState.value.updateMoveCandidate(
                                 cell,
@@ -376,6 +387,7 @@ internal fun HomeCanvasGrid(
                     window = window,
                     overscanRows = overscanRows,
                     geometry = geometry,
+                    originX = originX,
                     rowOrigin = rowOrigin,
                     minHeightPx = minHeightPx,
                 )
@@ -384,6 +396,7 @@ internal fun HomeCanvasGrid(
                         active = active,
                         geometry = geometry,
                         rowOrigin = rowOrigin,
+                        originX = originX,
                     )
                 }
                 if (active != null && active.mode == EditMode.RESIZE) {
@@ -393,6 +406,7 @@ internal fun HomeCanvasGrid(
                         geometry = geometry,
                         rowOrigin = rowOrigin,
                         isValid = active.candidateValidity == CandidateValidity.VALID,
+                        originX = originX,
                     )
                 }
                 // Resize handle overlay: positioned over the active tile's bottom-right
@@ -407,6 +421,7 @@ internal fun HomeCanvasGrid(
                             position = GridPosition(active.origin.column, active.origin.row),
                             span = GridSpan(active.candidateSpan.columns, active.candidateSpan.rows),
                             geometry = geometry,
+                            originX = originX,
                         )
                         val handleTopPx = tileBounds.bottom - with(density) { 48.dp.roundToPx() }
                         val handleLeftPx = tileBounds.right - with(density) { 48.dp.roundToPx() }
@@ -426,6 +441,26 @@ internal fun HomeCanvasGrid(
             }
         }
     }
+}
+
+/**
+ * Centered horizontal origin (column 0 left edge) for the home canvas grid.
+ *
+ * Rule: `originX = (availableWidthPx - (count * cell + (count - 1) * gap)) / 2`,
+ * computed with [Long] intermediates and flooring division, so the leftover slack
+ * is split evenly and left/right slack stays equal within 1px. The geometry formula
+ * itself is unchanged; this only centers the already-derived grid.
+ */
+internal fun centeredOriginX(
+    availableWidthPx: Int,
+    geometry: SquareCellGeometry,
+): Int {
+    require(availableWidthPx > 0) { "availableWidthPx must be positive" }
+    val count = geometry.columnCount.toLong()
+    val gridWidthPx = count * geometry.cellSizePx.toLong() +
+        (count - 1L) * geometry.columnGapPx.toLong()
+    val originLong = Math.floorDiv(availableWidthPx.toLong() - gridWidthPx, 2L)
+    return originLong.coerceIn(0L, Int.MAX_VALUE.toLong()).toInt()
 }
 
 /**
@@ -527,12 +562,14 @@ private fun MoveCandidateOverlay(
     geometry: SquareCellGeometry,
     rowOrigin: Long,
     modifier: Modifier = Modifier,
+    originX: Int = 0,
 ) {
     val density = LocalDensity.current
     val absolute = TileBounds.bounds(
         position = GridPosition(active.candidatePosition.column, active.candidatePosition.row),
         span = GridSpan(active.candidateSpan.columns, active.candidateSpan.rows),
         geometry = geometry,
+        originX = originX,
     )
     val rowStridePx = geometry.cellSizePx.toLong() + geometry.rowGapPx.toLong()
     val topPx = rebasedOverlayTop(

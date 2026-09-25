@@ -21,7 +21,9 @@ import me.foxtails.lakehead.core.grid.GridSpan
  * a 2dp outline in `scheme.primary`; invalid candidates draw in `scheme.error`.
  *
  * Position reuses [TileBounds.bounds] for the absolute candidate frame, rebased via the
- * caller-provided [rowOrigin].
+ * caller-provided [rowOrigin]. Horizontal placement includes [originX]: the caller-centered
+ * remainder split, so column 0 starts at [originX] rather than 0 and left/right slack
+ * stays equal within 1px.
  */
 @Composable
 fun ResizeCandidateOverlay(
@@ -31,12 +33,14 @@ fun ResizeCandidateOverlay(
     rowOrigin: Long,
     isValid: Boolean,
     modifier: Modifier = Modifier,
+    originX: Int = 0,
 ) {
     val density = LocalDensity.current
     val absolute = TileBounds.bounds(
         position = originPosition,
         span = candidateSpan,
         geometry = geometry,
+        originX = originX,
     )
     val rowStridePx = geometry.cellSizePx.toLong() + geometry.rowGapPx.toLong()
     val topPx = rebasedOverlayTopPx(

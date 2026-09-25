@@ -106,7 +106,10 @@ data class SquareCellGeometry(
          * `columns.count`, integer division floors and the leftover
          * `0..columns.count - 1` pixels are left undistributed as trailing slack. Cells
          * are never stretched or rounded up to absorb the remainder, so they stay
-         * square and equal.
+         * square and equal. The remainder split itself is caller-centered: callers
+         * derive a horizontal origin (column 0 left edge) that splits the leftover
+         * evenly so left/right slack stays equal within 1px; this type keeps the
+         * geometry formula unchanged and performs no centering.
          *
          * [availableWidthPx] must be positive while [horizontalPaddingPx], [columnGapPx]
          * and [rowGapPx] must be non-negative; the derived cell must be positive.

@@ -23,6 +23,8 @@ object ResizeDragMath {
      * @param cellSizePx cell size in pixels
      * @param columnGapPx gap between columns in pixels
      * @param rowGapPx gap between rows in pixels
+     * @param originXPx horizontal pixel origin of column 0's left edge (caller-centered
+     * remainder split); defaults to 0 for edge-to-edge callers
      * @return raw logical span (may be fractional-cell; caller quantizes). Minimum 1×1.
      */
     fun rawSpan(
@@ -32,16 +34,18 @@ object ResizeDragMath {
         cellSizePx: Float,
         columnGapPx: Float,
         rowGapPx: Float,
+        originXPx: Float = 0f,
     ): LogicalSpan {
         val cellWidth = cellSizePx + columnGapPx
         val cellHeight = cellSizePx + rowGapPx
 
-        // Origin cell's top-left pixel coordinate
-        val originXPx = originPosition.column * cellWidth
+        // Origin cell's top-left pixel coordinate, including the caller-centered
+        // horizontal origin.
+        val originLeftPx = originPosition.column * cellWidth + originXPx
         val originYPx = originPosition.row * cellHeight
 
         // Pointer offset from origin cell's top-left
-        val dxPx = pointerXPx - originXPx
+        val dxPx = pointerXPx - originLeftPx
         val dyPx = pointerYPx - originYPx
 
         // Raw span = ceil(offset / stride), minimum 1
