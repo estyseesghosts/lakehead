@@ -94,10 +94,9 @@ class TileBoundsTest {
     }
 
     @Test
-    fun unsupportedPositiveDimensionsRemainMeasurable() {
+    fun genericPositiveDimensionsRemainMeasurable() {
         val span = GridSpan(3, 3)
 
-        assertEquals(false, span.isSupported)
         assertEquals(
             PixelRect(left = 0, top = 0, right = 34, bottom = 36),
             TileBounds.bounds(GridPosition(0, 0), span, geometry),

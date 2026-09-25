@@ -1,6 +1,6 @@
 package me.foxtails.lakehead.core.grid
 
-/** Pure B1 legality checks for placements on an explicitly-sized finite grid. */
+/** Pure generic legality checks for placements on an explicitly-sized finite grid. */
 object GridRules {
     /** A successful operation returns a fresh list, retaining unrelated entries and their order. */
     sealed class Result<out T : Any> {
@@ -10,7 +10,6 @@ object GridRules {
 
     /** Reasons a candidate placement can be rejected. */
     enum class Rejection {
-        UNSUPPORTED_SPAN,
         OUT_OF_BOUNDS,
         COLLISION,
         UNKNOWN_ITEM,
@@ -110,7 +109,6 @@ object GridRules {
         rows: Int,
         ignoredIndex: Int,
     ): Rejection? {
-        if (!candidate.span.isSupported) return Rejection.UNSUPPORTED_SPAN
         if (!isWithinBounds(candidate, columns, rows)) return Rejection.OUT_OF_BOUNDS
         if (placements.indices.any { index ->
                 index != ignoredIndex && overlaps(candidate, placements[index])

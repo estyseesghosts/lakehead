@@ -64,10 +64,13 @@ class RoomHomePlacementRepositoryTest {
 
         assertRejected(repository.place(home, candidateId, identity, LogicalPosition(0, 0), LogicalSpan(1, 1), 6, 10), GridRules.Rejection.COLLISION)
         assertEquals(rejectedSnapshot, snapshot())
-        assertRejected(repository.place(home, candidateId, identity, LogicalPosition(1, 0), LogicalSpan(3, 1), 6, 10), GridRules.Rejection.UNSUPPORTED_SPAN)
-        assertEquals(rejectedSnapshot, snapshot())
+        val genericId = ItemId("generic")
+        val genericIdentity = identity("work", "org.generic")
+        assertTrue(repository.place(home, genericId, genericIdentity, LogicalPosition(1, 0), LogicalSpan(3, 1), 6, 10) is MutationResult.Accepted)
+        assertEquals(RemoveResult.Removed, repository.remove(home, genericId))
+        val postGenericSnapshot = snapshot()
         assertRejected(repository.place(home, candidateId, identity, LogicalPosition(6, 0), LogicalSpan(1, 1), 6, 10), GridRules.Rejection.OUT_OF_BOUNDS)
-        assertEquals(rejectedSnapshot, snapshot())
+        assertEquals(postGenericSnapshot, snapshot())
 
         val result = repository.place(home, candidateId, identity, LogicalPosition(2, 0), LogicalSpan(1, 1), 6, 10)
         assertTrue(result is MutationResult.Accepted)
@@ -94,7 +97,7 @@ class RoomHomePlacementRepositoryTest {
         assertEquals(neighbor, dao.placement(neighbor.itemId.value)!!.toDomain())
 
         val beforeResize = snapshot()
-        assertRejected(repository.resize(target.homeId, target.itemId, LogicalSpan(3, 1), 6, 10), GridRules.Rejection.UNSUPPORTED_SPAN)
+        assertRejected(repository.resize(target.homeId, target.itemId, LogicalSpan(3, 1), 6, 10), GridRules.Rejection.COLLISION)
         assertEquals(beforeResize, snapshot())
         assertRejected(repository.resize(target.homeId, target.itemId, LogicalSpan(2, 1), 6, 10), GridRules.Rejection.COLLISION)
         assertEquals(beforeResize, snapshot())
