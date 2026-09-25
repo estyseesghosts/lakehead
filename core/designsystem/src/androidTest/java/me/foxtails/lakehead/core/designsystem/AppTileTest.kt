@@ -415,6 +415,65 @@ class AppTileTest {
         }
     }
 
+    @Test
+    fun oneByOneSymbolHitBoxSmallerThanTileBody() {
+        composeRule.setContent {
+            LauncherTheme {
+                Box(Modifier.size(160.dp)) {
+                    AppTile(
+                        state = AppTileState(label = "Calendar", span = GridSpan(1, 1)),
+                        onBodyClick = {}, onSymbolClick = {},
+                        symbolContentDescription = "Launch Calendar",
+                        onLongClick = {},
+                        icon = { Box(Modifier.testTag("tile-icon").size(24.dp)) },
+                    )
+                }
+            }
+        }
+        composeRule.waitForIdle()
+
+        // TileBody keeps the full tile bounds; the 1x1 symbol hit region is an
+        // icon-sized (symbolSize coerced to >=48dp) box centered on the tile, so
+        // ring/edge touches still reach TileBody.
+        val tileBounds = boundsInRoot(composeRule.onNodeWithContentDescription("Calendar"))
+        val symbolBounds = boundsInRoot(composeRule.onNodeWithContentDescription("Launch Calendar"))
+        composeRule.runOnIdle {
+            assertTrue(
+                "1x1 symbol hit box must be smaller than the tile " +
+                    "(tile=$tileBounds symbol=$symbolBounds)",
+                symbolBounds.width < tileBounds.width &&
+                    symbolBounds.height < tileBounds.height,
+            )
+            assertTrue(
+                "1x1 symbol hit box must stay inside the tile " +
+                    "(tile=$tileBounds symbol=$symbolBounds)",
+                symbolBounds.left >= tileBounds.left - 1f &&
+                    symbolBounds.top >= tileBounds.top - 1f &&
+                    symbolBounds.right <= tileBounds.right + 1f &&
+                    symbolBounds.bottom <= tileBounds.bottom + 1f,
+            )
+            assertTrue(
+                "1x1 symbol hit box must be centered on the tile " +
+                    "(tile=$tileBounds symbol=$symbolBounds)",
+                abs(symbolBounds.center.x - tileBounds.center.x) <= 1f &&
+                    abs(symbolBounds.center.y - tileBounds.center.y) <= 1f,
+            )
+        }
+        val bodyNode = composeRule.onNodeWithContentDescription("Calendar").fetchSemanticsNode()
+        val symbolNode =
+            composeRule.onNodeWithContentDescription("Launch Calendar").fetchSemanticsNode()
+        composeRule.runOnIdle {
+            assertTrue(
+                "TileBody must still expose OnLongClick",
+                bodyNode.config.contains(SemanticsActions.OnLongClick),
+            )
+            assertFalse(
+                "AppLaunchButton must never expose OnLongClick",
+                symbolNode.config.contains(SemanticsActions.OnLongClick),
+            )
+        }
+    }
+
     private fun boundsInRoot(interaction: SemanticsNodeInteraction): Rect {
         val node = interaction.fetchSemanticsNode()
         val position = node.positionInRoot

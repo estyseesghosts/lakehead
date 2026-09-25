@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.material3.MaterialTheme
@@ -120,8 +121,10 @@ internal fun resolveTileColors(
  *   clickable, never focusable); a trailing sibling so order stays Body → Symbol →
  *   slots when D3 adds placeholder glyphs.
  *
- * A 1x1 tile is full-bleed (no [LauncherDimensions.tilePadding] inset; the symbol
- * region fills the whole tile), while larger spans keep the tile-padding inset with
+ * A 1x1 tile is full-bleed (no [LauncherDimensions.tilePadding] inset; the tile
+ * background fills the whole cell) while the symbol hit region stays icon-sized
+ * ([LauncherDimensions.symbolSize] coerced to the 48.dp minimum) centered on the
+ * tile, so ring/edge touches reach TileBody; larger spans keep the tile-padding inset with
  * the caller's natural symbol size anchored via [symbolAlignment]: tall 1x2 tiles
  * bottom-center the symbol, every other span bottom-ends it, so icons are never
  * centered.
@@ -205,7 +208,8 @@ fun AppTile(
         if (isFullBleed) {
             Box(
                 modifier = Modifier
-                    .fillMaxSize()
+                    .align(Alignment.Center)
+                    .size(dimensions.symbolSize.coerceAtLeast(48.dp))
                     .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
                     .semantics(mergeDescendants = true) {
                         this.contentDescription = resolvedSymbolDescription
@@ -215,7 +219,6 @@ fun AppTile(
                         role = Role.Button,
                     ),
                 contentAlignment = Alignment.Center,
-                propagateMinConstraints = true,
             ) {
                 if (icon != null) {
                     icon()
