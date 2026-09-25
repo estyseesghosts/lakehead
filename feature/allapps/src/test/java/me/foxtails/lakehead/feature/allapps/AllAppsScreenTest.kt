@@ -10,6 +10,7 @@ import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertHeightIsAtLeast
 import androidx.compose.ui.test.assertHeightIsEqualTo
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertWidthIsAtLeast
 import androidx.compose.ui.test.assertWidthIsEqualTo
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
@@ -211,12 +212,19 @@ class AllAppsScreenTest {
         composeRule.onNodeWithContentDescription("Add Personal App to Home").assertDoesNotExist()
         composeRule.onNodeWithContentDescription("Add Work App to Home").assertIsDisplayed()
 
-        // The marker is not clickable: tapping it dispatches nothing.
-        composeRule.onNodeWithContentDescription("Personal App already on Home").performClick()
-        composeRule.runOnIdle {
-            assertEquals(null, launched)
-            assertEquals(null, added)
-        }
+        // The marker is honest and non-clickable: no click action, no Button role.
+        val addedNode = composeRule.onNodeWithContentDescription("Personal App already on Home")
+            .assertIsDisplayed()
+            .fetchSemanticsNode()
+        assertFalse(
+            "Added marker must not expose a click action",
+            addedNode.config.contains(SemanticsActions.OnClick),
+        )
+        assertFalse(
+            "Added marker must not expose a Button role",
+            addedNode.config.contains(SemanticsProperties.Role),
+        )
+        assertEquals(ADDED_STATE_DESCRIPTION, addedNode.config[SemanticsProperties.StateDescription])
 
         // The on-Home row still launches.
         composeRule.onNodeWithText("Personal App").performClick()
@@ -258,6 +266,11 @@ class AllAppsScreenTest {
         composeRule.onNodeWithContentDescription("Add Personal App to Home")
             .assertIsDisplayed()
             .assertHeightIsAtLeast(48.dp)
+            .assertWidthIsAtLeast(48.dp)
+        composeRule.onNodeWithContentDescription("Remove Personal App from Home")
+            .assertIsDisplayed()
+            .assertHeightIsAtLeast(48.dp)
+            .assertWidthIsAtLeast(48.dp)
     }
 
     @Test
@@ -287,6 +300,117 @@ class AllAppsScreenTest {
             .assertIsDisplayed()
             .fetchSemanticsNode().config[SemanticsProperties.Role]
         assertEquals(Role.Button, addRole)
+        // Remove placeholder is visual-only: no Button role and no click action.
+        val removeNode = composeRule.onNodeWithContentDescription("Remove Personal App from Home")
+            .assertIsDisplayed()
+            .fetchSemanticsNode()
+        assertFalse(
+            "Remove placeholder must not expose a Role",
+            removeNode.config.contains(SemanticsProperties.Role),
+        )
+        assertFalse(
+            "Remove placeholder must not expose a click action",
+            removeNode.config.contains(SemanticsActions.OnClick),
+        )
+    }
+
+    @Test
+    fun notOnHome_exposesLaunchAddAndDisabledRemove_asThreeNodes() {
+        var launched: AppIdentity? = null
+        var added: AppIdentity? = null
+        setScreen(
+            AllAppsViewState.Loaded(listOf(entry(personal, "Personal App"))),
+            onLaunchApp = { launched = it },
+            onAddToHome = { added = it },
+        )
+
+        // Launch + enabled Add + disabled Remove placeholder are all displayed siblings.
+        composeRule.onNodeWithContentDescription("Personal App").assertIsDisplayed()
+        composeRule.onNodeWithContentDescription("Add Personal App to Home").assertIsDisplayed()
+        composeRule.onNodeWithContentDescription("Remove Personal App from Home").assertIsDisplayed()
+        composeRule.onNodeWithTag(ALL_APPS_REMOVE_TAG).assertIsDisplayed()
+        composeRule.onNodeWithText(REMOVE_ACTION_TEXT).assertIsDisplayed()
+
+        // Add is enabled; Remove is disabled visual-only.
+        val addNode = composeRule.onNodeWithContentDescription("Add Personal App to Home")
+            .fetchSemanticsNode()
+        assertTrue(
+            "Add slot must expose a click action",
+            addNode.config.contains(SemanticsActions.OnClick),
+        )
+        val removeNode = composeRule.onNodeWithContentDescription("Remove Personal App from Home")
+            .fetchSemanticsNode()
+        assertFalse(
+            "Remove placeholder must not expose a click action",
+            removeNode.config.contains(SemanticsActions.OnClick),
+        )
+
+        // Add tap dispatches the exact identity without launching.
+        composeRule.onNodeWithContentDescription("Add Personal App to Home").performClick()
+        composeRule.runOnIdle {
+            assertEquals(personal, added)
+            assertEquals(null, launched)
+        }
+    }
+
+    @Test
+    fun removePlaceholder_tapDispatchesNothing() {
+        var launched: AppIdentity? = null
+        var added: AppIdentity? = null
+        setScreen(
+            AllAppsViewState.Loaded(listOf(entry(personal, "Personal App"))),
+            onLaunchApp = { launched = it },
+            onAddToHome = { added = it },
+        )
+
+        // Disabled placeholder exposes no click action, so there is nothing to dispatch.
+        val removeNode = composeRule.onNodeWithContentDescription("Remove Personal App from Home")
+            .assertIsDisplayed()
+            .fetchSemanticsNode()
+        assertFalse(
+            "Remove placeholder must not expose a click action",
+            removeNode.config.contains(SemanticsActions.OnClick),
+        )
+        composeRule.runOnIdle {
+            assertEquals(null, launched)
+            assertEquals(null, added)
+        }
+    }
+
+    @Test
+    fun alreadyOnHome_exposesLaunchAddedAndDisabledRemove_withNoAddNode() {
+        setScreen(
+            AllAppsViewState.Loaded(listOf(entry(personal, "Personal App", alreadyOnHome = true))),
+        )
+
+        composeRule.onNodeWithContentDescription("Personal App").assertIsDisplayed()
+        composeRule.onNodeWithContentDescription("Personal App already on Home").assertIsDisplayed()
+        composeRule.onNodeWithText(ADDED_MARKER_TEXT).assertIsDisplayed()
+        composeRule.onNodeWithContentDescription("Remove Personal App from Home").assertIsDisplayed()
+        composeRule.onNodeWithTag(ALL_APPS_REMOVE_TAG).assertIsDisplayed()
+        composeRule.onNodeWithContentDescription("Add Personal App to Home").assertDoesNotExist()
+
+        // Added marker meets the 48dp slot minima despite being non-clickable.
+        composeRule.onNodeWithContentDescription("Personal App already on Home")
+            .assertHeightIsAtLeast(48.dp)
+            .assertWidthIsAtLeast(48.dp)
+        composeRule.onNodeWithContentDescription("Remove Personal App from Home")
+            .assertHeightIsAtLeast(48.dp)
+            .assertWidthIsAtLeast(48.dp)
+
+        // Neither the Added marker nor the Remove placeholder carries a Button role.
+        val addedRoleNode = composeRule.onNodeWithContentDescription("Personal App already on Home")
+            .fetchSemanticsNode()
+        assertFalse(
+            "Added marker must not expose a Role",
+            addedRoleNode.config.contains(SemanticsProperties.Role),
+        )
+        val removeRoleNode = composeRule.onNodeWithContentDescription("Remove Personal App from Home")
+            .fetchSemanticsNode()
+        assertFalse(
+            "Remove placeholder must not expose a Role",
+            removeRoleNode.config.contains(SemanticsProperties.Role),
+        )
     }
 
     @Test

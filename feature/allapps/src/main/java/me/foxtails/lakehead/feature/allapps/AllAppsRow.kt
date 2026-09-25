@@ -12,6 +12,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
@@ -42,10 +43,17 @@ import me.foxtails.lakehead.core.model.AppIdentity
  *
  * - The launch area (icon + label) is a single merged button node named by [AllAppsEntry.label];
  *   activating it dispatches the exact [AppIdentity] via [onLaunchApp].
- * - The add control is a separate ≥48dp button node described as `"Add {label} to Home"`;
- *   activating it dispatches the exact [AppIdentity] via [onAddToHome].
- * - When [AllAppsEntry.alreadyOnHome] is true the add control is replaced by an honest,
- *   non-clickable `"Added"` marker so the row never promises an add it will not perform.
+ * - The trailing cluster is always two sibling slots directly under the outer [Row]
+ *   (never nested): an Add slot followed by a Remove placeholder slot.
+ * - When [AllAppsEntry.alreadyOnHome] is false the Add slot is an enabled ≥48dp button
+ *   described as `"Add {label} to Home"`; activating it dispatches the exact [AppIdentity]
+ *   via [onAddToHome].
+ * - When [AllAppsEntry.alreadyOnHome] is true the Add slot is replaced by an honest,
+ *   non-clickable ≥48dp `"Added"` marker described as `"{label} already on Home"` with
+ *   state `"Added"`, so the row never promises an add it will not perform.
+ * - The Remove slot is visual-only in this slice: a disabled ≥48dp box described as
+ *   `"Remove {label} from Home"` with no click action, no [Role], and 0.38f alpha.
+ *   There is intentionally no `onRemove` callback, no persistence, and no platform call.
  */
 @Composable
 fun AllAppsRow(
@@ -97,16 +105,21 @@ fun AllAppsRow(
             )
         }
         if (entry.alreadyOnHome) {
-            BasicText(
-                text = ADDED_MARKER_TEXT,
-                style = onSurfaceStyle,
+            Box(
                 modifier = Modifier
-                    .padding(horizontal = 12.dp, vertical = 12.dp)
+                    .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
                     .semantics {
                         contentDescription = "${entry.label} already on Home"
                         stateDescription = ADDED_STATE_DESCRIPTION
-                    },
-            )
+                    }
+                    .padding(horizontal = 12.dp, vertical = 12.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                BasicText(
+                    text = ADDED_MARKER_TEXT,
+                    style = onSurfaceStyle,
+                )
+            }
         } else {
             Box(
                 modifier = Modifier
@@ -127,6 +140,22 @@ fun AllAppsRow(
                 )
             }
         }
+        Box(
+            modifier = Modifier
+                .testTag(ALL_APPS_REMOVE_TAG)
+                .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+                .alpha(0.38f)
+                .semantics(mergeDescendants = true) {
+                    contentDescription = "Remove ${entry.label} from Home"
+                }
+                .padding(horizontal = 12.dp, vertical = 12.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            BasicText(
+                text = REMOVE_ACTION_TEXT,
+                style = onSurfaceStyle,
+            )
+        }
     }
 }
 
@@ -136,8 +165,14 @@ const val ALL_APPS_ROW_TAG: String = "allapps-row"
 /** Test tag on a directly rendered pre-decoded row icon (testing hook only). */
 const val ALL_APPS_ICON_TAG: String = "allapps-row-icon"
 
+/** Test tag on the visual-only Remove placeholder slot (testing hook only). */
+const val ALL_APPS_REMOVE_TAG: String = "allapps-remove"
+
 /** Visible label of the add control. */
 const val ADD_ACTION_TEXT: String = "Add"
+
+/** Visible label of the visual-only remove placeholder. */
+const val REMOVE_ACTION_TEXT: String = "Remove"
 
 /** Visible marker shown instead of the add control when the app is already on Home. */
 const val ADDED_MARKER_TEXT: String = "Added"
