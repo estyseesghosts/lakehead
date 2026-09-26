@@ -3,6 +3,8 @@ package me.foxtails.lakehead.feature.home
 import me.foxtails.lakehead.core.designsystem.GestureArbitration
 import me.foxtails.lakehead.core.designsystem.GestureArbitration.LockedAxis
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class HomeGestureArbitrationTest {
@@ -276,5 +278,23 @@ class HomeGestureArbitrationTest {
         assertEquals(HomeGestureWinner.TAP, values[5])
         assertEquals(HomeGestureWinner.SCROLL, values[6])
         assertEquals(HomeGestureWinner.BACKGROUND, values[7])
+    }
+
+    // ---- A2 holdsPager: tile touch never becomes page swipe ----
+
+    @Test
+    fun holdsPager_trueForSix() {
+        assertTrue(HomeGestureWinner.UNPIN.holdsPager())
+        assertTrue(HomeGestureWinner.HANDLE.holdsPager())
+        assertTrue(HomeGestureWinner.ACTIVE_RESIZE.holdsPager())
+        assertTrue(HomeGestureWinner.ACTIVE_MOVE.holdsPager())
+        assertTrue(HomeGestureWinner.SELECT_DRAG.holdsPager())
+        assertTrue(HomeGestureWinner.TAP.holdsPager())
+    }
+
+    @Test
+    fun holdsPager_falseForScrollAndBackground() {
+        assertFalse(HomeGestureWinner.SCROLL.holdsPager())
+        assertFalse(HomeGestureWinner.BACKGROUND.holdsPager())
     }
 }

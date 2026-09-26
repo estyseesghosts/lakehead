@@ -68,6 +68,24 @@ fun resolveHomeGesture(
 }
 
 /**
+ * A2 pager-hold mapping: tile-origin winners hold the pager so a tile touch
+ * never becomes a page swipe; [SCROLL]/[BACKGROUND] leave the pager free.
+ *
+ * True for UNPIN/HANDLE/ACTIVE_RESIZE/ACTIVE_MOVE/SELECT_DRAG/TAP, false for
+ * SCROLL/BACKGROUND. Pure, framework-free and unit-testable.
+ */
+fun HomeGestureWinner.holdsPager(): Boolean = when (this) {
+    HomeGestureWinner.UNPIN,
+    HomeGestureWinner.HANDLE,
+    HomeGestureWinner.ACTIVE_RESIZE,
+    HomeGestureWinner.ACTIVE_MOVE,
+    HomeGestureWinner.SELECT_DRAG,
+    HomeGestureWinner.TAP -> true
+    HomeGestureWinner.SCROLL,
+    HomeGestureWinner.BACKGROUND -> false
+}
+
+/**
  * Classifies the drag axis for home-screen arbitration, applying the diagonal
  * guard on top of [GestureArbitration.lockAxis].
  *

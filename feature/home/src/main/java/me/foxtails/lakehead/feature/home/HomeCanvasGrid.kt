@@ -158,6 +158,11 @@ internal fun HomeCanvasGrid(
     // editing, or shown shortcut surface) should hold pager swipe. Emitted via
     // LaunchedEffect; the caller (shell) owns the pager gate.
     onTransientHoldChange: (Boolean) -> Unit = {},
+    // A2 tile-touch hold: true from a tile-origin down until release (tap,
+    // select-drag, active move/resize) so the gesture never becomes a page
+    // swipe; background-origin gestures leave it false. Separate from the A1
+    // hold above; the shell ANDs both negations into userScrollEnabled.
+    onPagerHoldChange: (Boolean) -> Unit = {},
 ) {
     require(overscanRows >= 0L) { "overscanRows must be non-negative" }
     // P0 stale-hold guard: the transient hold triple (active edit, wiggle
@@ -166,15 +171,18 @@ internal fun HomeCanvasGrid(
     // reset above the early return so shell `homeHold` cannot stick true after
     // a populated→empty transition or grid disposal.
     val latestHoldCallback = rememberUpdatedState(onTransientHoldChange)
+    val latestPagerHoldCallback = rememberUpdatedState(onPagerHoldChange)
     val tilesEmpty = loaded.tiles.isEmpty()
     LaunchedEffect(tilesEmpty, loaded.requestedHomeId) {
         if (tilesEmpty) {
             latestHoldCallback.value(false)
+            latestPagerHoldCallback.value(false)
         }
     }
     DisposableEffect(loaded.requestedHomeId) {
         onDispose {
             latestHoldCallback.value(false)
+            latestPagerHoldCallback.value(false)
         }
     }
     if (tilesEmpty) {
@@ -221,6 +229,13 @@ internal fun HomeCanvasGrid(
             // UNDECIDED (never steal). Reset at gesture end; writes happen only on
             // lock transitions so scroll moves don't recompose per frame.
             var pagerAxisLock by remember { mutableStateOf(LockedAxis.UNDECIDED) }
+            // A2 tile-touch hold: true from a tile-origin down until release so
+            // the pager never steals the gesture. Plain remember alongside
+            // pagerAxisLock (gesture state, never persisted); reset per gesture
+            // and on home switch via key(requestedHomeId). Separate from the A1
+            // isHold above. Set once at down via resolveHomeGesture + holdsPager
+            // (snapshot-once, never flipped mid-gesture); cleared on release.
+            var pagerHold by remember { mutableStateOf(false) }
             // S2 swipe surface: transient pop-out for one tile's shortcuts. Hoisted
             // inside key(requestedHomeId) alongside scroll/edit state so a home switch
             // resets it. Edit entry stays authoritative: entering edit dismisses any
@@ -244,6 +259,13 @@ internal fun HomeCanvasGrid(
             )
             LaunchedEffect(isHold) {
                 latestHoldCallback.value(isHold)
+            }
+            // A2 tile-touch hold emission: forwards pagerHold to the shell via
+            // the hoisted latest callback so lambda recompositions never restart
+            // the emission. The top-level empty/dispose guards above force false
+            // on populated→empty transitions and grid disposal.
+            LaunchedEffect(pagerHold) {
+                latestPagerHoldCallback.value(pagerHold)
             }
             BackHandler(
                 enabled = active != null || shownSurface != null || interactionEditing != null,
@@ -489,6 +511,19 @@ internal fun HomeCanvasGrid(
                             tile.position.row + tile.span.rows
                     }
                     val downScroll = scrollState.value
+                    // A2 single arbitration for the idle gesture: route the down-hit
+                    // through resolveHomeGesture so a tile-origin touch holds the
+                    // pager for the whole gesture (snapshot-once, never flipped
+                    // mid-gesture even with horizontal motion). Wiggle-editing
+                    // tile downs arbitrate as SELECT_DRAG, plain tile downs as
+                    // TAP, empty-grid downs as BACKGROUND (pager stays free).
+                    val idleWinner = resolveHomeGesture(
+                        isSelectDrag = interactionSnapshot.value is HomeInteractionController.Editing &&
+                            downTile != null,
+                        isTap = downTile != null,
+                        isBackground = downTile == null,
+                    )
+                    pagerHold = idleWinner.holdsPager()
                     val tracker = VelocityTracker()
                     tracker.addPosition(down.uptimeMillis, startPos)
                     var lock = LockedAxis.UNDECIDED
@@ -543,6 +578,10 @@ internal fun HomeCanvasGrid(
                             surface = surfaceState.value.showSurface(downTile.itemId)
                         }
                     }
+                    // A2 release: tile-touch hold ends with the gesture. A shown
+                    // surface (if the flick classified COMPLETE above) keeps the
+                    // pager held via the separate A1 isHold signal.
+                    pagerHold = false
                 }
             }
             // Unified move/resize drag handler on the parent Box. The resize handle is
@@ -637,6 +676,18 @@ internal fun HomeCanvasGrid(
                         handleSizePx,
                     )
                     val isOnHandle = startInHandle || slopInHandle
+                    // A2 single arbitration for the active drag: route the
+                    // start-decided routing through resolveHomeGesture so the
+                    // drag holds the pager for its lifetime. Handle-origin →
+                    // HANDLE/ACTIVE_RESIZE, body-origin → ACTIVE_MOVE; all hold
+                    // (snapshot-once, never flipped mid-gesture; steal-cancel
+                    // keeps last-valid with zero-write per W4).
+                    val dragWinner = resolveHomeGesture(
+                        isOnHandle = isOnHandle,
+                        isActiveResize = isOnHandle,
+                        isActiveMove = !isOnHandle,
+                    )
+                    pagerHold = dragWinner.holdsPager()
                     if (isOnHandle) {
                         // RESIZE mode: corner-anchored span updates.
                         editSession = sessionState.value.beginResize()
@@ -718,7 +769,10 @@ internal fun HomeCanvasGrid(
                             editSession = HomeEditSession.Idle
                         }
                         // W4: reset pager axis lock once after resize release/cancel.
+                        // A2: tile-touch hold ends with the drag; the session stays
+                        // in edit so the A1 isHold signal keeps holding the pager.
                         pagerAxisLock = LockedAxis.UNDECIDED
+                        pagerHold = false
                     } else {
                         // MOVE mode: pointer position maps to a candidate cell.
                         // W3 single-gesture rule (W4 owns arbitration): routing was
@@ -783,7 +837,10 @@ internal fun HomeCanvasGrid(
                         }
                         editSession = HomeEditSession.Idle
                         // W4: reset pager axis lock once after move release/cancel.
+                        // A2: tile-touch hold ends with the drag; the session is
+                        // Idle so neither hold keeps the pager.
                         pagerAxisLock = LockedAxis.UNDECIDED
+                        pagerHold = false
                     }
                 }
             }

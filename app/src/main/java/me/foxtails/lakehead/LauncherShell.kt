@@ -152,6 +152,11 @@ internal fun LauncherShell(
     // never persisted. ANDed into userScrollEnabled below; the pill's
     // programmatic animateScrollToPage is unaffected by userScrollEnabled.
     var homeHold by remember { mutableStateOf(false) }
+    // A2 transient tile-touch hold: true from a tile-origin down until release
+    // (tap, select-drag, active move/resize) so the gesture never becomes a
+    // page swipe. Plain remember alongside homeHold; ANDed into
+    // userScrollEnabled below; the pill is unaffected.
+    var pagerHold by remember { mutableStateOf(false) }
 
     Box(
         modifier = modifier
@@ -162,7 +167,7 @@ internal fun LauncherShell(
             state = pagerState,
             modifier = Modifier.fillMaxSize(),
             beyondViewportPageCount = 1,
-            userScrollEnabled = isPagerSwipeEnabled(pickerBlocksPager, pagerWinner, homeHold),
+            userScrollEnabled = isPagerSwipeEnabled(pickerBlocksPager, pagerWinner, homeHold, pagerHold),
         ) { page ->
             when (page) {
                 LAUNCHER_PAGE_FEED -> FeedSurface(
@@ -208,6 +213,7 @@ internal fun LauncherShell(
                     onRemoveTile = onRemoveTile,
                     bottomClearance = bottomClearance,
                     onTransientHoldChange = { homeHold = it },
+                    onPagerHoldChange = { pagerHold = it },
                 )
             }
         }
@@ -227,6 +233,10 @@ internal fun LauncherShell(
  * arbitration did not award the gesture to the picker, and home is not
  * holding (active edit, wiggle editing, or shown shortcut surface).
  *
+ * A2 adds the tile-touch hold: swipe is additionally disabled while
+ * [pagerHold] is true (tile-origin down until release), so a tile touch never
+ * becomes a page swipe. Background-origin gestures leave [pagerHold] false.
+ *
  * Pure boolean AND, framework-free and unit-testable. Programmatic pill
  * navigation via `animateScrollToPage` bypasses `userScrollEnabled` and is
  * unaffected by this gate.
@@ -235,4 +245,5 @@ internal fun isPagerSwipeEnabled(
     pickerBlocksPager: Boolean,
     pagerWinner: ArbWinner,
     homeHold: Boolean,
-): Boolean = !pickerBlocksPager && pagerWinner != ArbWinner.PICKER && !homeHold
+    pagerHold: Boolean = false,
+): Boolean = !pickerBlocksPager && pagerWinner != ArbWinner.PICKER && !homeHold && !pagerHold

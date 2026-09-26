@@ -47,11 +47,16 @@ import me.foxtails.lakehead.core.model.LogicalSpan
  * - A1 hold signal: [onTransientHoldChange] reports transient hold state owned by
  *   [HomeCanvasGrid] (active edit, wiggle editing, or shown surface) so the shell
  *   can gate pager swipe. Programmatic pill navigation is unaffected.
++ * - A2 tile-touch hold: [onPagerHoldChange] reports the per-press tile-origin
++ *   hold owned by [HomeCanvasGrid] (tile down until release) so a tile touch
++ *   never becomes a page swipe. Separate from the A1 hold; the shell ANDs both.
  *
  * @param onRequestDefaultHome retained for a future settings entry; currently unused by
  * this canvas (no HOME-role overlay is rendered).
  * @param onTransientHoldChange pass-through hold callback forwarded to
  * [HomeCanvasGrid]; invoked with true while held, false when released.
++ * @param onPagerHoldChange pass-through tile-touch hold callback forwarded to
++ * [HomeCanvasGrid]; invoked with true from a tile-origin down until release.
  */
 @Suppress("UNUSED_PARAMETER")
 @Composable
@@ -71,6 +76,7 @@ fun HomeCanvas(
     onSurfaceTogglePin: (ItemId, String) -> Unit = { _, _ -> },
     bottomClearance: Dp = 0.dp,
     onTransientHoldChange: (Boolean) -> Unit = {},
+    onPagerHoldChange: (Boolean) -> Unit = {},
 ) {
     require(overscanRows >= 0L) { "overscanRows must be non-negative" }
     // P0 stale-hold guard: Loading/NotFound never compose HomeCanvasGrid, so
@@ -78,14 +84,20 @@ fun HomeCanvas(
     // false emission + dispose reset here; Loaded (empty or populated) stays
     // owned by the grid.
     val latestHoldCallback = rememberUpdatedState(onTransientHoldChange)
+    // A2 stale-hold guard: same Loading/NotFound + dispose reset for the
+    // separate tile-touch `pagerHold` so it cannot stick true when the grid
+    // never composes.
+    val latestPagerHoldCallback = rememberUpdatedState(onPagerHoldChange)
     LaunchedEffect(state) {
         if (shouldResetCanvasHold(state)) {
             latestHoldCallback.value(false)
+            latestPagerHoldCallback.value(false)
         }
     }
     DisposableEffect(Unit) {
         onDispose {
             latestHoldCallback.value(false)
+            latestPagerHoldCallback.value(false)
         }
     }
     when (state) {
@@ -119,6 +131,7 @@ fun HomeCanvas(
                     onSurfaceExecute = onSurfaceExecute,
                     onSurfaceTogglePin = onSurfaceTogglePin,
                     onTransientHoldChange = onTransientHoldChange,
+                    onPagerHoldChange = onPagerHoldChange,
                 )
                 Spacer(
                     modifier = Modifier.fillMaxWidth().height(bottomClearance),
