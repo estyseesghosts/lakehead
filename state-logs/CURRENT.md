@@ -1,9 +1,9 @@
 # Current execution state
-- Phase: Phase C follow-up — **CODE-COMPLETE, DEVICE-PENDING**. Feed honesty and theme text changes are complete with unit validation; device proof NOT-RUN.
-- Active objective: User device verification of feed selector behavior and light/dark text readability, then regression fixes for move/unpin two-button behavior.
-- Owner: user (manual device validation).
-- Latest handoff: [`handoffs/2026-09-26-feed-query-theme.md`](handoffs/2026-09-26-feed-query-theme.md).
-- Device: NOT-RUN — verify no-provider fallback (`No feed installed`), honest no-op selection, provider `Available`/selected/hosted state, and dark/light readability screenshots.
-- Build/test/lint: **SUCCESS** — assembleDebug, test, lint, feed tests, and module_graph. Audits clean apart from pre-existing findings.
-- Known issues: Regression fixes intentionally not made pending device verification; `onEnterEdit` is currently dead and Active is never entered, so move/remove/resize controls do not become reachable.
-- Exact next operation: User records feed selector and theme readability proofs as PASS/FAIL; exit when those proofs are complete, then implement the bounded move/unpin regression fixes.
+- Phase: Move/twin-controls — **CODE-COMPLETE, DEVICE-PENDING**.
+- Active objective: User/device verification of move, resize, and unpin flows.
+- Owner: user/device validation.
+- Latest handoff: [`handoffs/2026-09-26-move-twin-controls.md`](handoffs/2026-09-26-move-twin-controls.md).
+- Device: NOT-RUN — verify actual long-press body drag commit, collision snapback, resize commit/block, edge controls, and unpin persistence.
+- Build/test/lint: **SUCCESS** — feature home unit, assembleDebug, test, lint, androidTest Kotlin compile, repo_map/module_graph. Audits only have pre-existing findings.
+- Known issues: Device/instrumentation proof remains outstanding; do not claim move, resize, or unpin behavior is device-verified.
+- Exact next operation: User/device verifies move, resize, and unpin flows; exit when those proofs are recorded PASS/FAIL, then create a bounded follow-up for any failures.
