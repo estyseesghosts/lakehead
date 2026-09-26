@@ -1,6 +1,8 @@
 package me.foxtails.lakehead.feature.home
 
 import me.foxtails.lakehead.core.designsystem.PixelRect
+import me.foxtails.lakehead.core.designsystem.SignedPixelFrame
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -86,5 +88,65 @@ class IsInHandleTest {
     @Test(expected = IllegalArgumentException::class)
     fun nonPositiveHandle_throws() {
         isInHandle(180f, 180f, bounds, 0)
+    }
+
+    // ---- B3 hardening: signed-frame parity ----
+
+    @Test
+    fun signedFrame_parityWithPixelRect() {
+        // B3: the G3 SignedPixelFrame overload applies the identical
+        // bottom-right inward rule. Same 200x200 footprint, same 48px handle:
+        // every verdict must agree with the PixelRect overload above.
+        val signed = SignedPixelFrame(left = 0, top = 0, widthPx = 200, heightPx = 200)
+        assertEquals(isInHandle(50f, 50f, bounds, handlePx), isInHandle(50f, 50f, signed, handlePx))
+        assertEquals(isInHandle(180f, 180f, bounds, handlePx), isInHandle(180f, 180f, signed, handlePx))
+        assertEquals(isInHandle(152f, 152f, bounds, handlePx), isInHandle(152f, 152f, signed, handlePx))
+        assertEquals(isInHandle(200f, 200f, bounds, handlePx), isInHandle(200f, 200f, signed, handlePx))
+        assertEquals(isInHandle(151f, 180f, bounds, handlePx), isInHandle(151f, 180f, signed, handlePx))
+        assertEquals(isInHandle(201f, 200f, bounds, handlePx), isInHandle(201f, 200f, signed, handlePx))
+        assertTrue(isInHandle(180f, 180f, signed, handlePx))
+        assertFalse(isInHandle(50f, 50f, signed, handlePx))
+    }
+
+    @Test
+    fun signedFrame_negativeTop_stillInward() {
+        // B3: content above the row origin carries a negative top. A frame at
+        // top=-100 (height 200 → bottom=100): the handle is [52,100] in y,
+        // still inward over the corner, never outward past the tile.
+        val above = SignedPixelFrame(left = 0, top = -100, widthPx = 200, heightPx = 200)
+        assertTrue(isInHandle(180f, 80f, above, handlePx))
+        assertTrue(isInHandle(200f, 100f, above, handlePx))
+        assertFalse(isInHandle(180f, 51f, above, handlePx))
+        assertFalse(isInHandle(180f, 101f, above, handlePx))
+        assertFalse(isInHandle(201f, 80f, above, handlePx))
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun signedFrame_nonPositiveHandle_throws() {
+        val signed = SignedPixelFrame(left = 0, top = 0, widthPx = 200, heightPx = 200)
+        isInHandle(180f, 180f, signed, 0)
+    }
+
+    // ---- B3 hardening: origin-vs-live distinction ----
+
+    @Test
+    fun routing_mustUseOriginSnapshot_notLiveBounds() {
+        // B3: drag routing hit-tests the ORIGIN snapshot (fixed at gesture
+        // start), never the live candidate bounds that grow during the drag.
+        // A 1x1 origin (0,0,100,100, handle [52,100]) resized toward 2x2 live
+        // bounds (0,0,208,208, handle [160,208]): point (170,170) sits inside
+        // the LIVE handle but outside the ORIGIN footprint — routing it as
+        // RESIZE would promote a body-origin MOVE mid-gesture. The grid passes
+        // the origin snapshot, so this point routes MOVE (false here).
+        val originBounds = PixelRect(left = 0, top = 0, right = 100, bottom = 100)
+        val liveBounds = PixelRect(left = 0, top = 0, right = 208, bottom = 208)
+        assertFalse(isInHandle(170f, 170f, originBounds, handlePx))
+        assertTrue(isInHandle(170f, 170f, liveBounds, handlePx))
+        // Conversely a point in the origin handle (90,90 in [52,100]) falls
+        // OUTSIDE the grown live handle ([160,208]) — re-testing against
+        // live bounds mid-gesture would wrongly demote a true RESIZE. Both
+        // directions prove routing must snapshot once at gesture start.
+        assertTrue(isInHandle(90f, 90f, originBounds, handlePx))
+        assertFalse(isInHandle(90f, 90f, liveBounds, handlePx))
     }
 }

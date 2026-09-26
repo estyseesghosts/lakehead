@@ -287,4 +287,95 @@ class ResizeDragMathTest {
         )
         assertEquals(LogicalSpan(3, 2), RenderableSpans.quantize(raw, columns = 5))
     }
+
+    // ---- B3 hardening: far-OOB raw, originX offset, rest-offset regression ----
+
+    @Test
+    fun rawSpan_farOutsideBottomRight_growsUnbounded() {
+        // B3: the raw span is unclamped math — a pointer ten strides out yields
+        // an 11x11 raw span. Clamping to the allowlist/columns and legality
+        // stays with RenderableSpans.quantize + core:grid; rawSpan never clips.
+        val span = ResizeDragMath.rawSpan(
+            pointerXPx = 10 * stride,
+            pointerYPx = 10 * stride,
+            originPosition = LogicalPosition(0, 0),
+            cellSizePx = cellSize,
+            columnGapPx = gap,
+            rowGapPx = gap,
+        )
+        assertEquals(LogicalSpan(11, 11), span)
+    }
+
+    @Test
+    fun rawSpan_farOutsideTopLeft_clampsTo1x1() {
+        // B3: far out-of-bounds above/left of the origin still floors at 1x1 —
+        // the minimum guarantee holds no matter how negative the delta is.
+        val span = ResizeDragMath.rawSpan(
+            pointerXPx = -500f,
+            pointerYPx = -500f,
+            originPosition = LogicalPosition(0, 0),
+            cellSizePx = cellSize,
+            columnGapPx = gap,
+            rowGapPx = gap,
+        )
+        assertEquals(LogicalSpan(1, 1), span)
+    }
+
+    @Test
+    fun rawSpan_centeredOriginX_offsetsPointerCorrectly() {
+        // B3: the caller-centered originX shifts the origin cell's left edge.
+        // originX=13 → origin left = 13. Pointer at x=60 is still inside the
+        // origin cell (dx=47 < stride 52) → 1 column. Without the offset the
+        // same pointer (dx=60) would read as 2 columns — the offset matters.
+        val span = ResizeDragMath.rawSpan(
+            pointerXPx = 60f,
+            pointerYPx = 0f,
+            originPosition = LogicalPosition(0, 0),
+            cellSizePx = cellSize,
+            columnGapPx = gap,
+            rowGapPx = gap,
+            originXPx = 13f,
+        )
+        assertEquals(LogicalSpan(1, 1), span)
+        // One stride right of the shifted origin left → 2 columns.
+        val twoWide = ResizeDragMath.rawSpan(
+            pointerXPx = 13f + stride,
+            pointerYPx = 0f,
+            originPosition = LogicalPosition(0, 0),
+            cellSizePx = cellSize,
+            columnGapPx = gap,
+            rowGapPx = gap,
+            originXPx = 13f,
+        )
+        assertEquals(LogicalSpan(2, 1), twoWide)
+    }
+
+    @Test
+    fun rawSpan_negativeRestOffset_regression() {
+        // B3 rest-offset regression: tall content anchors above with a negative
+        // rest. Origin (0,0), rowOrigin 0, rest -20 → top = -20. Pointer y=32
+        // gives dy=52 → rows = 2. Under the old rest-agnostic top (0) the same
+        // pointer (dy=32) would read rows = 1 — the rest offset is load-bearing.
+        val span = ResizeDragMath.rawSpan(
+            pointerXPx = 0f,
+            pointerYPx = 32f,
+            originPosition = LogicalPosition(0, 0),
+            cellSizePx = cellSize,
+            columnGapPx = gap,
+            rowGapPx = gap,
+            rowOrigin = 0L,
+            originYPxRestPx = -20f,
+        )
+        assertEquals(LogicalSpan(1, 2), span)
+        // Same pointer with zero rest → still inside the origin cell.
+        val withoutRest = ResizeDragMath.rawSpan(
+            pointerXPx = 0f,
+            pointerYPx = 32f,
+            originPosition = LogicalPosition(0, 0),
+            cellSizePx = cellSize,
+            columnGapPx = gap,
+            rowGapPx = gap,
+        )
+        assertEquals(LogicalSpan(1, 1), withoutRest)
+    }
 }

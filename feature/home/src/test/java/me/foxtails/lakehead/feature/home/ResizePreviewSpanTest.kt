@@ -30,10 +30,12 @@ class ResizePreviewSpanTest {
         id: String,
         spanColumns: Int = 2,
         spanRows: Int = 2,
+        column: Int = 0,
+        row: Int = 0,
     ) = HomeRenderTile(
         itemId = ItemId(id),
         appIdentity = identity,
-        position = LogicalPosition(0, 0),
+        position = LogicalPosition(column, row),
         span = LogicalSpan(spanColumns, spanRows),
         availability = ItemAvailability.AVAILABLE,
         label = id,
@@ -105,5 +107,51 @@ class ResizePreviewSpanTest {
     @Test
     fun touchTarget_is48dp() {
         assertEquals(48, RESIZE_TOUCH_DP)
+    }
+
+    // ---- B3 hardening: invalid keeps last-valid, commit null on blocked-only ----
+
+    @Test
+    fun previewSpan_blockedProposal_keepsLastValid() {
+        // B3 last-valid hold at the preview-span level: reach a valid 3x2,
+        // then push into the obstacle at column 3. The preview span (both
+        // animated and reduced-motion branches) stays at the held 3x2 while
+        // validity reports the collision — the error overlay flips color but
+        // the frame never follows the pointer into illegal territory.
+        val t = tile("app-a")
+        val obstacle = tile("app-b", spanColumns = 1, spanRows = 1, column = 3, row = 0)
+        val placements = listOf(t, obstacle)
+        val session = HomeEditSession.Idle.enterIfLaunchable(t, placements, columns = 5, rows = 10)
+            .beginResize()
+            .updateResizeCandidate(LogicalSpan(3, 2), placements, columns = 5, rows = 10)
+            .updateResizeCandidate(LogicalSpan(4, 2), placements, columns = 5, rows = 10)
+        val active = session as HomeEditSession.Active
+
+        assertEquals(CandidateValidity.COLLIDING, active.candidateValidity)
+        assertEquals(GridSpan(3, 2), resizePreviewSpan(active, reducedMotion = false))
+        assertEquals(
+            resizePreviewSpan(active, reducedMotion = false),
+            resizePreviewSpan(active, reducedMotion = true),
+        )
+    }
+
+    @Test
+    fun commitSpan_blockedOnly_isNull() {
+        // B3 blocked-only release: the preview never leaves the 1x1 origin
+        // (2x1 collides with the neighbour at column 1), so there is nothing
+        // to persist — zero writes. The preview span still renders the origin.
+        val t = tile("app-a", spanColumns = 1, spanRows = 1)
+        val obstacle = tile("app-b", spanColumns = 1, spanRows = 1, column = 1, row = 0)
+        val placements = listOf(t, obstacle)
+        val session = HomeEditSession.Idle.enterIfLaunchable(t, placements, columns = 5, rows = 10)
+            .beginResize()
+            .updateResizeCandidate(LogicalSpan(2, 1), placements, columns = 5, rows = 10)
+        val active = session as HomeEditSession.Active
+
+        assertEquals(CandidateValidity.COLLIDING, active.candidateValidity)
+        assertEquals(null, session.resizeCommitSpan())
+        assertEquals(false, session.hasResized())
+        assertEquals(GridSpan(1, 1), resizePreviewSpan(active, reducedMotion = false))
+        assertEquals(GridSpan(1, 1), resizePreviewSpan(active, reducedMotion = true))
     }
 }
