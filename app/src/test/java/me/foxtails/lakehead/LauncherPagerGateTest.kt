@@ -88,4 +88,58 @@ class LauncherPagerGateTest {
             ),
         )
     }
+
+    // S1 settings-menu hold.
+
+    @Test
+    fun settingsClosed_keepsSwipeEnabled() {
+        assertTrue(
+            isPagerSwipeEnabled(
+                pickerBlocksPager = false,
+                pagerWinner = ArbWinner.UNDECIDED,
+                homeHold = false,
+                isSettingsOpen = false,
+            ),
+        )
+    }
+
+    @Test
+    fun settingsOpen_disablesSwipe() {
+        assertFalse(
+            isPagerSwipeEnabled(
+                pickerBlocksPager = false,
+                pagerWinner = ArbWinner.UNDECIDED,
+                homeHold = false,
+                isSettingsOpen = true,
+            ),
+        )
+    }
+
+    @Test
+    fun settingsOpen_disablesSwipeEvenWhenAllOtherGuardsClear() {
+        assertFalse(
+            isPagerSwipeEnabled(
+                pickerBlocksPager = false,
+                pagerWinner = ArbWinner.HORIZONTAL,
+                homeHold = false,
+                pagerHold = false,
+                pagerRegionAllowed = true,
+                isSettingsOpen = true,
+            ),
+        )
+    }
+
+    @Test
+    fun defaultGate_omitsSettingsHold() {
+        // Callers that do not hoist the menu keep the A3 behavior exactly.
+        assertTrue(
+            isPagerSwipeEnabled(
+                pickerBlocksPager = false,
+                pagerWinner = ArbWinner.UNDECIDED,
+                homeHold = false,
+                pagerHold = false,
+                pagerRegionAllowed = true,
+            ),
+        )
+    }
 }

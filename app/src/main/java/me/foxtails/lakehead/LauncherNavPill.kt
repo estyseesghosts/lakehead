@@ -22,7 +22,10 @@ private const val ALL_APPS_GLYPH = "A"
  * Presentation only: [selectedPage] is caller-acquired (the launcher pager's current page)
  * and [onSelectPage] is a raw press signal; this composable holds no pager, scroll, or
  * saveable selection state. Tabs map to [LAUNCHER_PAGE_FEED], [LAUNCHER_PAGE_TILE], and
- * [LAUNCHER_PAGE_ALL_APPS] in order. The caller's [modifier] is expected to carry the
+ * [LAUNCHER_PAGE_ALL_APPS] in order. [onHomeLongPress] is an optional raw long-press
+ * signal carried by the middle (Home) button only (null keeps a plain click with no
+ * long-click node; non-null exposes combined click + long-click); Feed and All Apps
+ * expose no long-click action. The caller's [modifier] is expected to carry the
  * [androidx.compose.foundation.layout.BoxScope.align] placement; [bottomSafetyInset] only
  * lifts the pill above the system-gesture zone.
  */
@@ -32,6 +35,7 @@ fun LauncherNavPill(
     onSelectPage: (Int) -> Unit,
     modifier: Modifier = Modifier,
     bottomSafetyInset: Dp = 0.dp,
+    onHomeLongPress: (() -> Unit)? = null,
 ) {
     require(bottomSafetyInset.value >= 0f) {
         "bottomSafetyInset must be non-negative, was $bottomSafetyInset"
@@ -52,6 +56,7 @@ fun LauncherNavPill(
             enabled = true,
             contentDescription = "Home",
             onPress = { onSelectPage(LAUNCHER_PAGE_TILE) },
+            onLongPress = onHomeLongPress,
         ) {
             BasicText(text = HOME_GLYPH)
         }

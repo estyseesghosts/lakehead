@@ -1,8 +1,10 @@
 package me.foxtails.lakehead.core.designsystem
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
@@ -173,13 +175,17 @@ internal fun resolveNavigationControlColors(selected: Boolean): NavigationContro
  * emphasis and reduced alpha — they carry no destination or navigation state.
  * [contentDescription] is the required caller-supplied TalkBack label and must
  * be non-blank. [onPress] is a raw press signal only: it navigates nowhere and
- * changes no selection by itself. Slot [content] must be a label-free glyph;
+ * changes no selection by itself. [onLongPress] is an optional raw long-press
+ * signal (same ownership as [onPress]): when non-null the button exposes a
+ * long-click action alongside the press; when null the button uses a plain
+ * click with no long-click node. Slot [content] must be a label-free glyph;
  * the button merges descendants into a single accessible node.
  *
  * The caller's [modifier] is preserved within an enforced 48dp minimum touch
  * target, so undersized caller sizes cannot shrink the control below the
  * accessible minimum.
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun NavigationControlButton(
     selected: Boolean,
@@ -187,11 +193,24 @@ fun NavigationControlButton(
     contentDescription: String,
     onPress: () -> Unit,
     modifier: Modifier = Modifier,
+    onLongPress: (() -> Unit)? = null,
     content: @Composable BoxScope.() -> Unit,
 ) {
     require(contentDescription.isNotBlank()) { "contentDescription must be non-blank" }
 
     val colors = resolveNavigationControlColors(selected)
+    // Null long-press keeps a plain click (no long-click semantics node);
+    // non-null upgrades to a combined click that preserves the press signal.
+    val interactionModifier = if (onLongPress != null) {
+        Modifier.combinedClickable(
+            enabled = enabled,
+            role = Role.Button,
+            onLongClick = onLongPress,
+            onClick = onPress,
+        )
+    } else {
+        Modifier.clickable(enabled = enabled, role = Role.Button, onClick = onPress)
+    }
     Box(
         contentAlignment = Alignment.Center,
         modifier = Modifier
@@ -208,7 +227,7 @@ fun NavigationControlButton(
                 color = colors.outline,
                 shape = CircleShape,
             )
-            .clickable(enabled = enabled, role = Role.Button, onClick = onPress)
+            .then(interactionModifier)
             .semantics(mergeDescendants = true) {
                 // Note: no `disabled()` marker is set here. `clickable(enabled =
                 // false)` already exposes the disabled semantics through the

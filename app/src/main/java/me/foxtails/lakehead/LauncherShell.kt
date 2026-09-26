@@ -48,6 +48,7 @@ import me.foxtails.lakehead.feature.home.HomeCanvas
 import me.foxtails.lakehead.feature.home.HomeCanvasViewportStyle
 import me.foxtails.lakehead.feature.home.HomeRenderState
 import me.foxtails.lakehead.platform.feed.FeedAvailability
+import me.foxtails.lakehead.platform.feed.FeedProviderId
 
 /** Feed page index in the launcher pager. */
 const val LAUNCHER_PAGE_FEED = 0
@@ -100,6 +101,13 @@ const val LAUNCHER_PAGE_COUNT = 3
  * ANDed into `userScrollEnabled` alongside the picker/winner/homeHold/
  * pagerHold guards. Top-67% starts never page; bottom-33% starts page unless
  * another guard holds. The pill bypasses `userScrollEnabled` and always works.
+ *
+ * S1 settings menu: the shell hoists transient `isSettingsOpen` (plain
+ * `remember`, never persisted). A Home long-press opens the menu; Back, the
+ * scrim, or a provider pick dismisses it, and the pick reports through
+ * [onSelectFeedProvider] (binding stays with the caller). While open the pager
+ * sets `userScrollEnabled = false`, so swipe navigation is held; programmatic
+ * pill navigation still works.
  */
 @Composable
 internal fun LauncherShell(
@@ -126,6 +134,9 @@ internal fun LauncherShell(
     onSurfaceExecute: (ItemId, String) -> Unit = { _, _ -> },
     onSurfaceTogglePin: (ItemId, String) -> Unit = { _, _ -> },
     onHeaderTap: (String) -> Unit = {},
+    // S1 settings menu: reports the feed provider picked in the transient
+    // settings menu. The shell dismisses the menu; binding stays with the caller.
+    onSelectFeedProvider: (FeedProviderId) -> Unit = {},
     modifier: Modifier = Modifier,
     initialPage: Int = LAUNCHER_PAGE_TILE,
     viewportStyle: HomeCanvasViewportStyle = HomeCanvasViewportStyle(),
@@ -194,6 +205,11 @@ internal fun LauncherShell(
     // alongside picker/winner/homeHold/pagerHold. The pill is unaffected.
     var shellHeightPx by remember { mutableFloatStateOf(0f) }
     var pagerRegionAllowed by remember { mutableStateOf(true) }
+    // S1 transient settings menu: true from a Home long-press until dismiss or
+    // provider pick. Plain remember: gesture state, never persisted. ANDed into
+    // userScrollEnabled below; the pill's programmatic animateScrollToPage is
+    // unaffected by userScrollEnabled.
+    var isSettingsOpen by remember { mutableStateOf(false) }
 
     Box(
         modifier = modifier
@@ -228,7 +244,7 @@ internal fun LauncherShell(
             state = pagerState,
             modifier = Modifier.fillMaxSize(),
             beyondViewportPageCount = 1,
-            userScrollEnabled = isPagerSwipeEnabled(pickerBlocksPager, pagerWinner, homeHold, pagerHold, pagerRegionAllowed),
+            userScrollEnabled = isPagerSwipeEnabled(pickerBlocksPager, pagerWinner, homeHold, pagerHold, pagerRegionAllowed, isSettingsOpen),
         ) { page ->
             when (page) {
                 LAUNCHER_PAGE_FEED -> FeedSurface(
@@ -289,6 +305,19 @@ internal fun LauncherShell(
             },
             modifier = Modifier.align(Alignment.BottomCenter),
             bottomSafetyInset = gestureBottom,
+            onHomeLongPress = { isSettingsOpen = true },
+        )
+        // S1 settings menu floats above the pager and the pill. A provider pick
+        // reports through onSelectFeedProvider then dismisses; Back and the scrim
+        // dismiss without reporting.
+        SettingsMenuOverlay(
+            isOpen = isSettingsOpen,
+            availability = feedAvailability,
+            onDismiss = { isSettingsOpen = false },
+            onSelectProvider = { provider ->
+                onSelectFeedProvider(provider)
+                isSettingsOpen = false
+            },
         )
     }
 }
@@ -307,6 +336,10 @@ internal fun LauncherShell(
  * fell in the bottom strip per `isBottomRegionStart`). Top-67% starts never
  * page on any page. Defaults to true so pre-measurement behavior matches A2.
  *
+ * S1 adds the transient settings-menu hold: swipe is additionally disabled
+ * while [isSettingsOpen] is true (the settings menu is up). Defaults to false
+ * so callers that do not hoist the menu keep the A3 behavior exactly.
+ *
  * Pure boolean AND, framework-free and unit-testable. Programmatic pill
  * navigation via `animateScrollToPage` bypasses `userScrollEnabled` and is
  * unaffected by this gate.
@@ -317,4 +350,5 @@ internal fun isPagerSwipeEnabled(
     homeHold: Boolean,
     pagerHold: Boolean = false,
     pagerRegionAllowed: Boolean = true,
-): Boolean = !pickerBlocksPager && pagerWinner != ArbWinner.PICKER && !homeHold && !pagerHold && pagerRegionAllowed
+    isSettingsOpen: Boolean = false,
+): Boolean = !pickerBlocksPager && pagerWinner != ArbWinner.PICKER && !homeHold && !pagerHold && pagerRegionAllowed && !isSettingsOpen

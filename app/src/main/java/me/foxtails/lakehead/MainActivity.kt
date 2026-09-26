@@ -228,6 +228,9 @@ class MainActivity : ComponentActivity() {
                 },
                 onRequestDefaultHome = ::requestDefaultHome,
                 feedAvailability = feedAvailability,
+                // S1: menu picks attach directly (non-suspend tryLock path); the
+                // shell dismisses the menu around this call.
+                onSelectFeedProvider = { feedGateway.attach(it) },
                 onMoveTile = { itemId, position ->
                     lifecycleScope.launch {
                         routeLoader.commitMove(itemId, position)
