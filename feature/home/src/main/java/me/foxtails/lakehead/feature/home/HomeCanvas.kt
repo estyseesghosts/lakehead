@@ -11,6 +11,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import me.foxtails.lakehead.core.designsystem.ShortcutSurfaceEntry
 import me.foxtails.lakehead.core.model.AppIdentity
 import me.foxtails.lakehead.core.model.ItemId
 import me.foxtails.lakehead.core.model.LogicalPosition
@@ -35,6 +36,11 @@ import me.foxtails.lakehead.core.model.LogicalSpan
  *   reports a resize-committed [ItemId] and [LogicalSpan], and [onRemoveTile] reports a
  *   remove-tap [ItemId]. The caller owns persistence. This composable performs no
  *   writes itself.
+ * - The swipe surface is transient presentation state owned by [HomeCanvasGrid]:
+ *   [surfaceEntries] carries the rank-ordered shortcut rows for the currently shown
+ *   tile (empty until shortcut discovery lands), and row taps report
+ *   [onSurfaceExecute]/[onSurfaceTogglePin] with the shown [ItemId] and entry id.
+ *   Execution and pin persistence stay with the caller.
  *
  * @param onRequestDefaultHome retained for a future settings entry; currently unused by
  * this canvas (no HOME-role overlay is rendered).
@@ -52,6 +58,9 @@ fun HomeCanvas(
     onMoveTile: (ItemId, LogicalPosition) -> Unit = { _, _ -> },
     onResizeTile: (ItemId, LogicalSpan) -> Unit = { _, _ -> },
     onRemoveTile: (ItemId) -> Unit = {},
+    surfaceEntries: List<ShortcutSurfaceEntry> = emptyList(),
+    onSurfaceExecute: (ItemId, String) -> Unit = { _, _ -> },
+    onSurfaceTogglePin: (ItemId, String) -> Unit = { _, _ -> },
     bottomClearance: Dp = 0.dp,
 ) {
     require(overscanRows >= 0L) { "overscanRows must be non-negative" }
@@ -82,6 +91,9 @@ fun HomeCanvas(
                     onMoveTile = onMoveTile,
                     onResizeTile = onResizeTile,
                     onRemoveTile = onRemoveTile,
+                    surfaceEntries = surfaceEntries,
+                    onSurfaceExecute = onSurfaceExecute,
+                    onSurfaceTogglePin = onSurfaceTogglePin,
                 )
                 Spacer(
                     modifier = Modifier.fillMaxWidth().height(bottomClearance),
