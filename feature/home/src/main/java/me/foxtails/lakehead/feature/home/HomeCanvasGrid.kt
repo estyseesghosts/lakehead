@@ -398,6 +398,7 @@ internal fun HomeCanvasGrid(
                     originX = originX,
                     rowOrigin = rowOrigin,
                     originYPx = originYPx,
+                    scrollYPx = scrollState.value.toFloat(),
                 ),
             )
             // Tap on the grid background (outside any tile) cancels an active edit
@@ -444,6 +445,7 @@ internal fun HomeCanvasGrid(
                         windowFirstRow = snapshot.rowOrigin,
                         originXPx = snapshot.originX.toFloat(),
                         originYPxPx = snapshot.originYPx.toFloat(),
+                        scrollYPx = snapshot.scrollYPx,
                     )
                     val downTile = snapshot.tiles.firstOrNull { tile ->
                         downCell.column in tile.position.column until
@@ -534,6 +536,10 @@ internal fun HomeCanvasGrid(
                         ?: return@awaitEachGesture
                     val downId = down.id
                     val startPos = down.position
+                    // Pointer coordinates are viewport-local. Freeze the viewport
+                    // translation at down so a scroll/gesture arbitration change
+                    // cannot remap the same drag underneath the pointer.
+                    val gestureScrollYPx = scrollState.value.toFloat()
                     val interactionAtDown = interactionSnapshot.value
                     val hitSnapshot = idleHitInputs.value
                     val downCell = MoveDragMath.cellForPixel(
@@ -545,6 +551,7 @@ internal fun HomeCanvasGrid(
                         windowFirstRow = hitSnapshot.rowOrigin,
                         originXPx = hitSnapshot.originX.toFloat(),
                         originYPxPx = hitSnapshot.originYPx.toFloat(),
+                        scrollYPx = gestureScrollYPx,
                     )
                     val downTile = hitSnapshot.tiles.firstOrNull { tile ->
                         downCell.column in tile.position.column until
@@ -567,8 +574,21 @@ internal fun HomeCanvasGrid(
                         )
                     }
                     val selectedResize = selectedBounds?.let {
-                        isInHandle(startPos.x, startPos.y, it, with(density) { RESIZE_TOUCH_DP.dp.roundToPx() })
+                        isInHandle(
+                            startPos.x,
+                            startPos.y + gestureScrollYPx,
+                            it,
+                            with(density) { RESIZE_TOUCH_DP.dp.roundToPx() },
+                        )
                     } == true
+                    // Preserve the point grabbed inside the selected tile. This is
+                    // content-space state, while startPos remains viewport-space.
+                    val grabOffsetXPx = selectedBounds?.let {
+                        startPos.x - it.left.toFloat()
+                    } ?: 0f
+                    val grabOffsetYPx = selectedBounds?.let {
+                        startPos.y + gestureScrollYPx - it.top.toFloat()
+                    } ?: 0f
                     val selectedDrag = interactionAtDown is HomeInteractionController.Editing &&
                         interactionAtDown.selectedId == (downTile?.itemId ?: selectedTile?.itemId) &&
                         (downTile != null || selectedResize)
@@ -583,6 +603,7 @@ internal fun HomeCanvasGrid(
                     // predicate, not an inline distance check.
                     val touchSlopPx = viewConfiguration.touchSlop.toFloat()
                     var slop: PointerInputChange? = null
+                    var slopAxis = LockedAxis.UNDECIDED
                     while (slop == null) {
                         val nextEvent = awaitPointerEvent()
                         val nextChange = nextEvent.changes.find { it.id == downId }
@@ -592,12 +613,19 @@ internal fun HomeCanvasGrid(
                         }
                         val dx = nextChange.position.x - startPos.x
                         val dy = nextChange.position.y - startPos.y
-                        val dragLock = GestureArbitration.lockAxis(
+                        // Use the home arbitration diagonal guard rather than
+                        // choosing horizontal for every selected drag. A diagonal
+                        // motion remains undecided until one axis is genuinely
+                        // dominant; once chosen, the owner stays stable.
+                        val dragLock = classifyHomeAxis(
                             dxPx = dx,
                             dyPx = dy,
                             slopPx = touchSlopPx,
+                            jitterPx = touchSlopPx,
+                            currentLock = slopAxis,
                         )
                         if (dragLock != LockedAxis.UNDECIDED) {
+                            slopAxis = dragLock
                             nextChange.consume()
                             slop = nextChange
                         }
@@ -618,7 +646,6 @@ internal fun HomeCanvasGrid(
                                 pagerHold = false
                                 return@awaitEachGesture
                             }
-                        pagerAxisLock = LockedAxis.HORIZONTAL
                     }
                     var activeAtDown = sessionAtDown ?: return@awaitEachGesture
                     // W3 single-BR-only: the origin corner is snapshotted ONCE at
@@ -633,7 +660,12 @@ internal fun HomeCanvasGrid(
                         originYPx = originYPx,
                     )
                     val handleSizePx = with(density) { RESIZE_TOUCH_DP.dp.roundToPx() }
-                    val startInHandle = isInHandle(startPos.x, startPos.y, originBounds, handleSizePx)
+                    val startInHandle = isInHandle(
+                        startPos.x,
+                        startPos.y + gestureScrollYPx,
+                        originBounds,
+                        handleSizePx,
+                    )
                     // B2: RESIZE routes only on startInHandle (hold position in
                     // the handle corner). A body-origin press never upgrades to
                     // RESIZE via the slop position; MOVE stays authoritative
@@ -687,6 +719,7 @@ internal fun HomeCanvasGrid(
                                 originXPx = originX.toFloat(),
                                 rowOrigin = rowOrigin,
                                 originYPxRestPx = originYPx.toFloat(),
+                                scrollYPx = gestureScrollYPx,
                             )
                             val quantized = RenderableSpans.quantize(rawSpan, columns)
                             currentSession = currentSession.updateResizeCandidate(
@@ -757,6 +790,9 @@ internal fun HomeCanvasGrid(
                             windowFirstRow = rowOrigin,
                             originXPx = originX.toFloat(),
                             originYPxPx = originYPx.toFloat(),
+                            scrollYPx = gestureScrollYPx,
+                            grabOffsetXPx = grabOffsetXPx,
+                            grabOffsetYPx = grabOffsetYPx,
                         )
                         currentSession = currentSession.updateMoveCandidate(
                             slopCell,
@@ -792,6 +828,9 @@ internal fun HomeCanvasGrid(
                                 windowFirstRow = rowOrigin,
                                 originXPx = originX.toFloat(),
                                 originYPxPx = originYPx.toFloat(),
+                                scrollYPx = gestureScrollYPx,
+                                grabOffsetXPx = grabOffsetXPx,
+                                grabOffsetYPx = grabOffsetYPx,
                             )
                             currentSession = currentSession.updateMoveCandidate(
                                 cell,
@@ -1253,6 +1292,7 @@ private data class IdleHitSnapshot(
     val originX: Int,
     val rowOrigin: Long,
     val originYPx: Long,
+    val scrollYPx: Float,
 )
 
 /**
