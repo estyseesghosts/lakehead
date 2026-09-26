@@ -708,8 +708,9 @@ internal fun HomeCanvasGrid(
                             )
                         }
                         val final = sessionState.value as? HomeEditSession.Active
-                        if (final != null && sessionState.value.hasMoved()) {
-                            onMoveTile(final.itemId, final.candidatePosition)
+                        val commit = sessionState.value.moveCommitPosition()
+                        if (final != null && commit != null) {
+                            onMoveTile(final.itemId, commit)
                         }
                         editSession = HomeEditSession.Idle
                     }
@@ -1207,13 +1208,18 @@ internal const val HOME_CANVAS_ROW_ORIGIN: Long = 0L
 internal const val MOVE_CANDIDATE_OVERLAY_TAG: String = "move-candidate-overlay"
 
 /**
- * Non-interactive outline marking the active move candidate cell.
+ * Non-interactive outline marking the move ghost's committed position.
  *
  * Position uses [TileBounds.signedBounds] with the signed [rowOrigin] plus the G2
  * rest [originYPx] offset, so the outline lands on the same Box content coordinates
- * the windowed tiles are placed at (rebased container plus rest offset). A valid
+ * the windowed tiles are placed at (rebased container plus rest offset). The frame
+ * is placed at [HomeEditSession.Active.lastValidPosition] (equivalent to
+ * [HomeEditSession.renderedPosition]) so the ghost shows the tile's snap-back
+ * target — colliding/out-of-bounds drags keep the outline at the last confirmed
+ * valid cell rather than following the pointer into illegal territory. A valid
  * candidate draws a 2dp outline in `scheme.primary`; any other validity draws
- * `scheme.error`.
+ * `scheme.error` (the color reports the current drag's legality, not the frame
+ * position).
  */
 @Composable
 private fun MoveCandidateOverlay(
@@ -1226,8 +1232,8 @@ private fun MoveCandidateOverlay(
 ) {
     val density = LocalDensity.current
     val frame = TileBounds.signedBounds(
-        column = active.candidatePosition.column,
-        row = active.candidatePosition.row.toLong(),
+        column = active.lastValidPosition.column,
+        row = active.lastValidPosition.row.toLong(),
         span = GridSpan(active.candidateSpan.columns, active.candidateSpan.rows),
         geometry = geometry,
         originX = originX,
