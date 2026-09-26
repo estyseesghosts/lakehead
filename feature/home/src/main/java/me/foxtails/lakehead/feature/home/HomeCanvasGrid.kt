@@ -360,19 +360,6 @@ internal fun HomeCanvasGrid(
                             onLaunchApp = onLaunchApp,
                             isEditActive = active != null,
                             activeItemId = active?.itemId,
-                            onEnterEdit = { entered ->
-                                editSession = editSession.enterIfLaunchable(
-                                    entered,
-                                    loaded.tiles,
-                                    columns,
-                                    rows,
-                                )
-                                // W4: lock pager axis on Active entry so the
-                                // drag handler can detect pager-flip/scroll-steal.
-                                if (editSession is HomeEditSession.Active) {
-                                    pagerAxisLock = LockedAxis.HORIZONTAL
-                                }
-                            },
                             // W1 recess/select: tap transfers selection directly
                             // (selectOnTap, never launch); long-press enters
                             // wiggle-editing (enterOnLongPress).
@@ -431,8 +418,9 @@ internal fun HomeCanvasGrid(
             // slop gate and the [GestureArbitration.dominantAxis] diagonal guard:
             // when both axes clear slop but neither dominates, the pre-commit
             // lock holds UNDECIDED so a diagonal drag never steals the gesture
-            // from either consumer. Installed only while idle; the edit drag
-            // handler below owns the gesture once a session is active.
+            // from either consumer. The selected tile is claimed by the edit
+            // drag handler below, so the two observers never race for one
+            // gesture.
             val idleGestureModifier = Modifier.pointerInput(Unit) {
                 awaitEachGesture {
                     val firstEvent = awaitPointerEvent()
@@ -455,8 +443,16 @@ internal fun HomeCanvasGrid(
                     val downTile = snapshot.tiles.firstOrNull { tile ->
                         downCell.column in tile.position.column until
                             tile.position.column + tile.span.columns &&
-                            downCell.row in tile.position.row until
+                        downCell.row in tile.position.row until
                             tile.position.row + tile.span.rows
+                    }
+                    // Selected-drag is the sole owner of this gesture. Do not
+                    // set/reset pager state here or flip it before slop.
+                    val idleInteraction = interactionSnapshot.value
+                    if (idleInteraction is HomeInteractionController.Editing &&
+                        downTile?.itemId == idleInteraction.selectedId
+                    ) {
+                        return@awaitEachGesture
                     }
                     // A2 single arbitration for the idle gesture: route the down-hit
                     // through resolveHomeGesture so a tile-origin touch holds the
@@ -517,13 +513,13 @@ internal fun HomeCanvasGrid(
             // session lifetime) so in-flight drags survive candidate recompositions;
             // scroll is disabled while active so scrollState/geometry stay fixed.
             //
-            // This handler is only installed while a session is active (entered via the
-            // tile's long-press). The pointer is therefore already down from the
-            // long-press when this block starts, so it must NOT use awaitFirstDown()
+            // This handler is also used for a selected tile in wiggle editing;
+            // in either route the pointer is already down when this block starts.
+            // It must NOT use awaitFirstDown()
             // (which waits for a fresh down that never arrives). Instead the first
             // awaitPointerEvent() observes the already-pressed pointer and tracks it
             // past touch slop for a continuous press-hold-drag.
-            val dragModifier = Modifier.pointerInput(active?.itemId) {
+            val dragModifier = Modifier.pointerInput(loaded.requestedHomeId) {
                 awaitEachGesture {
                     // Pointer is already down from the long-press that entered edit mode.
                     // Observe the current pressed pointer instead of waiting for a new down.
@@ -532,39 +528,30 @@ internal fun HomeCanvasGrid(
                         ?: return@awaitEachGesture
                     val downId = down.id
                     val startPos = down.position
-                    val sessionAtDown =
-                        sessionState.value as? HomeEditSession.Active ?: return@awaitEachGesture
-                    // W3 single-BR-only: the origin corner is snapshotted ONCE at
-                    // gesture start from the ORIGIN span (top-left fixed anchor),
-                    // never the live candidate bounds. The handle hit rect is the
-                    // inward [right - RESIZE_TOUCH, right] x [bottom - RESIZE_TOUCH,
-                    // bottom] corner square: it extends inward over the tile, never
-                    // outward, so edge tiles never clip. Routing is decided once at
-                    // drag start (hold + slop positions); a MOVE drag never promotes
-                    // to RESIZE mid-gesture (gated for W4 arbitration).
-                    val originBounds = TileBounds.signedBounds(
-                        column = sessionAtDown.origin.column,
-                        row = sessionAtDown.origin.row.toLong(),
-                        span = GridSpan(
-                            sessionAtDown.originSpan.columns,
-                            sessionAtDown.originSpan.rows,
-                        ),
-                        geometry = geometry,
-                        originX = originX,
-                        originRow = rowOrigin,
-                        originYPx = originYPx,
+                    val interactionAtDown = interactionSnapshot.value
+                    val hitSnapshot = idleHitInputs.value
+                    val downCell = MoveDragMath.cellForPixel(
+                        xPx = startPos.x,
+                        yPx = startPos.y,
+                        cellSizePx = hitSnapshot.geometry.cellSizePx.toFloat(),
+                        columnGapPx = hitSnapshot.geometry.columnGapPx.toFloat(),
+                        rowGapPx = hitSnapshot.geometry.rowGapPx.toFloat(),
+                        windowFirstRow = hitSnapshot.rowOrigin,
+                        originXPx = hitSnapshot.originX.toFloat(),
+                        originYPxPx = hitSnapshot.originYPx.toFloat(),
                     )
-                    val handleSizePx = with(density) { RESIZE_TOUCH_DP.dp.roundToPx() }
-                    // Hit-test in content-local coords: the pointer position observed
-                    // inside the scrolling content (after verticalScroll in the
-                    // modifier chain) already includes the scroll offset, so no
-                    // scroll addition is needed. Scroll is disabled while a
-                    // session is active.
-                    // startPos is the pointer's position at the first observed event
-                    // after entering edit mode — effectively the hold position since
-                    // the finger is stationary after the long-press.
-                    val startInHandle =
-                        isInHandle(startPos.x, startPos.y, originBounds, handleSizePx)
+                    val downTile = hitSnapshot.tiles.firstOrNull { tile ->
+                        downCell.column in tile.position.column until
+                            tile.position.column + tile.span.columns &&
+                            downCell.row in tile.position.row until
+                            tile.position.row + tile.span.rows
+                    }
+                    val selectedDrag = interactionAtDown is HomeInteractionController.Editing &&
+                        interactionAtDown.selectedId == downTile?.itemId
+                    var currentSession: HomeEditSession = sessionState.value
+                    var sessionAtDown = currentSession as? HomeEditSession.Active
+                    if (sessionAtDown == null && !selectedDrag) return@awaitEachGesture
+                    if (selectedDrag) pagerHold = true
                     // Wait until the already-pressed pointer moves past touch slop.
                     // Release before slop means no drag (a tap; tapCancel handles it).
                     // P2: the slop gate is the shared [GestureArbitration.lockAxis]
@@ -575,6 +562,7 @@ internal fun HomeCanvasGrid(
                         val nextEvent = awaitPointerEvent()
                         val nextChange = nextEvent.changes.find { it.id == downId }
                         if (nextChange == null || !nextChange.pressed) {
+                            if (selectedDrag) pagerHold = false
                             return@awaitEachGesture
                         }
                         val dx = nextChange.position.x - startPos.x
@@ -590,6 +578,37 @@ internal fun HomeCanvasGrid(
                         }
                     }
                     val slopChange = slop ?: return@awaitEachGesture
+                    if (sessionAtDown == null) {
+                        val entered = currentSession.enterSelectedDrag(
+                            interaction = interactionAtDown,
+                            tile = downTile,
+                            placements = loaded.tiles,
+                            columns = columns,
+                            rows = rows,
+                        )
+                        currentSession = entered
+                        editSession = entered
+                        sessionAtDown = entered as? HomeEditSession.Active
+                            ?: run {
+                                pagerHold = false
+                                return@awaitEachGesture
+                            }
+                        pagerAxisLock = LockedAxis.HORIZONTAL
+                    }
+                    var activeAtDown = sessionAtDown ?: return@awaitEachGesture
+                    // W3 single-BR-only: the origin corner is snapshotted ONCE at
+                    // drag start from the ORIGIN span (top-left fixed anchor).
+                    val originBounds = TileBounds.signedBounds(
+                        column = activeAtDown.origin.column,
+                        row = activeAtDown.origin.row.toLong(),
+                        span = GridSpan(activeAtDown.originSpan.columns, activeAtDown.originSpan.rows),
+                        geometry = geometry,
+                        originX = originX,
+                        originRow = rowOrigin,
+                        originYPx = originYPx,
+                    )
+                    val handleSizePx = with(density) { RESIZE_TOUCH_DP.dp.roundToPx() }
+                    val startInHandle = isInHandle(startPos.x, startPos.y, originBounds, handleSizePx)
                     // B2: RESIZE routes only on startInHandle (hold position in
                     // the handle corner). A body-origin press never upgrades to
                     // RESIZE via the slop position; MOVE stays authoritative
@@ -609,12 +628,15 @@ internal fun HomeCanvasGrid(
                     pagerHold = dragWinner.holdsPager()
                     if (isOnHandle) {
                         // RESIZE mode: corner-anchored span updates.
-                        editSession = sessionState.value.beginResize()
+                        currentSession = activeAtDown.beginResize()
+                        editSession = currentSession
+                        activeAtDown = currentSession as? HomeEditSession.Active
+                            ?: return@awaitEachGesture
                         // W4: track initial scroll and pager lock for steal detection.
                         val resizeStartScroll = scrollState.value
                         val resizeStartPagerLock = pagerAxisLock
                         var resizeStolen = false
-                        var current: PointerInputChange = slopChange
+                        var currentChange: PointerInputChange = slopChange
                         while (true) {
                             // W4: break on pager flip or scroll delta (steal attempt).
                             // Steal fails: keeps last-valid, zero-write on cancel.
@@ -624,16 +646,16 @@ internal fun HomeCanvasGrid(
                                 resizeStolen = true
                                 break
                             }
-                            val next = awaitDragOrCancellation(current.id) ?: break
+                            val next = awaitDragOrCancellation(currentChange.id) ?: break
                             next.consume()
-                            current = next
-                            if (sessionState.value as? HomeEditSession.Active == null) break
+                            currentChange = next
+                            if (currentSession !is HomeEditSession.Active) break
                             val pointerXPx = next.position.x
                             val pointerYPx = next.position.y
                             val rawSpan = ResizeDragMath.rawSpan(
                                 pointerXPx = pointerXPx,
                                 pointerYPx = pointerYPx,
-                                originPosition = sessionAtDown.origin,
+                                originPosition = activeAtDown.origin,
                                 cellSizePx = geometry.cellSizePx.toFloat(),
                                 columnGapPx = geometry.columnGapPx.toFloat(),
                                 rowGapPx = geometry.rowGapPx.toFloat(),
@@ -642,23 +664,24 @@ internal fun HomeCanvasGrid(
                                 originYPxRestPx = originYPx.toFloat(),
                             )
                             val quantized = RenderableSpans.quantize(rawSpan, columns)
-                            editSession = sessionState.value.updateResizeCandidate(
+                            currentSession = currentSession.updateResizeCandidate(
                                 quantized,
                                 loaded.tiles,
                                 columns,
                                 rows,
                             )
+                            editSession = currentSession
                         }
-                        val final = sessionState.value as? HomeEditSession.Active
+                        val final = currentSession as? HomeEditSession.Active
                         // W3 release: commit the held last-valid span iff it differs
                         // from origin; otherwise snap back. Either way the session
                         // stays in edit mode (stays-editing, never exits on resize).
                         // W4: skip commit when stolen (zero-write on cancel).
-                        val commitSpan = if (resizeStolen) null else sessionState.value.resizeCommitSpan()
+                        val commitSpan = if (resizeStolen) null else currentSession.resizeCommitSpan()
                         if (final != null && commitSpan != null) {
                             onResizeTile(final.itemId, commitSpan)
                             // Keep session active in MOVE with the committed span as origin.
-                            editSession = HomeEditSession.Active(
+                            currentSession = HomeEditSession.Active(
                                 itemId = final.itemId,
                                 origin = final.origin,
                                 originSpan = commitSpan,
@@ -671,9 +694,10 @@ internal fun HomeCanvasGrid(
                                 candidateValidity = CandidateValidity.VALID,
                                 mode = EditMode.MOVE,
                             )
+                            editSession = currentSession
                         } else if (final != null) {
                             // No change or blocked-only — snap back, stay in MOVE with original origin.
-                            editSession = HomeEditSession.Active(
+                            currentSession = HomeEditSession.Active(
                                 itemId = final.itemId,
                                 origin = final.origin,
                                 originSpan = final.originSpan,
@@ -684,8 +708,10 @@ internal fun HomeCanvasGrid(
                                 candidateValidity = CandidateValidity.VALID,
                                 mode = EditMode.MOVE,
                             )
+                            editSession = currentSession
                         } else {
-                            editSession = HomeEditSession.Idle
+                            currentSession = HomeEditSession.Idle
+                            editSession = currentSession
                         }
                         // W4: reset pager axis lock once after resize release/cancel.
                         // A2: tile-touch hold ends with the drag; the session stays
@@ -707,17 +733,18 @@ internal fun HomeCanvasGrid(
                             originXPx = originX.toFloat(),
                             originYPxPx = originYPx.toFloat(),
                         )
-                        editSession = sessionState.value.updateMoveCandidate(
+                        currentSession = currentSession.updateMoveCandidate(
                             slopCell,
                             loaded.tiles,
                             columns,
                             rows,
                         )
+                        editSession = currentSession
                         // W4: track initial scroll and pager lock for steal detection.
                         val moveStartScroll = scrollState.value
                         val moveStartPagerLock = pagerAxisLock
                         var moveStolen = false
-                        var current: PointerInputChange = slopChange
+                        var currentChange: PointerInputChange = slopChange
                         while (true) {
                             // W4: break on pager flip or scroll delta (steal attempt).
                             // Steal fails: keeps last-valid, zero-write on cancel.
@@ -727,10 +754,10 @@ internal fun HomeCanvasGrid(
                                 moveStolen = true
                                 break
                             }
-                            val next = awaitDragOrCancellation(current.id) ?: break
+                            val next = awaitDragOrCancellation(currentChange.id) ?: break
                             next.consume()
-                            current = next
-                            if (sessionState.value as? HomeEditSession.Active == null) break
+                            currentChange = next
+                            if (currentSession !is HomeEditSession.Active) break
                             val cell = MoveDragMath.cellForPixel(
                                 xPx = next.position.x,
                                 yPx = next.position.y,
@@ -741,20 +768,22 @@ internal fun HomeCanvasGrid(
                                 originXPx = originX.toFloat(),
                                 originYPxPx = originYPx.toFloat(),
                             )
-                            editSession = sessionState.value.updateMoveCandidate(
+                            currentSession = currentSession.updateMoveCandidate(
                                 cell,
                                 loaded.tiles,
                                 columns,
                                 rows,
                             )
+                            editSession = currentSession
                         }
-                        val final = sessionState.value as? HomeEditSession.Active
+                        val final = currentSession as? HomeEditSession.Active
                         // W4: skip commit when stolen (zero-write on cancel).
-                        val commit = if (moveStolen) null else sessionState.value.moveCommitPosition()
+                        val commit = if (moveStolen) null else currentSession.moveCommitPosition()
                         if (final != null && commit != null) {
                             onMoveTile(final.itemId, commit)
                         }
-                        editSession = HomeEditSession.Idle
+                        currentSession = HomeEditSession.Idle
+                        editSession = currentSession
                         // W4: reset pager axis lock once after move release/cancel.
                         // A2: tile-touch hold ends with the drag; the session is
                         // Idle so neither hold keeps the pager.
@@ -770,7 +799,7 @@ internal fun HomeCanvasGrid(
                         enabled = active == null && pagerAxisLock != LockedAxis.HORIZONTAL,
                     )
                     .then(tapCancelModifier)
-                    .then(if (active != null) dragModifier else Modifier)
+                    .then(dragModifier)
                     .then(if (active != null) Modifier else idleGestureModifier)
                     .testTag(HOME_CANVAS_GRID_TAG),
             ) {

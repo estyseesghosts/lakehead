@@ -69,6 +69,37 @@ class HomeEditSessionTest {
         assertTrue(session is HomeEditSession.Idle)
     }
 
+    @Test
+    fun enterSelectedDrag_selectedLaunchableTile_entersMove() {
+        val t = tile("app-a", column = 2, row = 3)
+
+        val session = HomeEditSession.Idle.enterSelectedDrag(
+            interaction = HomeInteractionController.Editing(t.itemId),
+            tile = t,
+            placements = listOf(t),
+            columns = 6,
+            rows = 10,
+        )
+
+        assertEquals(EditMode.MOVE, (session as HomeEditSession.Active).mode)
+        assertEquals(t.position, session.origin)
+    }
+
+    @Test
+    fun enterSelectedDrag_unselectedTile_doesNotEnter() {
+        val t = tile("app-a")
+
+        val session = HomeEditSession.Idle.enterSelectedDrag(
+            interaction = HomeInteractionController.Editing(ItemId("other")),
+            tile = t,
+            placements = listOf(t),
+            columns = 6,
+            rows = 10,
+        )
+
+        assertTrue(session is HomeEditSession.Idle)
+    }
+
     // ---- beginResize ----
 
     @Test

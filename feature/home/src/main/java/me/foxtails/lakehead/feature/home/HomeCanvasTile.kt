@@ -36,8 +36,7 @@ import me.foxtails.lakehead.core.model.LogicalSpan
  * - Long-press on a launchable tile calls [onEnterWiggle] to enter/select
  *   transient W1 wiggle-editing from TileBody only (AppLaunchButton never exposes
  *   long-click); unavailable tiles expose no long-click action. The pre-W1
- *   move-session entry ([onEnterEdit], retained for W2 manipulation rewiring) is
- *   not invoked from long-press in this slice.
+ *   move-session entry is handled by the grid when a selected tile is dragged.
  * - While [isEditActive] is true every tile is non-interactive
  *   (`isInteractionEnabled = false` on [AppTile], so TileBody
  *   `combinedClickable(enabled = false)` and the symbol `clickable(enabled = false)`
@@ -84,7 +83,6 @@ internal fun HomeCanvasTile(
     modifier: Modifier = Modifier,
     isEditActive: Boolean = false,
     activeItemId: ItemId? = null,
-    onEnterEdit: (HomeRenderTile) -> Unit = {},
     shortcutPlaceholders: Int = 0,
     pinnedCount: Int = 0,
     interactionState: HomeInteractionController = HomeInteractionController.Normal,
@@ -170,8 +168,8 @@ internal fun HomeCanvasTile(
         contentDescription = null,
         // W1 retarget: long-press enters/selects wiggle-editing from both Normal
         // and Editing (controller replaces selection directly, no Normal
-        // round-trip). Move-session entry (onEnterEdit) is NOT invoked here;
-        // W2 rewires manipulation entry separately. Unavailable tiles expose none.
+        // round-trip). Move-session entry is handled by the grid's selected-tile
+        // drag bridge. Unavailable tiles expose none.
         onLongClick = if (tile.isLaunchable) {
             { onEnterWiggle(tile) }
         } else {

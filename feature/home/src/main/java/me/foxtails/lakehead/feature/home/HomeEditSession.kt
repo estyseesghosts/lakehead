@@ -87,6 +87,24 @@ fun HomeEditSession.enterIfLaunchable(
 }
 
 /**
+ * Starts manipulation only for the tile selected by the W1 editing state.
+ * The caller snapshots [interaction] and [tile] at pointer-down, then calls
+ * this after slop so an editing tap remains a selection, not a move.
+ */
+internal fun HomeEditSession.enterSelectedDrag(
+    interaction: HomeInteractionController,
+    tile: HomeRenderTile?,
+    placements: List<HomeRenderTile>,
+    columns: Int,
+    rows: Int,
+): HomeEditSession {
+    if (tile == null || interaction !is HomeInteractionController.Editing ||
+        interaction.selectedId != tile.itemId
+    ) return this
+    return enterIfLaunchable(tile, placements, columns, rows)
+}
+
+/**
  * Switch to resize mode. No-op if not Active or already in resize mode.
  */
 fun HomeEditSession.beginResize(): HomeEditSession {
