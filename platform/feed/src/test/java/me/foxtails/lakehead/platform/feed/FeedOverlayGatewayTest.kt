@@ -76,6 +76,7 @@ class FeedOverlayGatewayTest {
         harness.gateway.start(this)
 
         harness.gateway.attach(FeedProviderId.Lawnfeed)
+        harness.installed = setOf(NEO_FEED_PACKAGE)
         harness.gateway.attach(FeedProviderId.NeoFeed)
         advanceUntilIdle()
 
@@ -174,6 +175,56 @@ class FeedOverlayGatewayTest {
     }
 
     @Test
+    fun attachWithoutProviderEmitsNoProviderWithoutBinding() = runTest {
+        val harness = Harness(this, installed = emptySet())
+        harness.gateway.start(this)
+        advanceUntilIdle()
+
+        harness.gateway.attach(FeedProviderId.Lawnfeed)
+        advanceUntilIdle()
+
+        assertTrue(harness.connector.bindCalls.isEmpty())
+        assertEquals(
+            FeedAvailability.Unavailable(FeedAvailability.Unavailable.Reason.NO_PROVIDER),
+            harness.gateway.state.value,
+        )
+    }
+
+    @Test
+    fun attachBindRejectionSurfacesQueryFailed() = runTest {
+        val harness = Harness(this, installed = setOf(LAWNFEED_PACKAGE), acceptBind = false)
+        harness.gateway.start(this)
+        advanceUntilIdle()
+
+        harness.gateway.attach(FeedProviderId.Lawnfeed)
+        advanceUntilIdle()
+
+        assertEquals(
+            FeedAvailability.Unavailable(FeedAvailability.Unavailable.Reason.QUERY_FAILED),
+            harness.gateway.state.value,
+        )
+    }
+
+    @Test
+    fun attachBindExceptionSurfacesQueryFailed() = runTest {
+        val harness = Harness(
+            this,
+            installed = setOf(LAWNFEED_PACKAGE),
+            bindFailure = BindFailure.QUERY,
+        )
+        harness.gateway.start(this)
+        advanceUntilIdle()
+
+        harness.gateway.attach(FeedProviderId.Lawnfeed)
+        advanceUntilIdle()
+
+        assertEquals(
+            FeedAvailability.Unavailable(FeedAvailability.Unavailable.Reason.QUERY_FAILED),
+            harness.gateway.state.value,
+        )
+    }
+
+    @Test
     fun packageAppearAutoBinds() = runTest {
         val harness = Harness(this, installed = emptySet())
         harness.gateway.start(this)
@@ -251,8 +302,9 @@ class FeedOverlayGatewayTest {
         scope: TestScope,
         var installed: Set<String>,
         acceptBind: Boolean = true,
+        bindFailure: BindFailure? = null,
     ) {
-        val connector = RecordingConnector(acceptBind = acceptBind)
+        val connector = RecordingConnector(acceptBind = acceptBind, bindFailure = bindFailure)
         var packageListener: (() -> Unit)? = null
         val monitor = object : FeedPackageMonitor {
             override fun start(onPackageChanged: () -> Unit) {
@@ -276,7 +328,15 @@ class FeedOverlayGatewayTest {
         }
     }
 
-    private class RecordingConnector(var acceptBind: Boolean = true) : FeedServiceConnector {
+    private enum class BindFailure {
+        QUERY,
+        SECURITY,
+    }
+
+    private class RecordingConnector(
+        var acceptBind: Boolean = true,
+        private val bindFailure: BindFailure? = null,
+    ) : FeedServiceConnector {
         val bindCalls: MutableList<String> = mutableListOf()
         var unbindCalls: Int = 0
         var lastConnection: ServiceConnection? = null
@@ -284,6 +344,11 @@ class FeedOverlayGatewayTest {
         override fun bind(connection: ServiceConnection, packageName: String): Boolean {
             bindCalls += packageName
             lastConnection = connection
+            when (bindFailure) {
+                BindFailure.QUERY -> throw IllegalStateException("bind failed")
+                BindFailure.SECURITY -> throw SecurityException("bind denied")
+                null -> Unit
+            }
             return acceptBind
         }
 

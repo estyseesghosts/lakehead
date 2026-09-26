@@ -147,6 +147,8 @@ class FeedOverlayGatewayImpl internal constructor(
         resolveJob = scope.launch(ioDispatcher) {
             val availability = try {
                 resolver.resolve()
+            } catch (_: SecurityException) {
+                FeedAvailability.Unavailable(FeedAvailability.Unavailable.Reason.PERMISSION_DENIED)
             } catch (_: Exception) {
                 FeedAvailability.Unavailable(FeedAvailability.Unavailable.Reason.QUERY_FAILED)
             }
@@ -157,7 +159,10 @@ class FeedOverlayGatewayImpl internal constructor(
                     if (boundProvider == availability.provider && boundPackage != null) {
                         _state.emit(availability)
                     } else {
-                        tryBindLocked(availability.provider)
+                        tryBindLocked(
+                            provider = availability.provider,
+                            fallbackReason = FeedAvailability.Unavailable.Reason.QUERY_FAILED,
+                        )
                     }
                 } else {
                     unbindLocked()
@@ -184,12 +189,34 @@ class FeedOverlayGatewayImpl internal constructor(
     }
 
     override fun attach(provider: FeedProviderId) {
-        if (!mutex.tryLock()) return
-        try {
-            if (boundProvider == provider && boundPackage != null) return
-            tryBindLocked(provider)
-        } finally {
-            mutex.unlock()
+        val currentScope = scope ?: return
+        currentScope.launch(ioDispatcher) {
+            val availability = try {
+                resolver.resolve()
+            } catch (_: SecurityException) {
+                FeedAvailability.Unavailable(FeedAvailability.Unavailable.Reason.PERMISSION_DENIED)
+            } catch (_: Exception) {
+                FeedAvailability.Unavailable(FeedAvailability.Unavailable.Reason.QUERY_FAILED)
+            }
+            if (!mutex.tryLock()) return@launch
+            try {
+                if (this@FeedOverlayGatewayImpl.scope !== currentScope) return@launch
+                if (availability is FeedAvailability.Available && availability.provider == provider) {
+                    if (boundProvider == provider && boundPackage != null) {
+                        _state.emit(availability)
+                    } else {
+                        tryBindLocked(
+                            provider = provider,
+                            fallbackReason = FeedAvailability.Unavailable.Reason.QUERY_FAILED,
+                        )
+                    }
+                } else {
+                    unbindLocked()
+                    _state.emit(availability)
+                }
+            } finally {
+                mutex.unlock()
+            }
         }
     }
 
@@ -257,6 +284,8 @@ class FeedOverlayGatewayImpl internal constructor(
         scope?.launch(ioDispatcher) {
             val availability = try {
                 resolver.resolve()
+            } catch (_: SecurityException) {
+                FeedAvailability.Unavailable(FeedAvailability.Unavailable.Reason.PERMISSION_DENIED)
             } catch (_: Exception) {
                 FeedAvailability.Unavailable(FeedAvailability.Unavailable.Reason.QUERY_FAILED)
             }
@@ -266,7 +295,10 @@ class FeedOverlayGatewayImpl internal constructor(
                     if (boundProvider == availability.provider && boundPackage != null) {
                         _state.emit(availability)
                     } else {
-                        tryBindLocked(availability.provider)
+                        tryBindLocked(
+                            provider = availability.provider,
+                            fallbackReason = FeedAvailability.Unavailable.Reason.QUERY_FAILED,
+                        )
                     }
                 } else {
                     unbindLocked()
@@ -281,18 +313,29 @@ class FeedOverlayGatewayImpl internal constructor(
     /**
      * Binds [provider] on the calling thread; the caller must hold [mutex] via `tryLock`.
      *
-     * Manual [attach] and the automatic paths ([start] resolution and [onPackageChanged])
+     * The automatic paths ([start] resolution and [onPackageChanged]) and resolved [attach]
      * share this single bind sequence so there is exactly one connection: any previous bind
      * is released first, then each package id is tried in order. A bind rejection from the
-     * connector surfaces as `Unavailable(QUERY_FAILED)` via non-suspending `tryEmit` and
-     * never throws.
+     * connector surfaces as the supplied pre-bind verdict unless the connector throws. A thrown
+     * bind is classified as `PERMISSION_DENIED` for [SecurityException], otherwise
+     * `QUERY_FAILED`; a plain false result never invents a query failure.
      */
-    private fun tryBindLocked(provider: FeedProviderId) {
+    private fun tryBindLocked(
+        provider: FeedProviderId,
+        fallbackReason: FeedAvailability.Unavailable.Reason,
+    ) {
         unbindLocked()
+        var exceptionReason: FeedAvailability.Unavailable.Reason? = null
         for (packageName in provider.packageNames) {
             val accepted = try {
                 connector.bind(connection, packageName)
+            } catch (_: SecurityException) {
+                exceptionReason = FeedAvailability.Unavailable.Reason.PERMISSION_DENIED
+                false
             } catch (_: Exception) {
+                if (exceptionReason == null) {
+                    exceptionReason = FeedAvailability.Unavailable.Reason.QUERY_FAILED
+                }
                 false
             }
             if (accepted) {
@@ -303,7 +346,7 @@ class FeedOverlayGatewayImpl internal constructor(
             }
         }
         _state.tryEmit(
-            FeedAvailability.Unavailable(FeedAvailability.Unavailable.Reason.QUERY_FAILED),
+            FeedAvailability.Unavailable(exceptionReason ?: fallbackReason),
         )
     }
 
