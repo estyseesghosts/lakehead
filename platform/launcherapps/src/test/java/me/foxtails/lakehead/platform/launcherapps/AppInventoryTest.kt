@@ -146,7 +146,8 @@ class AppInventoryTest {
 
         inventory.replaceProfile(personal, listOf(replacement))
 
-        assertEquals(listOf(replacement, preserved), inventory.apps.value)
+        // Label-first sort: "Kept" < "New"
+        assertEquals(listOf(preserved, replacement), inventory.apps.value)
     }
 
     @Test
@@ -176,18 +177,42 @@ class AppInventoryTest {
     }
 
     @Test
-    fun snapshotsAreDeterministicallyOrderedByProfilePackageAndClass() {
+    fun snapshotsAreDeterministicallyOrderedByLabelThenPackageClassAndProfile() {
         val inventory = AppInventory()
         val expected = listOf(
-            entry(personal, "a.package", "A", "One"),
-            entry(personal, "a.package", "Z", "Two"),
-            entry(personal, "z.package", "A", "Three"),
-            entry(work, "a.package", "A", "Four"),
+            entry(personal, "a.package", "A", "Alpha"),
+            entry(work, "z.package", "A", "Alpha"),
+            entry(personal, "a.package", "Z", "Beta"),
+            entry(personal, "z.package", "A", "Gamma"),
         )
 
         inventory.replaceAll(expected.reversed())
 
         assertEquals(expected, inventory.apps.value)
+    }
+
+    @Test
+    fun entriesAreSortedByLabelCaseInsensitive() {
+        val inventory = AppInventory()
+        val zebra = entry(personal, "z.app", "Main", "Zebra")
+        val apple = entry(personal, "a.app", "Main", "Apple")
+        val mango = entry(personal, "m.app", "Main", "Mango")
+
+        inventory.replaceAll(listOf(zebra, apple, mango))
+
+        assertEquals(listOf(apple, mango, zebra), inventory.apps.value)
+    }
+
+    @Test
+    fun labelSortIsCaseInsensitive() {
+        val inventory = AppInventory()
+        val upper = entry(personal, "a.app", "Main", "BANANA")
+        val lower = entry(personal, "b.app", "Main", "apple")
+        val mixed = entry(personal, "c.app", "Main", "Cherry")
+
+        inventory.replaceAll(listOf(upper, lower, mixed))
+
+        assertEquals(listOf(lower, upper, mixed), inventory.apps.value)
     }
 
     private fun app(profileId: ProfileId, packageName: String, className: String) =

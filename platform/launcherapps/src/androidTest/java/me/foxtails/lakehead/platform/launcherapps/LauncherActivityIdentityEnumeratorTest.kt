@@ -14,6 +14,8 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
+import java.text.Collator
+import java.util.Locale
 
 @RunWith(AndroidJUnit4::class)
 class LauncherActivityIdentityEnumeratorTest {
@@ -41,9 +43,14 @@ class LauncherActivityIdentityEnumeratorTest {
             if (expectedHasActivities) assertTrue("Activities should enumerate for $id", first.isNotEmpty())
             assertEquals("Repeated calls should return identical entries and labels", first, second)
             assertEquals("Identities must be duplicate-free", first.map { it.identity }.distinct(), first.map { it.identity })
+            val collator = Collator.getInstance(Locale.ROOT).apply { strength = Collator.PRIMARY }
             assertEquals(
-                "Entries should be ordered by package then class",
-                first.sortedWith(compareBy({ it.identity.component.packageName }, { it.identity.component.className })),
+                "Entries should be ordered by label then package and class",
+                first.sortedWith(
+                    compareBy<LauncherAppEntry, String>(collator) { it.label }
+                        .thenBy { it.identity.component.packageName }
+                        .thenBy { it.identity.component.className },
+                ),
                 first,
             )
             assertTrue("Every entry retains its source profile token", first.all { it.identity.profileId == id })

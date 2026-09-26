@@ -5,14 +5,20 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import me.foxtails.lakehead.core.model.LauncherAppEntry
 import me.foxtails.lakehead.core.model.ProfileId
+import java.text.Collator
 import java.util.Collections
+import java.util.Locale
 
 /**
  * Owns the immutable, profile-aware snapshot published by [AppCatalogue]. Snapshots are ordered
- * deterministically by profile, package and class. Entries are de-duplicated by
- * [me.foxtails.lakehead.core.model.AppIdentity], so one component can never appear twice with
- * competing labels; when duplicates disagree on a label, the lexicographically smallest label wins
- * so the published snapshot cannot depend on input order.
+ * by display label (case-insensitive, locale-aware via [Collator]) as the primary key so the
+ * catalogue reads in natural A→Z order. Package name, class name and profile ID serve as
+ * deterministic tie-breakers; profile is last so the flat list is label-first across all
+ * profiles, with profile grouping only when labels, package and class coincide.
+ *
+ * Entries are de-duplicated by [me.foxtails.lakehead.core.model.AppIdentity], so one component
+ * can never appear twice with competing labels; when duplicates disagree on a label, the
+ * lexicographically smallest label wins so the published snapshot cannot depend on input order.
  */
 internal class AppInventory : AppCatalogue {
     private val mutableApps = MutableStateFlow<List<LauncherAppEntry>>(emptyList())
@@ -41,13 +47,15 @@ internal class AppInventory : AppCatalogue {
         }
     }
 
-    private fun snapshot(entries: List<LauncherAppEntry>): List<LauncherAppEntry> =
-        Collections.unmodifiableList(
+    private fun snapshot(entries: List<LauncherAppEntry>): List<LauncherAppEntry> {
+        val collator = Collator.getInstance(Locale.ROOT).apply { strength = Collator.PRIMARY }
+        return Collections.unmodifiableList(
             entries.sortedWith(
-                compareBy<LauncherAppEntry> { it.identity.profileId.value }
+                compareBy<LauncherAppEntry, String>(collator) { it.label }
                     .thenBy { it.identity.component.packageName }
                     .thenBy { it.identity.component.className }
-                    .thenBy { it.label },
+                    .thenBy { it.identity.profileId.value },
             ).distinctBy { it.identity },
         )
+    }
 }
