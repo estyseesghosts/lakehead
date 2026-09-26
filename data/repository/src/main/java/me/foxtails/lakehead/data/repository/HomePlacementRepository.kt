@@ -11,6 +11,7 @@ import me.foxtails.lakehead.core.model.ItemAvailability
 import me.foxtails.lakehead.core.model.ItemId
 import me.foxtails.lakehead.core.model.LogicalPosition
 import me.foxtails.lakehead.core.model.LogicalSpan
+import me.foxtails.lakehead.core.model.TileBinding
 import me.foxtails.lakehead.data.database.HomeEntity
 import me.foxtails.lakehead.data.database.toDomain
 import me.foxtails.lakehead.data.database.toEntity
@@ -38,6 +39,15 @@ interface HomePlacementRepository {
 
     /** Ensures a home row exists for the given HomeId. Creates it if absent. Returns true. */
     fun ensureHome(homeId: HomeId): Boolean
+
+    /** Loads the shortcut binding for [tileId], or an empty binding if none exists. */
+    fun loadBinding(tileId: ItemId): TileBinding
+
+    /** Persists (upserts) a shortcut binding. The referenced tile must exist. */
+    fun saveBinding(binding: TileBinding)
+
+    /** Deletes the shortcut binding for [tileId]. No-op if none exists. */
+    fun deleteBinding(tileId: ItemId)
 }
 
 sealed interface LoadResult {
@@ -176,6 +186,20 @@ class RoomHomePlacementRepository(
             dao.insertHome(HomeEntity(homeId.value))
             true
         }
+    }
+
+    override fun loadBinding(tileId: ItemId): TileBinding {
+        val entity = dao.shortcutBinding(tileId.value)
+        return entity?.toDomain() ?: TileBinding(tileId)
+    }
+
+    override fun saveBinding(binding: TileBinding): Unit = database.runInTransaction {
+        val entity = binding.toEntity()
+        dao.upsertShortcutBinding(entity)
+    }
+
+    override fun deleteBinding(tileId: ItemId) {
+        dao.deleteShortcutBinding(tileId.value)
     }
 
     private fun edit(

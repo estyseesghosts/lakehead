@@ -47,7 +47,9 @@ class MainActivity : ComponentActivity() {
     }
 
     private val placementDatabase: PlacementDatabase by lazy(LazyThreadSafetyMode.NONE) {
-        Room.databaseBuilder(applicationContext, PlacementDatabase::class.java, "placements.db").build()
+        Room.databaseBuilder(applicationContext, PlacementDatabase::class.java, "placements.db")
+            .addMigrations(PlacementDatabase.MIGRATION_1_2)
+            .build()
     }
 
     private val placementRepository: HomePlacementRepository by lazy(LazyThreadSafetyMode.NONE) {

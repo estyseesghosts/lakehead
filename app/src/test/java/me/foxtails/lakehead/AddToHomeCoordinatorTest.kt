@@ -17,6 +17,7 @@ import me.foxtails.lakehead.core.model.LauncherAppEntry
 import me.foxtails.lakehead.core.model.LogicalPosition
 import me.foxtails.lakehead.core.model.LogicalSpan
 import me.foxtails.lakehead.core.model.ProfileId
+import me.foxtails.lakehead.core.model.TileBinding
 import me.foxtails.lakehead.data.repository.HomePlacementRepository
 import me.foxtails.lakehead.data.repository.LoadResult
 import me.foxtails.lakehead.data.repository.MutationResult
@@ -163,6 +164,9 @@ class AddToHomeCoordinatorTest {
         override fun remove(homeId: HomeId, itemId: ItemId): RemoveResult =
             error("not implemented")
         override fun ensureHome(homeId: HomeId): Boolean = true
+        override fun loadBinding(tileId: ItemId): TileBinding = TileBinding(tileId)
+        override fun saveBinding(binding: TileBinding) {}
+        override fun deleteBinding(tileId: ItemId) {}
     }
 
     /** Repository that throws on load to test error wrapping. */
@@ -179,5 +183,8 @@ class AddToHomeCoordinatorTest {
             error("not implemented")
         override fun remove(homeId: HomeId, itemId: ItemId): RemoveResult = error("not implemented")
         override fun ensureHome(homeId: HomeId): Boolean = true
+        override fun loadBinding(tileId: ItemId): TileBinding = error("not implemented")
+        override fun saveBinding(binding: TileBinding) = error("not implemented")
+        override fun deleteBinding(tileId: ItemId) = error("not implemented")
     }
 }

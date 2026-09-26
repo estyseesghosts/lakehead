@@ -19,6 +19,7 @@ import me.foxtails.lakehead.core.model.LauncherAppEntry
 import me.foxtails.lakehead.core.model.LogicalPosition
 import me.foxtails.lakehead.core.model.LogicalSpan
 import me.foxtails.lakehead.core.model.ProfileId
+import me.foxtails.lakehead.core.model.TileBinding
 import me.foxtails.lakehead.data.repository.HomePlacementRepository
 import me.foxtails.lakehead.data.repository.LoadResult
 import me.foxtails.lakehead.data.repository.MutationResult
@@ -325,5 +326,8 @@ class AllAppsRouteLoaderTest {
             error("loader must not write")
         override fun remove(homeId: HomeId, itemId: ItemId): RemoveResult = error("loader must not write")
         override fun ensureHome(homeId: HomeId): Boolean = error("loader must not write")
+        override fun loadBinding(tileId: ItemId): TileBinding = TileBinding(tileId)
+        override fun saveBinding(binding: TileBinding) = error("loader must not write")
+        override fun deleteBinding(tileId: ItemId) = error("loader must not write")
     }
 }

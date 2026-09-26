@@ -34,8 +34,8 @@ class PlacementDatabaseTest {
     fun closeDatabase() = database.close()
 
     @Test
-    fun freshDatabaseCreatesVersionOneSchemaAndReferentialKeys() {
-        assertEquals(1, DatabaseSchema.VERSION)
+    fun freshDatabaseCreatesVersionTwoSchemaWithAllTablesAndReferentialKeys() {
+        assertEquals(2, DatabaseSchema.VERSION)
         assertEquals(DatabaseSchema.VERSION, database.openHelper.readableDatabase.version)
         assertEquals(
             setOf("homeId"),
@@ -53,18 +53,28 @@ class PlacementDatabaseTest {
             columns("placements"),
         )
         assertEquals(
+            setOf("tileId", "pinnedShortcutIds"),
+            columns("shortcut_bindings"),
+        )
+        assertEquals(
             setOf("homeId->homes.homeId", "profileId->app_references.profileId",
                 "packageName->app_references.packageName", "className->app_references.className"),
             foreignKeyEdges("placements"),
         )
+        assertEquals(
+            setOf("tileId->placements.itemId"),
+            foreignKeyEdges("shortcut_bindings"),
+        )
         assertEquals(setOf("profileId", "packageName", "className"), primaryKeyColumns("app_references"))
         assertEquals(setOf("itemId"), primaryKeyColumns("placements"))
+        assertEquals(setOf("tileId"), primaryKeyColumns("shortcut_bindings"))
 
         val schema = java.io.File(
-            "schemas/me.foxtails.lakehead.data.database.PlacementDatabase/1.json",
+            "schemas/me.foxtails.lakehead.data.database.PlacementDatabase/2.json",
         ).readText()
-        assertEquals(true, schema.contains("\"version\": 1"))
-        listOf("homes", "app_references", "placements", "profileId", "packageName", "className")
+        assertEquals(true, schema.contains("\"version\": 2"))
+        listOf("homes", "app_references", "placements", "shortcut_bindings",
+            "profileId", "packageName", "className", "tileId", "pinnedShortcutIds")
             .forEach { assertEquals("missing exported schema token: $it", true, schema.contains(it)) }
     }
 

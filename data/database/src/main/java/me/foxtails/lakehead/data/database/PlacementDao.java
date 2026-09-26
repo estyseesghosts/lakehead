@@ -59,4 +59,18 @@ public interface PlacementDao {
 
     @Query("SELECT COUNT(*) FROM placements")
     int placementCount();
+
+    // --- Shortcut binding operations ---
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    void upsertShortcutBinding(ShortcutBindingEntity binding);
+
+    @Query("SELECT * FROM shortcut_bindings WHERE tileId = :tileId")
+    ShortcutBindingEntity shortcutBinding(String tileId);
+
+    @Query("DELETE FROM shortcut_bindings WHERE tileId = :tileId")
+    int deleteShortcutBinding(String tileId);
+
+    @Query("SELECT COUNT(*) FROM shortcut_bindings")
+    int shortcutBindingCount();
 }

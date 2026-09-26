@@ -10,6 +10,10 @@ import me.foxtails.lakehead.core.model.ItemId
 import me.foxtails.lakehead.core.model.LogicalPosition
 import me.foxtails.lakehead.core.model.LogicalSpan
 import me.foxtails.lakehead.core.model.ProfileId
+import me.foxtails.lakehead.core.model.ShortcutRef
+import me.foxtails.lakehead.core.model.TileBinding
+import org.json.JSONArray
+import org.json.JSONObject
 
 fun AppIdentity.toEntity() = AppReferenceEntity(
     profileId.value,
@@ -50,3 +54,33 @@ fun PlacementEntity.toDomain() = AppPlacement(
 ).also {
     require(itemType == HomeItemType.APP.name) { "Unsupported placement type: $itemType" }
 }
+
+// --- ShortcutBinding ↔ ShortcutBindingEntity ---
+
+fun TileBinding.toEntity() = ShortcutBindingEntity(
+    tileId.value,
+    JSONArray().apply {
+        pinnedShortcuts.forEach { ref ->
+            put(JSONObject().apply {
+                put("packageName", ref.packageName)
+                put("profileId", ref.profileId.value)
+                put("shortcutId", ref.shortcutId)
+            })
+        }
+    }.toString(),
+)
+
+fun ShortcutBindingEntity.toDomain() = TileBinding(
+    tileId = ItemId(tileId),
+    pinnedShortcuts = run {
+        val array = JSONArray(pinnedShortcutIds)
+        (0 until array.length()).map { i ->
+            val obj = array.getJSONObject(i)
+            ShortcutRef(
+                packageName = obj.getString("packageName"),
+                profileId = ProfileId(obj.getString("profileId")),
+                shortcutId = obj.getString("shortcutId"),
+            )
+        }
+    },
+)
