@@ -76,13 +76,15 @@ internal data class TileColors(
  *
  * See `docs/grid.md` section 12: Normal resolves to
  * `surfaceContainer`/`onSurface`, Accent to `primaryContainer`/`onPrimaryContainer`;
- * the pressed container is the base at 70% alpha and the selection border is
+ * the pressed container is the base at 70% alpha, the selected container is the
+ * base at 50% alpha (selection border is kept), and the selection border is
  * `scheme.primary`. Only the role is persisted, never these resolved colors.
  */
 @Composable
 internal fun resolveTileColors(
     role: TileColorRole,
     isPressed: Boolean,
+    isSelected: Boolean = false,
 ): TileColors {
     val scheme = MaterialTheme.colorScheme
     val baseContainer = when (role) {
@@ -94,7 +96,11 @@ internal fun resolveTileColors(
         TileColorRole.Accent -> scheme.onPrimaryContainer
     }
     return TileColors(
-        container = if (isPressed) baseContainer.copy(alpha = 0.7f) else baseContainer,
+        container = when {
+            isSelected -> baseContainer.copy(alpha = 0.5f)
+            isPressed -> baseContainer.copy(alpha = 0.7f)
+            else -> baseContainer
+        },
         content = baseContent,
         selectionBorder = scheme.primary,
     )
@@ -192,7 +198,11 @@ fun AppTile(
     val renderedPlaceholders = shortcutPlaceholders.coerceAtMost(maxShortcutSlots)
     val resolvedDescription = contentDescription ?: state.label
     val resolvedSymbolDescription = symbolContentDescription ?: resolvedDescription
-    val tileColors = resolveTileColors(role = state.colorRole, isPressed = state.isPressed)
+    val tileColors = resolveTileColors(
+        role = state.colorRole,
+        isPressed = state.isPressed,
+        isSelected = state.isSelected,
+    )
     val containerColor = tileColors.container
     val dimensions = LocalLauncherDimensions.current
 

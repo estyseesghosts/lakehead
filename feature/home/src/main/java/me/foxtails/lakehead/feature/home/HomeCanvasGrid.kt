@@ -29,6 +29,7 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import me.foxtails.lakehead.core.designsystem.AppTileDefaults
 import me.foxtails.lakehead.core.designsystem.PixelRect
+import me.foxtails.lakehead.core.designsystem.RemoveButton
 import me.foxtails.lakehead.core.designsystem.ResizeCandidateOverlay
 import me.foxtails.lakehead.core.designsystem.ResizeHandle
 import me.foxtails.lakehead.core.designsystem.SpanChild
@@ -91,6 +92,11 @@ data class HomeCanvasViewportStyle(
  *   [onResizeTile] when the span differs from the origin span. Persistence itself stays
  *   with the caller: this grid only reports the committed [ItemId] and [LogicalPosition] or
  *   [LogicalSpan].
+ * - A remove affordance floats as a sibling overlay over the active tile in both MOVE
+ *   and RESIZE modes: a 48dp [RemoveButton] (`"Remove {label}"`) positioned via
+ *   [removeButtonOffset] (1×1 center pinned to the tile's top-left corner, larger
+ *   spans centered on the tile). Tapping it reports [onRemoveTile] with the active
+ *   [ItemId] only; the grid performs no persistence delete and issues no move/resize.
  */
 @Composable
 internal fun HomeCanvasGrid(
@@ -102,6 +108,7 @@ internal fun HomeCanvasGrid(
     modifier: Modifier = Modifier,
     onMoveTile: (ItemId, LogicalPosition) -> Unit = { _, _ -> },
     onResizeTile: (ItemId, LogicalSpan) -> Unit = { _, _ -> },
+    onRemoveTile: (ItemId) -> Unit = {},
 ) {
     require(overscanRows >= 0L) { "overscanRows must be non-negative" }
     if (loaded.tiles.isEmpty()) {
@@ -526,6 +533,40 @@ internal fun HomeCanvasGrid(
                         ) {
                             ResizeHandle()
                         }
+                        // Remove affordance: sibling overlay over the active tile in
+                        // both MOVE and RESIZE modes. Tracks the live candidate span
+                        // (same footprint as the handle) so it stays attached during
+                        // a resize drag. Tap reports onRemoveTile only; the grid
+                        // performs no persistence delete and issues no move/resize.
+                        val removeLabel = if (activeTile.label.isNullOrBlank()) {
+                            UNAVAILABLE_LABEL
+                        } else {
+                            activeTile.label
+                        }
+                        val buttonPx = with(density) { 48.dp.roundToPx() }
+                        val removeAbsolute = removeButtonOffset(
+                            tileBounds = tileBounds,
+                            buttonSizePx = buttonPx,
+                            span = GridSpan(
+                                active.candidateSpan.columns,
+                                active.candidateSpan.rows,
+                            ),
+                        )
+                        val removeTop = rebasedOverlayTop(
+                            absoluteTopPx = removeAbsolute.y.coerceAtLeast(0),
+                            rowOrigin = rowOrigin,
+                            rowStridePx = rowStridePx,
+                        )
+                        Box(
+                            modifier = Modifier
+                                .offset { IntOffset(removeAbsolute.x.coerceAtLeast(0), removeTop) }
+                                .size(48.dp),
+                        ) {
+                            RemoveButton(
+                                label = removeLabel,
+                                onRemove = { onRemoveTile(active.itemId) },
+                            )
+                        }
                     }
                 }
             }
@@ -732,5 +773,36 @@ internal fun rebasedOverlayTop(
         rebased.coerceIn(Int.MIN_VALUE.toLong(), Int.MAX_VALUE.toLong()).toInt()
     } catch (e: ArithmeticException) {
         Int.MIN_VALUE
+    }
+}
+
+/**
+ * Positions the remove affordance for the active tile in absolute content pixels.
+ *
+ * - 1×1 spans pin the button's center to the tile's top-left corner:
+ *   `(left - button/2, top - button/2)` (integer division; may be negative on the
+ *   first row/column — callers clamp for rendering so the target stays visible).
+ * - Larger spans center the button on the tile:
+ *   `(left + (width - button)/2, top + (height - button)/2)`.
+ *
+ * Pure math, framework-free; the caller rebases the Y via [rebasedOverlayTop] like
+ * other overlays. [span] selects the rule; legality stays owned by `core:grid`.
+ */
+internal fun removeButtonOffset(
+    tileBounds: PixelRect,
+    buttonSizePx: Int,
+    span: GridSpan,
+): IntOffset {
+    require(buttonSizePx > 0) { "buttonSizePx must be positive" }
+    return if (span == GridSpan(1, 1)) {
+        IntOffset(
+            tileBounds.left - buttonSizePx / 2,
+            tileBounds.top - buttonSizePx / 2,
+        )
+    } else {
+        IntOffset(
+            tileBounds.left + (tileBounds.width - buttonSizePx) / 2,
+            tileBounds.top + (tileBounds.height - buttonSizePx) / 2,
+        )
     }
 }

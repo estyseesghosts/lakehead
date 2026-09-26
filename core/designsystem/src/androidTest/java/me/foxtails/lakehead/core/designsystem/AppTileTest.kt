@@ -649,6 +649,53 @@ class AppTileTest {
         }
     }
 
+    @Test
+    fun selectedDimsContainerToHalfAlpha_keepsBorder() {
+        var base: TileColors? = null
+        var selected: TileColors? = null
+        composeRule.setContent {
+            LauncherTheme {
+                base = resolveTileColors(TileColorRole.Normal, isPressed = false, isSelected = false)
+                selected = resolveTileColors(TileColorRole.Normal, isPressed = false, isSelected = true)
+            }
+        }
+        composeRule.runOnIdle {
+            val b = base!!
+            val s = selected!!
+            assertEquals(1f, b.container.alpha, 0.01f)
+            assertEquals(0.5f, s.container.alpha, 0.01f)
+            assertEquals(b.container.red, s.container.red, 0.01f)
+            assertEquals(b.container.green, s.container.green, 0.01f)
+            assertEquals(b.container.blue, s.container.blue, 0.01f)
+            assertEquals("selected must keep the selection border", b.selectionBorder, s.selectionBorder)
+            assertEquals(b.content, s.content)
+        }
+    }
+
+    @Test
+    fun selectedContainer_neverHardcodesBlackOrWhite() {
+        var lightSelected: TileColors? = null
+        var darkSelected: TileColors? = null
+        composeRule.setContent {
+            LauncherTheme(darkTheme = false) {
+                lightSelected = resolveTileColors(TileColorRole.Normal, isPressed = false, isSelected = true)
+            }
+        }
+        composeRule.runOnIdle {
+            assertNotEquals(androidx.compose.ui.graphics.Color.Black, lightSelected!!.container)
+            assertNotEquals(androidx.compose.ui.graphics.Color.White, lightSelected!!.container)
+        }
+        composeRule.setContent {
+            LauncherTheme(darkTheme = true) {
+                darkSelected = resolveTileColors(TileColorRole.Normal, isPressed = false, isSelected = true)
+            }
+        }
+        composeRule.runOnIdle {
+            assertNotEquals(androidx.compose.ui.graphics.Color.Black, darkSelected!!.container)
+            assertNotEquals(androidx.compose.ui.graphics.Color.White, darkSelected!!.container)
+        }
+    }
+
     private fun boundsInRoot(interaction: SemanticsNodeInteraction): Rect {
         val node = interaction.fetchSemanticsNode()
         val position = node.positionInRoot

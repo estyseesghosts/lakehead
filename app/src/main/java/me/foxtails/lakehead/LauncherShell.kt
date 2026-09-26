@@ -73,6 +73,7 @@ internal fun LauncherShell(
     onRequestDefaultHome: () -> Unit,
     onMoveTile: (ItemId, LogicalPosition) -> Unit = { _, _ -> },
     onResizeTile: (ItemId, LogicalSpan) -> Unit = { _, _ -> },
+    onRemoveTile: (ItemId) -> Unit = { },
     modifier: Modifier = Modifier,
     initialDestination: LauncherDestination = LauncherDestination.HOME,
     viewportStyle: HomeCanvasViewportStyle = HomeCanvasViewportStyle(),
@@ -99,6 +100,7 @@ internal fun LauncherShell(
                 viewportStyle = viewportStyle,
                 onMoveTile = onMoveTile,
                 onResizeTile = onResizeTile,
+                onRemoveTile = onRemoveTile,
             )
 
             LauncherDestination.ALL_APPS -> AllAppsScreen(

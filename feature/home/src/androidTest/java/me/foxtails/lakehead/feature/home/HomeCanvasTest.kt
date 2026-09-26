@@ -666,6 +666,87 @@ class HomeCanvasTest {
         composeRule.onAllNodesWithContentDescription("Square App").assertCountEquals(2)
     }
 
+    // ---- Remove affordance (delete X) ----
+
+    @Test
+    fun removeAffordance_hiddenBeforeEdit_shownInEdit_tapCallsOnRemoveOnly() {
+        val tiles = listOf(
+            tile("a", personal, "Removable App", column = 0, row = 0),
+            tile("b", work, "Other App", column = 1, row = 0),
+        )
+        var removed: ItemId? = null
+        var moved: ItemId? = null
+        var resized: ItemId? = null
+        var launched: AppIdentity? = null
+        composeRule.setContent {
+            HomeCanvas(
+                state = loaded(tiles),
+                iconsByIdentity = emptyMap(),
+                onLaunchApp = { launched = it },
+                onRequestDefaultHome = {},
+                onMoveTile = { id, _ -> moved = id },
+                onResizeTile = { id, _ -> resized = id },
+                onRemoveTile = { removed = it },
+            )
+        }
+        composeRule.waitForIdle()
+
+        // Hidden before edit.
+        composeRule.onAllNodesWithContentDescription("Remove Removable App").assertCountEquals(0)
+
+        // Enter edit from TileBody (index 0: only region with long-click).
+        composeRule.onAllNodesWithContentDescription("Removable App")[0]
+            .performSemanticsAction(SemanticsActions.OnLongClick) { it() }
+        composeRule.waitForIdle()
+
+        // Shown in MOVE mode with Role.Button and 48dp minima.
+        composeRule.onNodeWithContentDescription("Remove Removable App")
+            .assertExists()
+            .assert(hasClickAction())
+            .assert(
+                SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Button),
+            )
+        val minTouchPx = with(composeRule.density) { 48.dp.roundToPx() }
+        val removeSize = composeRule
+            .onNodeWithContentDescription("Remove Removable App")
+            .fetchSemanticsNode().size
+        composeRule.runOnIdle {
+            assertTrue(
+                "remove target width ${removeSize.width} must meet 48dp ($minTouchPx px)",
+                removeSize.width >= minTouchPx,
+            )
+            assertTrue(
+                "remove target height ${removeSize.height} must meet 48dp ($minTouchPx px)",
+                removeSize.height >= minTouchPx,
+            )
+        }
+
+        // Body/Symbol stay inert while editing.
+        val regions = composeRule.onAllNodesWithContentDescription("Removable App")
+        regions.assertCountEquals(2)
+        composeRule.runOnIdle {
+            regions.fetchSemanticsNodes().forEach { node ->
+                assertFalse(
+                    "in-edit body/symbol must expose no click",
+                    node.config.contains(SemanticsActions.OnClick),
+                )
+                assertFalse(
+                    "in-edit body/symbol must expose no long-click",
+                    node.config.contains(SemanticsActions.OnLongClick),
+                )
+            }
+        }
+
+        // X tap reports remove only: no move/resize commit, no launch.
+        composeRule.onNodeWithContentDescription("Remove Removable App").performClick()
+        composeRule.runOnIdle {
+            assertEquals(ItemId("a"), removed)
+            assertEquals(null, moved)
+            assertEquals(null, resized)
+            assertEquals(null, launched)
+        }
+    }
+
     // ---- Ownership/purity evidence ----
 
     @Test

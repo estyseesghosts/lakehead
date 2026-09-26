@@ -415,6 +415,83 @@ class HomeRouteLoaderTest {
         loader.stop()
     }
 
+    // ---- commitRemove ----
+
+    @Test
+    fun commitRemoveDispatchesToIOAndReloadsOnRemoved() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        var loadCount = 0
+        val repository = FakeRepository { _, _, _ ->
+            loadCount++
+            if (loadCount == 1) {
+                LoadResult.Loaded(listOf(placement("tile-a", appA)))
+            } else {
+                LoadResult.Loaded(emptyList())
+            }
+        }
+        repository.removeAction = { _, _ -> RemoveResult.Removed }
+        val loader = loader(repository, dispatcher)
+        loader.start(this)
+        advanceUntilIdle()
+        assertTrue(loader.state.value is HomeRenderState.Loaded)
+        assertEquals(1, (loader.state.value as HomeRenderState.Loaded).tiles.size)
+        val readsBefore = repository.reads
+
+        val result = loader.commitRemove(ItemId("tile-a"))
+        advanceUntilIdle()
+
+        assertTrue(result is RemoveResult.Removed)
+        assertEquals(1, repository.removeCalls.size)
+        assertEquals(requestedHome, repository.removeCalls[0].homeId)
+        assertEquals(ItemId("tile-a"), repository.removeCalls[0].itemId)
+        assertTrue("Expected reload after removed", repository.reads > readsBefore)
+        assertTrue(loader.state.value is HomeRenderState.Loaded)
+        assertEquals(0, (loader.state.value as HomeRenderState.Loaded).tiles.size)
+        loader.stop()
+    }
+
+    @Test
+    fun commitRemoveDoesNotReloadOnNotFound() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val repository = FakeRepository { _, _, _ ->
+            LoadResult.Loaded(listOf(placement("tile-a", appA)))
+        }
+        repository.removeAction = { _, _ -> RemoveResult.NotFound }
+        val loader = loader(repository, dispatcher)
+        loader.start(this)
+        advanceUntilIdle()
+        assertTrue(loader.state.value is HomeRenderState.Loaded)
+        val readsBefore = repository.reads
+
+        val result = loader.commitRemove(ItemId("tile-a"))
+        advanceUntilIdle()
+
+        assertTrue(result is RemoveResult.NotFound)
+        assertEquals(1, repository.removeCalls.size)
+        assertEquals("NotFound remove must not trigger reload", readsBefore, repository.reads)
+        loader.stop()
+    }
+
+    @Test
+    fun commitRemoveDoesNotReloadOnWrongHome() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val repository = FakeRepository { _, _, _ ->
+            LoadResult.Loaded(listOf(placement("tile-a", appA)))
+        }
+        repository.removeAction = { _, _ -> RemoveResult.WrongHome }
+        val loader = loader(repository, dispatcher)
+        loader.start(this)
+        advanceUntilIdle()
+        val readsBefore = repository.reads
+
+        val result = loader.commitRemove(ItemId("tile-a"))
+        advanceUntilIdle()
+
+        assertTrue(result is RemoveResult.WrongHome)
+        assertEquals("WrongHome remove must not trigger reload", readsBefore, repository.reads)
+        loader.stop()
+    }
+
     @Test
     fun decodedIconSnapshotIsImmutableBoundedAndUsesInjectedDecoder() {
         val imageA = "decoded-image"
@@ -582,6 +659,11 @@ class HomeRouteLoaderTest {
         var resizeAction: (HomeId, ItemId, LogicalSpan, Int, Int) -> MutationResult = { _, _, _, _, _ ->
             error("loader must not write")
         }
+        data class RemoveCall(val homeId: HomeId, val itemId: ItemId)
+        var removeCalls = mutableListOf<RemoveCall>()
+        var removeAction: (HomeId, ItemId) -> RemoveResult = { _, _ ->
+            error("loader must not write")
+        }
         override fun load(homeId: HomeId, columns: Int, rows: Int): LoadResult {
             reads++
             return read(homeId, columns, rows)
@@ -601,7 +683,9 @@ class HomeRouteLoaderTest {
             return resizeAction(homeId, itemId, span, columns, rows)
         }
         override fun remove(homeId: HomeId, itemId: ItemId): RemoveResult {
-            mutations++; error("loader must not write")
+            mutations++
+            removeCalls += RemoveCall(homeId, itemId)
+            return removeAction(homeId, itemId)
         }
         override fun ensureHome(homeId: HomeId): Boolean {
             mutations++; error("loader must not write")

@@ -23,6 +23,7 @@ import me.foxtails.lakehead.core.grid.GridRowWindow
 import me.foxtails.lakehead.core.model.HomeId
 import me.foxtails.lakehead.data.database.PlacementDatabase
 import me.foxtails.lakehead.data.repository.HomePlacementRepository
+import me.foxtails.lakehead.data.repository.RemoveResult
 import me.foxtails.lakehead.data.repository.RoomHomePlacementRepository
 import me.foxtails.lakehead.feature.home.HomeCanvasViewportStyle
 import me.foxtails.lakehead.feature.home.HomeViewportInputs
@@ -197,6 +198,14 @@ class MainActivity : ComponentActivity() {
                 onResizeTile = { itemId, span ->
                     lifecycleScope.launch {
                         routeLoader.commitResize(itemId, span)
+                    }
+                },
+                onRemoveTile = { itemId ->
+                    lifecycleScope.launch {
+                        val result = routeLoader.commitRemove(itemId)
+                        if (result is RemoveResult.Removed) {
+                            allAppsLoader.refreshHomeMembership()
+                        }
                     }
                 },
                 viewportStyle = routeViewportStyle,

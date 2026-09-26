@@ -25,6 +25,7 @@ import me.foxtails.lakehead.core.model.LogicalSpan
 import me.foxtails.lakehead.data.repository.HomePlacementRepository
 import me.foxtails.lakehead.data.repository.LoadResult
 import me.foxtails.lakehead.data.repository.MutationResult
+import me.foxtails.lakehead.data.repository.RemoveResult
 import me.foxtails.lakehead.feature.home.HomeAppMetadata
 import me.foxtails.lakehead.feature.home.HomeRenderProjection
 import me.foxtails.lakehead.feature.home.HomeRenderState
@@ -166,6 +167,28 @@ internal class HomeRouteLoader(
                 rows = viewport.rowsBound,
             )
             if (result is MutationResult.Accepted) {
+                reload()
+            }
+            result
+        }
+    }
+
+    /**
+     * Commits a tile removal on the IO dispatcher and reloads on success.
+     *
+     * Callers must be in a coroutine scope (typically `lifecycleScope`).
+     * The repository write is synchronous (Room transaction) and is wrapped in
+     * `withContext(Dispatchers.IO)` so the caller never blocks the main thread.
+     * Only [RemoveResult.Removed] triggers a reload — [RemoveResult.NotFound] or
+     * [RemoveResult.WrongHome] persist nothing.
+     */
+    suspend fun commitRemove(itemId: ItemId): RemoveResult {
+        return withContext(ioDispatcher) {
+            val result = repository.remove(
+                homeId = homeId,
+                itemId = itemId,
+            )
+            if (result is RemoveResult.Removed) {
                 reload()
             }
             result
