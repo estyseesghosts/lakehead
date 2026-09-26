@@ -3,6 +3,8 @@ package me.foxtails.lakehead
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.text.BasicText
+import androidx.compose.material3.LocalTextStyle
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -35,7 +37,12 @@ internal fun FeedSurface(
             is FeedAvailability.Available -> FeedOverlaySurface(
                 provider = availability.provider,
             )
-            is FeedAvailability.Unavailable -> BasicText(text = "Feed unavailable")
+            is FeedAvailability.Unavailable -> BasicText(
+                text = "Feed unavailable",
+                style = LocalTextStyle.current.merge(
+                    color = MaterialTheme.colorScheme.onSurface,
+                ),
+            )
         }
     }
 }

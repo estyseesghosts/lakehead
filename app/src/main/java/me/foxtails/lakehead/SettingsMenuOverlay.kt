@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.text.BasicText
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -183,7 +184,12 @@ internal fun SettingsMenuOverlay(
                                     .background(menuColor)
                                     .padding(16.dp),
                             ) {
-                                BasicText(text = SETTINGS_MENU_FEED_HEADER)
+                                BasicText(
+                                    text = SETTINGS_MENU_FEED_HEADER,
+                                    style = LocalTextStyle.current.merge(
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    ),
+                                )
                                 for (provider in FeedProviderId.PRIORITY) {
                                     val label = feedProviderLabel(provider)
                                     val isSelected = provider == selectedProvider
@@ -207,12 +213,22 @@ internal fun SettingsMenuOverlay(
                                             }
                                             .testTag(feedProviderRowTag(provider)),
                                     ) {
-                                        BasicText(text = rowText)
+                                        BasicText(
+                                            text = rowText,
+                                            style = LocalTextStyle.current.merge(
+                                                color = MaterialTheme.colorScheme.onSurface,
+                                            ),
+                                        )
                                     }
                                 }
                                 val unavailable = availability as? FeedAvailability.Unavailable
                                 if (unavailable != null) {
-                                    BasicText(text = feedUnavailableReasonText(unavailable.reason))
+                                    BasicText(
+                                        text = feedUnavailableReasonText(unavailable.reason),
+                                        style = LocalTextStyle.current.merge(
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        ),
+                                    )
                                 }
                             }
                         },

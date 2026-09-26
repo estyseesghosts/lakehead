@@ -15,7 +15,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
@@ -56,7 +55,7 @@ internal const val PICKER_ANIMATION_MILLIS: Int = 130
  *
  * - Closed (`!picker.isOpen`): [backgroundContent] alone, no scrim/grid/animation.
  * - Open: [FloatingControlOverlay] over [backgroundContent] with two layers —
- *   a full-viewport scrim dim (`Black` alpha 0.45, [ALPHABET_PICKER_SCRIM_DESCRIPTION],
+ *   a full-viewport scrim dim (theme `scrim` at 0.45 alpha, [ALPHABET_PICKER_SCRIM_DESCRIPTION],
  *   activation dismisses) below a centered [AlphabetPickerGrid]. The grid adapts the
  *   [String] enablement to [Char] via [enabledChars]; taps report
  *   `onLetterPicked(letter.toString())`. Disabled letters expose no click action, so
@@ -137,7 +136,7 @@ fun AlphabetPickerOverlay(
                         Box(
                             modifier = Modifier
                                 .fillMaxSize()
-                                .background(Color.Black.copy(alpha = 0.45f))
+                                .background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.45f))
                                 .testTag(ALPHABET_PICKER_SCRIM_TAG),
                         )
                     },
