@@ -31,6 +31,7 @@ import kotlinx.coroutines.launch
 import me.foxtails.lakehead.core.designsystem.GestureArbitration
 import me.foxtails.lakehead.core.designsystem.GestureArbitration.ArbWinner
 import me.foxtails.lakehead.core.designsystem.GestureArbitration.LockedAxis
+import me.foxtails.lakehead.core.designsystem.ShortcutSurfaceEntry
 import me.foxtails.lakehead.core.model.AppIdentity
 import me.foxtails.lakehead.core.model.ItemId
 import me.foxtails.lakehead.core.model.LogicalPosition
@@ -111,6 +112,14 @@ internal fun LauncherShell(
     onMoveTile: (ItemId, LogicalPosition) -> Unit = { _, _ -> },
     onResizeTile: (ItemId, LogicalSpan) -> Unit = { _, _ -> },
     onRemoveTile: (ItemId) -> Unit = { },
+    // B4 edit-menu rows (thin read-only domain interface via :app): rank-ordered
+    // shortcut entries for the currently selected home tile (empty until
+    // shortcut discovery lands, so production shows no menu). Row taps report
+    // the selected ItemId and entry id; execution and pin persistence stay
+    // with the caller.
+    surfaceEntries: List<ShortcutSurfaceEntry> = emptyList(),
+    onSurfaceExecute: (ItemId, String) -> Unit = { _, _ -> },
+    onSurfaceTogglePin: (ItemId, String) -> Unit = { _, _ -> },
     onHeaderTap: (String) -> Unit = {},
     modifier: Modifier = Modifier,
     initialPage: Int = LAUNCHER_PAGE_TILE,
@@ -258,6 +267,9 @@ internal fun LauncherShell(
                     onMoveTile = onMoveTile,
                     onResizeTile = onResizeTile,
                     onRemoveTile = onRemoveTile,
+                    surfaceEntries = surfaceEntries,
+                    onSurfaceExecute = onSurfaceExecute,
+                    onSurfaceTogglePin = onSurfaceTogglePin,
                     bottomClearance = bottomClearance,
                     onTransientHoldChange = { homeHold = it },
                     onPagerHoldChange = { pagerHold = it },

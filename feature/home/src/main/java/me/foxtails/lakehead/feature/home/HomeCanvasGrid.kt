@@ -37,6 +37,7 @@ import me.foxtails.lakehead.core.designsystem.PixelRect
 import me.foxtails.lakehead.core.designsystem.RemoveButton
 import me.foxtails.lakehead.core.designsystem.ResizeCandidateOverlay
 import me.foxtails.lakehead.core.designsystem.ResizeHandle
+import me.foxtails.lakehead.core.designsystem.ShortcutSurfaceEntry
 import me.foxtails.lakehead.core.designsystem.SignedPixelFrame
 import me.foxtails.lakehead.core.designsystem.SpanChild
 import me.foxtails.lakehead.core.designsystem.SquareCellGeometry
@@ -117,9 +118,13 @@ data class HomeCanvasViewportStyle(
  *   spans centered on the tile). Tapping it reports [onRemoveTile] with the active
  *   [ItemId] only; the grid performs no persistence delete and issues no move/resize.
  * - B1: swipe-to-open shortcuts are removed — no idle/editing flick opens a
- *   shortcut surface and this grid exposes no surface rows or execute/pin
- *   callbacks. Shortcuts return in B4 as an edit-mode menu above the selected
- *   tile; the overlay frame geometry is retained in [swipeSurfaceFrame].
+ *   shortcut surface and this grid exposes no swipe rows. Shortcuts return in
+ *   B4 as an edit-mode menu above the selected tile: [EditShortcutMenu] follows
+ *   `(interaction as? Editing)?.selectedId` (long-press shows, tap-other
+ *   transfers, empty-tap/Back/navigate/move-start/resize-start/removal
+ *   dismisses with zero activation) and renders [surfaceEntries] in caller
+ *   rank order via the reused [swipeSurfaceFrame]-pattern geometry
+ *   ([editShortcutMenuFrame]); no reflow, no packing, no grid legality.
  */
 @Composable
 internal fun HomeCanvasGrid(
@@ -132,6 +137,13 @@ internal fun HomeCanvasGrid(
     onMoveTile: (ItemId, LogicalPosition) -> Unit = { _, _ -> },
     onResizeTile: (ItemId, LogicalSpan) -> Unit = { _, _ -> },
     onRemoveTile: (ItemId) -> Unit = {},
+    // B4 edit-menu rows: rank-ordered shortcut entries for the currently
+    // selected tile (empty until shortcut discovery lands). Row taps report
+    // onSurfaceExecute/onSurfaceTogglePin with the selected ItemId and entry
+    // id; execution and pin persistence stay with the caller.
+    surfaceEntries: List<ShortcutSurfaceEntry> = emptyList(),
+    onSurfaceExecute: (ItemId, String) -> Unit = { _, _ -> },
+    onSurfaceTogglePin: (ItemId, String) -> Unit = { _, _ -> },
     // W3 reduced-motion: when true the resize preview snaps to the validated
     // span immediately instead of animating rapidly toward it. Both branches
     // share [resizePreviewFrame] geometry, so the rendered bounds are identical.
@@ -880,6 +892,35 @@ internal fun HomeCanvasGrid(
                                 },
                             )
                         }
+                    }
+                }
+                // B4 edit-mode shortcut menu: sibling overlay above the W1-selected
+                // tile, inside the scrolling content so it shares the tiles'
+                // coordinate space and tracks scroll. Follows
+                // (interaction as? Editing)?.selectedId: long-press shows,
+                // tap-other transfers with no Normal round-trip, and every
+                // dismiss path (empty-tap/Back/navigate to Normal, move/resize
+                // start to Active, removal/uninstall via a null selection or a
+                // tile-lookup miss, zero shortcuts) uncomposes the menu with
+                // zero activation. Only a row tap reports onSurfaceExecute/
+                // onSurfaceTogglePin with the selected ItemId and entry id;
+                // the menu never moves, resizes or pages tiles.
+                val menuSelectedId = interactionEditing?.selectedId
+                if (isEditShortcutMenuVisible(active, menuSelectedId, loaded.tiles, surfaceEntries)) {
+                    val menuTile = loaded.tiles.find { it.itemId == menuSelectedId }
+                    if (menuTile != null) {
+                        EditShortcutMenu(
+                            tile = menuTile,
+                            entries = surfaceEntries,
+                            geometry = geometry,
+                            originX = originX,
+                            rowOrigin = rowOrigin,
+                            originYPx = originYPx,
+                            availableWidthPx = availableWidthPx,
+                            minHeightPx = minHeightPx,
+                            onSurfaceExecute = onSurfaceExecute,
+                            onSurfaceTogglePin = onSurfaceTogglePin,
+                        )
                     }
                 }
             }

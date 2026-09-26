@@ -14,6 +14,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import me.foxtails.lakehead.core.designsystem.ShortcutSurfaceEntry
 import me.foxtails.lakehead.core.model.AppIdentity
 import me.foxtails.lakehead.core.model.ItemId
 import me.foxtails.lakehead.core.model.LogicalPosition
@@ -39,8 +40,12 @@ import me.foxtails.lakehead.core.model.LogicalSpan
  *   remove-tap [ItemId]. The caller owns persistence. This composable performs no
  *   writes itself.
  * - B1: swipe-to-open shortcuts are removed — no surface rows or execute/pin
- *   callbacks pass through this canvas. Shortcuts return in B4 as an edit-mode
- *   menu above the selected tile.
+ *   callbacks pass through this canvas for swipes. Shortcuts return in B4 as
+ *   an edit-mode menu above the selected tile: [surfaceEntries] carries the
+ *   rank-ordered shortcut rows for the current selection (empty until
+ *   shortcut discovery lands), and row taps report [onSurfaceExecute]/
+ *   [onSurfaceTogglePin] with the selected [ItemId] and entry id. Execution
+ *   and pin persistence stay with the caller.
  * - A1 hold signal: [onTransientHoldChange] reports transient hold state owned by
  *   [HomeCanvasGrid] (active edit or wiggle editing) so the shell
  *   can gate pager swipe. Programmatic pill navigation is unaffected.
@@ -68,6 +73,9 @@ fun HomeCanvas(
     onMoveTile: (ItemId, LogicalPosition) -> Unit = { _, _ -> },
     onResizeTile: (ItemId, LogicalSpan) -> Unit = { _, _ -> },
     onRemoveTile: (ItemId) -> Unit = {},
+    surfaceEntries: List<ShortcutSurfaceEntry> = emptyList(),
+    onSurfaceExecute: (ItemId, String) -> Unit = { _, _ -> },
+    onSurfaceTogglePin: (ItemId, String) -> Unit = { _, _ -> },
     bottomClearance: Dp = 0.dp,
     onTransientHoldChange: (Boolean) -> Unit = {},
     onPagerHoldChange: (Boolean) -> Unit = {},
@@ -121,6 +129,9 @@ fun HomeCanvas(
                     onMoveTile = onMoveTile,
                     onResizeTile = onResizeTile,
                     onRemoveTile = onRemoveTile,
+                    surfaceEntries = surfaceEntries,
+                    onSurfaceExecute = onSurfaceExecute,
+                    onSurfaceTogglePin = onSurfaceTogglePin,
                     onTransientHoldChange = onTransientHoldChange,
                     onPagerHoldChange = onPagerHoldChange,
                 )
