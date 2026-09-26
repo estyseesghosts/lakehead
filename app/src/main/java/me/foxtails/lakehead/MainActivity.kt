@@ -53,12 +53,27 @@ class MainActivity : ComponentActivity() {
         RoomHomePlacementRepository(placementDatabase)
     }
 
-    private val iconSnapshots by lazy(LazyThreadSafetyMode.NONE) { AppIconSnapshotCache(maxEntries = 64) }
-    private val iconRefresher by lazy(LazyThreadSafetyMode.NONE) {
+    private val homeIconSnapshots by lazy(LazyThreadSafetyMode.NONE) { AppIconSnapshotCache(maxEntries = 64) }
+    private val allAppsIconSnapshots by lazy(LazyThreadSafetyMode.NONE) { AppIconSnapshotCache(maxEntries = 64) }
+    private val iconLookup by lazy(LazyThreadSafetyMode.NONE) {
+        LauncherAppsIconActivityLookup(applicationContext)
+    }
+    private val iconEncoder by lazy(LazyThreadSafetyMode.NONE) {
+        BoundedLauncherAppIconPngEncoder()
+    }
+    private val homeIconRefresher by lazy(LazyThreadSafetyMode.NONE) {
         LauncherAppsIconSnapshotRefresher(
-            lookup = LauncherAppsIconActivityLookup(applicationContext),
-            encoder = BoundedLauncherAppIconPngEncoder(),
-            cache = iconSnapshots,
+            lookup = iconLookup,
+            encoder = iconEncoder,
+            cache = homeIconSnapshots,
+            ioDispatcher = Dispatchers.IO,
+        )
+    }
+    private val allAppsIconRefresher by lazy(LazyThreadSafetyMode.NONE) {
+        LauncherAppsIconSnapshotRefresher(
+            lookup = iconLookup,
+            encoder = iconEncoder,
+            cache = allAppsIconSnapshots,
             ioDispatcher = Dispatchers.IO,
         )
     }
@@ -92,8 +107,8 @@ class MainActivity : ComponentActivity() {
             homeId = PRODUCTION_HOME_ID,
             repository = placementRepository,
             catalogue = appCatalogue,
-            iconRefresher = iconRefresher,
-            encodedIcons = iconSnapshots,
+            iconRefresher = homeIconRefresher,
+            encodedIcons = homeIconSnapshots,
             decodedIcons = decodedIcons,
             viewport = HomeRouteViewport(
                 inputs = HomeViewportInputs(
@@ -115,8 +130,8 @@ class MainActivity : ComponentActivity() {
             homeId = PRODUCTION_HOME_ID,
             repository = placementRepository,
             catalogue = appCatalogue,
-            iconRefresher = iconRefresher,
-            encodedIcons = iconSnapshots,
+            iconRefresher = allAppsIconRefresher,
+            encodedIcons = allAppsIconSnapshots,
             decodedIcons = decodedAllAppsIcons,
             columnsBound = 5,
             rowsBound = 4096,

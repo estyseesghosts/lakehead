@@ -185,7 +185,9 @@ internal class HomeRouteLoader(
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: Exception) {
-                encodedIcons.invalidate()
+                // Preserve last-good decoded icons on transient refresh failure;
+                // do not invalidate the (now-isolated) encoded cache.
+                return@withLock
             }
             val decoded = withContext(ioDispatcher) { decodedIcons.replace(encodedIcons.snapshot()) }
             synchronized(this) {

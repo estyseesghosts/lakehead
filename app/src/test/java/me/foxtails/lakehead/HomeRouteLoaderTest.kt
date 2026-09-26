@@ -440,6 +440,75 @@ class HomeRouteLoaderTest {
         } catch (_: UnsupportedOperationException) { }
     }
 
+    @Test
+    fun decodedCachePreservesLastGoodWhenAllNewDecodesFail() {
+        var decodeCount = 0
+        val cache = DecodedHomeIconCache<String>(maxEntries = 4) { png ->
+            decodeCount++
+            if (png[0] == 0.toByte()) null else "decoded-${png[0]}"
+        }
+        // First replace with valid entries
+        val first = cache.replace(linkedMapOf(
+            appA to AppIconSnapshot(appA, byteArrayOf(1)),
+            appB to AppIconSnapshot(appB, byteArrayOf(2)),
+        ))
+        assertEquals(2, first.size)
+        assertEquals("decoded-1", first[appA])
+        assertEquals("decoded-2", first[appB])
+        val savedDecodeCount = decodeCount
+
+        // Now replace with entries that all fail to decode (byte 0 → null from decoder)
+        val second = cache.replace(linkedMapOf(
+            appA to AppIconSnapshot(appA, byteArrayOf(0)),
+            appB to AppIconSnapshot(appB, byteArrayOf(0)),
+        ))
+        // Last-good should be preserved
+        assertEquals("Last-good preserved when all new decodes fail", 2, second.size)
+        assertEquals("decoded-1", second[appA])
+        assertEquals("decoded-2", second[appB])
+        assertEquals("Decoder was called for the failing entries", savedDecodeCount + 2, decodeCount)
+    }
+
+    @Test
+    fun allIconLookupsReturningNullPreservesLastGoodDecodedIcons() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        var shouldReturnNull = false
+        val testIconLookup = LauncherAppIconLookup { identity ->
+            if (shouldReturnNull) null
+            else TestLauncherIcon(identity)
+        }
+        val testEncoder = LauncherAppIconPngEncoder { icon ->
+            (icon as TestLauncherIcon).identity.profileId.value.encodeToByteArray()
+        }
+        val testDecoder: (ByteArray) -> ImageBitmap? = { _ -> TestImageBitmap }
+        val repository = FakeRepository { _, _, _ -> LoadResult.Loaded(listOf(placement("work", appB))) }
+        val catalogue = FakeCatalogue(listOf(
+            LauncherAppEntry(appA, "Personal"),
+            LauncherAppEntry(appB, "Work"),
+        ))
+        val loader = loader(repository, dispatcher, catalogue, testIconLookup, testEncoder, testDecoder)
+
+        loader.start(this)
+        advanceUntilIdle()
+
+        // Verify initial icons loaded
+        assertEquals(setOf(appB), loader.icons.value.keys)
+        assertSame(TestImageBitmap, loader.icons.value[appB])
+
+        // Now make all lookups return null (simulating a transient platform failure)
+        shouldReturnNull = true
+        catalogue.mutable.value = listOf(
+            LauncherAppEntry(appA, "Personal Updated"),
+            LauncherAppEntry(appB, "Work Updated"),
+        )
+        advanceUntilIdle()
+
+        // Last-good icons should be preserved — not wiped to empty
+        assertEquals("Icons should be preserved when all lookups return null", setOf(appB), loader.icons.value.keys)
+        assertSame(TestImageBitmap, loader.icons.value[appB])
+        loader.stop()
+    }
+
     private fun loader(
         repository: HomePlacementRepository,
         dispatcher: CoroutineDispatcher,

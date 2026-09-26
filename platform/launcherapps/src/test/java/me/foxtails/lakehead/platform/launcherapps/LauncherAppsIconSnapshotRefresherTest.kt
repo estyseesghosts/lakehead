@@ -132,6 +132,34 @@ class LauncherAppsIconSnapshotRefresherTest {
         assertFalse(cache[accepted.identity]!!.pngBytes.isEmpty())
     }
 
+    @Test
+    fun separateEncodedCachesAreIsolatedDuringConsecutiveRefreshes() = runTest {
+        val personal = entry("0")
+        val work = entry("10")
+        val extra = entry("0", "extra")
+        val homeCache = AppIconSnapshotCache(maxEntries = 64)
+        val allAppsCache = AppIconSnapshotCache(maxEntries = 64)
+
+        val homeRefresher = refresher(homeCache) { TestIcon(1) }
+        val allAppsRefresher = refresher(allAppsCache) { TestIcon(2) }
+
+        // Home refreshes with only placed entry (personal)
+        homeRefresher.refresh(listOf(personal))
+        // AllApps refreshes with all entries
+        allAppsRefresher.refresh(listOf(personal, work, extra))
+
+        // Home cache only has placed entry
+        assertEquals(setOf(personal.identity), homeCache.snapshot().keys)
+        // AllApps cache has all entries
+        assertEquals(setOf(personal.identity, work.identity, extra.identity), allAppsCache.snapshot().keys)
+
+        // Now Home refreshes again with different subset — should not affect AllApps
+        homeRefresher.refresh(listOf(personal, work))
+        assertEquals(setOf(personal.identity, work.identity), homeCache.snapshot().keys)
+        // AllApps cache unchanged
+        assertEquals(setOf(personal.identity, work.identity, extra.identity), allAppsCache.snapshot().keys)
+    }
+
     @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
     private fun refresher(
         cache: AppIconSnapshotCache,

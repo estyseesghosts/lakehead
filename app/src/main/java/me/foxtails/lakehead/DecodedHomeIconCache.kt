@@ -14,14 +14,24 @@ internal class DecodedHomeIconCache<T : Any>(
 
     init { require(maxEntries > 0) }
 
+    /**
+     * Decodes [snapshots] and replaces the internal map. If every decode attempt fails or the
+     * input is empty, the previous (last-good) entries are preserved so a transient failure
+     * never publishes an empty icon map.
+     */
     @Synchronized
     fun replace(snapshots: Map<AppIdentity, AppIconSnapshot>): Map<AppIdentity, T> {
-        entries.clear()
+        val newEntries = LinkedHashMap<AppIdentity, T>()
         snapshots.forEach { (identity, snapshot) ->
             val decoded = try { decoder(snapshot.pngBytes) } catch (_: Exception) { null }
-            if (decoded != null) entries[identity] = decoded
-            while (entries.size > maxEntries) entries.remove(entries.keys.first())
+            if (decoded != null) newEntries[identity] = decoded
+            while (newEntries.size > maxEntries) newEntries.remove(newEntries.keys.first())
         }
+        if (newEntries.isNotEmpty()) {
+            entries.clear()
+            entries.putAll(newEntries)
+        }
+        // When newEntries is empty the previous entries remain as last-good.
         return snapshot()
     }
 

@@ -33,6 +33,7 @@ import me.foxtails.lakehead.platform.launcherapps.LauncherAppIconLookup
 import me.foxtails.lakehead.platform.launcherapps.LauncherAppsIconSnapshotRefresher
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -173,6 +174,58 @@ class AllAppsRouteLoaderTest {
         assertEquals(2, loader.icons.value.size)
         assertTrue(appA in loader.icons.value)
         assertTrue(appB in loader.icons.value)
+        loader.stop()
+    }
+
+    @Test
+    fun allIconLookupsReturningNullPreservesLastGoodDecodedIcons() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        var shouldReturnNull = false
+        val testIconLookup = LauncherAppIconLookup { identity ->
+            if (shouldReturnNull) null
+            else TestLauncherIcon(identity)
+        }
+        val testEncoder = LauncherAppIconPngEncoder { icon ->
+            (icon as TestLauncherIcon).identity.profileId.value.encodeToByteArray()
+        }
+        val testDecoder: (ByteArray) -> ImageBitmap? = { _ -> TestImageBitmap }
+        val placements = listOf(
+            AppPlacement(homeId, ItemId("placed"), appA, LogicalPosition(0, 0), LogicalSpan(1, 1), ItemAvailability.AVAILABLE),
+        )
+        val repository = FakeReadRepository(LoadResult.Loaded(placements))
+        val catalogue = FakeCatalogue(listOf(
+            LauncherAppEntry(appA, "App A"),
+            LauncherAppEntry(appB, "App B"),
+        ))
+        val encodedIcons = AppIconSnapshotCache(8)
+        val decodedIcons = DecodedHomeIconCache<ImageBitmap>(8, testDecoder)
+        val loader = AllAppsRouteLoader(
+            homeId = homeId,
+            repository = repository,
+            catalogue = catalogue,
+            iconRefresher = LauncherAppsIconSnapshotRefresher(testIconLookup, testEncoder, encodedIcons, dispatcher),
+            encodedIcons = encodedIcons,
+            decodedIcons = decodedIcons,
+            ioDispatcher = dispatcher,
+        )
+        loader.start(this)
+        advanceUntilIdle()
+
+        // Verify initial icons loaded for all catalogue entries
+        assertEquals(setOf(appA, appB), loader.icons.value.keys)
+
+        // Now make all lookups return null (simulating a transient platform failure)
+        shouldReturnNull = true
+        catalogue.mutable.value = listOf(
+            LauncherAppEntry(appA, "App A Updated"),
+            LauncherAppEntry(appB, "App B Updated"),
+        )
+        advanceUntilIdle()
+
+        // Last-good icons should be preserved — not wiped to empty
+        assertEquals("Icons should be preserved when all lookups return null", setOf(appA, appB), loader.icons.value.keys)
+        assertSame(TestImageBitmap, loader.icons.value[appA])
+        assertSame(TestImageBitmap, loader.icons.value[appB])
         loader.stop()
     }
 
