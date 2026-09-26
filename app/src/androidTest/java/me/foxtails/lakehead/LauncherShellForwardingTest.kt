@@ -21,6 +21,7 @@ import me.foxtails.lakehead.core.model.ProfileId
 import me.foxtails.lakehead.feature.allapps.AllAppsViewState
 import me.foxtails.lakehead.feature.home.HomeRenderState
 import me.foxtails.lakehead.feature.home.HomeRenderTile
+import me.foxtails.lakehead.platform.feed.FeedAvailability
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
@@ -85,6 +86,9 @@ class LauncherShellForwardingTest {
                 onLaunchApp = {},
                 onAddToHome = {},
                 onRequestDefaultHome = {},
+                feedAvailability = FeedAvailability.Unavailable(
+                    FeedAvailability.Unavailable.Reason.NO_PROVIDER,
+                ),
                 onRemoveTile = { removed = it },
                 initialPage = LAUNCHER_PAGE_TILE,
             )

@@ -47,6 +47,7 @@ import me.foxtails.lakehead.feature.allapps.toAppSections
 import me.foxtails.lakehead.feature.home.HomeCanvas
 import me.foxtails.lakehead.feature.home.HomeCanvasViewportStyle
 import me.foxtails.lakehead.feature.home.HomeRenderState
+import me.foxtails.lakehead.platform.feed.FeedAvailability
 
 /** Feed page index in the launcher pager. */
 const val LAUNCHER_PAGE_FEED = 0
@@ -109,6 +110,10 @@ internal fun LauncherShell(
     onLaunchApp: (AppIdentity) -> Unit,
     onAddToHome: (AppIdentity) -> Unit,
     onRequestDefaultHome: () -> Unit,
+    // Feed host verdict from the platform gateway (owned by the caller): page 0
+    // hosts the provider surface when Available, else the honest fallback.
+    // Required (no default) so callers cannot silently hide Unavailable.
+    feedAvailability: FeedAvailability,
     onMoveTile: (ItemId, LogicalPosition) -> Unit = { _, _ -> },
     onResizeTile: (ItemId, LogicalSpan) -> Unit = { _, _ -> },
     onRemoveTile: (ItemId) -> Unit = { },
@@ -227,6 +232,7 @@ internal fun LauncherShell(
         ) { page ->
             when (page) {
                 LAUNCHER_PAGE_FEED -> FeedSurface(
+                    availability = feedAvailability,
                     modifier = Modifier.fillMaxSize(),
                 )
 

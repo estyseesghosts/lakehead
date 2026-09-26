@@ -4,7 +4,10 @@ import android.app.Activity
 import android.os.Bundle
 import android.app.role.RoleManager
 import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.BitmapFactory
+import android.os.Build
 import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.setContent
@@ -27,6 +30,10 @@ import me.foxtails.lakehead.data.repository.RemoveResult
 import me.foxtails.lakehead.data.repository.RoomHomePlacementRepository
 import me.foxtails.lakehead.feature.home.HomeCanvasViewportStyle
 import me.foxtails.lakehead.feature.home.HomeViewportInputs
+import me.foxtails.lakehead.platform.feed.FeedOverlayGateway
+import me.foxtails.lakehead.platform.feed.FeedOverlayGatewayImpl
+import me.foxtails.lakehead.platform.feed.FeedProviderResolver
+import me.foxtails.lakehead.platform.feed.FeedServiceQuery
 import me.foxtails.lakehead.platform.launcherapps.AppLauncher
 import me.foxtails.lakehead.platform.launcherapps.AppIconSnapshotCache
 import me.foxtails.lakehead.platform.launcherapps.BoundedLauncherAppIconPngEncoder
@@ -151,6 +158,32 @@ class MainActivity : ComponentActivity() {
         )
     }
 
+    // Feed overlay gateway: application context only, never the activity. The
+    // PackageManager probe is the production FeedServiceQuery behind the pure
+    // FeedProviderResolver decision; the gateway owns binding, lifecycle and
+    // availability state, and composables only collect the framework-free state.
+    private val feedGateway: FeedOverlayGateway by lazy(LazyThreadSafetyMode.NONE) {
+        val context = applicationContext
+        val query = FeedServiceQuery { packageName, action ->
+            val intent = Intent(action).setPackage(packageName)
+            val matches = if (Build.VERSION.SDK_INT >= 33) {
+                context.packageManager.queryIntentServices(
+                    intent,
+                    PackageManager.ResolveInfoFlags.of(0),
+                )
+            } else {
+                @Suppress("DEPRECATION")
+                context.packageManager.queryIntentServices(intent, 0)
+            }
+            matches.isNotEmpty()
+        }
+        FeedOverlayGatewayImpl(
+            applicationContext = context,
+            resolver = FeedProviderResolver(query),
+            ioDispatcher = Dispatchers.IO,
+        )
+    }
+
     internal var appLauncherForTest: AppLauncher? = null
 
     private val requestHomeRole = registerForActivityResult(
@@ -168,12 +201,14 @@ class MainActivity : ComponentActivity() {
         val coordinator = addToHomeCoordinator
         val routeViewportStyle = homeViewportStyle
         val productionAppLauncher = appLauncher
+        val feed = feedGateway
         setContent {
             LauncherTheme {
             val homeState by routeLoader.state.collectAsState()
             val homeIcons by routeLoader.icons.collectAsState()
             val allAppsState by allAppsLoader.state.collectAsState()
             val allAppsIconsMap by allAppsLoader.icons.collectAsState()
+            val feedAvailability by feed.state.collectAsState()
             LauncherShell(
                 homeState = homeState,
                 homeIcons = homeIcons,
@@ -192,6 +227,7 @@ class MainActivity : ComponentActivity() {
                     }
                 },
                 onRequestDefaultHome = ::requestDefaultHome,
+                feedAvailability = feedAvailability,
                 onMoveTile = { itemId, position ->
                     lifecycleScope.launch {
                         routeLoader.commitMove(itemId, position)
@@ -221,9 +257,11 @@ class MainActivity : ComponentActivity() {
         appCatalogue.start()
         homeRouteLoader.start(lifecycleScope)
         allAppsRouteLoader.start(lifecycleScope)
+        feedGateway.start(lifecycleScope)
     }
 
     override fun onStop() {
+        feedGateway.stop()
         allAppsRouteLoader.stop()
         homeRouteLoader.stop()
         appCatalogue.stop()
