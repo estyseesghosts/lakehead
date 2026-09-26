@@ -56,11 +56,13 @@ internal interface FeedPackageMonitor {
  *
  * Behavior contract:
  * - Resolution always runs off-main on [ioDispatcher]; [state] starts as
- *   `Unavailable(NO_PROVIDER)` until the first resolution completes.
+ *   `Unavailable(NO_PROVIDER)` until the first resolution completes, and [start] auto-binds
+ *   the resolved provider (unbinding when nothing resolves).
  * - Exactly one connection exists at a time; attaching the same provider reuses it, attaching a
  *   different one unbinds first.
- * - Package changes re-resolve off-main, emit the new verdict and auto-detach when the bound
- *   provider no longer resolves.
+ * - Package changes re-resolve off-main, auto-bind the newly available provider
+ *   (unbinding first on a switch), auto-detach when nothing resolves, and no-op when the
+ *   same provider stays bound.
  * - `onServiceDisconnected`/`onBindingDied` clear the connection and emit `Unavailable`
  *   without ever throwing; binder callbacks use `tryEmit` because they cannot suspend.
  * - Short critical sections are serialized with [mutex]. The public methods cannot suspend, so
@@ -136,11 +138,34 @@ class FeedOverlayGatewayImpl internal constructor(
             if (this.scope != null) return
             this.scope = scope
             packageMonitor.start(::onPackageChanged)
-            resolveJob = scope.launch(ioDispatcher) {
-                _state.emit(resolver.resolve())
-            }
         } finally {
             mutex.unlock()
+        }
+        // Launched after unlocking: an undispatched dispatcher runs the body eagerly on the
+        // calling thread, and the body needs [mutex.tryLock] for itself. Holding the lock
+        // across launch would self-contend and silently drop the first resolution.
+        resolveJob = scope.launch(ioDispatcher) {
+            val availability = try {
+                resolver.resolve()
+            } catch (_: Exception) {
+                FeedAvailability.Unavailable(FeedAvailability.Unavailable.Reason.QUERY_FAILED)
+            }
+            if (!mutex.tryLock()) return@launch
+            try {
+                if (this@FeedOverlayGatewayImpl.scope !== scope) return@launch
+                if (availability is FeedAvailability.Available) {
+                    if (boundProvider == availability.provider && boundPackage != null) {
+                        _state.emit(availability)
+                    } else {
+                        tryBindLocked(availability.provider)
+                    }
+                } else {
+                    unbindLocked()
+                    _state.emit(availability)
+                }
+            } finally {
+                mutex.unlock()
+            }
         }
     }
 
@@ -162,23 +187,7 @@ class FeedOverlayGatewayImpl internal constructor(
         if (!mutex.tryLock()) return
         try {
             if (boundProvider == provider && boundPackage != null) return
-            unbindLocked()
-            for (packageName in provider.packageNames) {
-                val accepted = try {
-                    connector.bind(connection, packageName)
-                } catch (_: Exception) {
-                    false
-                }
-                if (accepted) {
-                    boundProvider = provider
-                    boundPackage = packageName
-                    _state.tryEmit(FeedAvailability.Available(provider))
-                    return
-                }
-            }
-            _state.tryEmit(
-                FeedAvailability.Unavailable(FeedAvailability.Unavailable.Reason.QUERY_FAILED),
-            )
+            tryBindLocked(provider)
         } finally {
             mutex.unlock()
         }
@@ -253,15 +262,49 @@ class FeedOverlayGatewayImpl internal constructor(
             }
             if (!mutex.tryLock()) return@launch
             try {
-                _state.emit(availability)
-                val current = boundProvider
-                if (current != null && availability != FeedAvailability.Available(current)) {
+                if (availability is FeedAvailability.Available) {
+                    if (boundProvider == availability.provider && boundPackage != null) {
+                        _state.emit(availability)
+                    } else {
+                        tryBindLocked(availability.provider)
+                    }
+                } else {
                     unbindLocked()
+                    _state.emit(availability)
                 }
             } finally {
                 mutex.unlock()
             }
         }
+    }
+
+    /**
+     * Binds [provider] on the calling thread; the caller must hold [mutex] via `tryLock`.
+     *
+     * Manual [attach] and the automatic paths ([start] resolution and [onPackageChanged])
+     * share this single bind sequence so there is exactly one connection: any previous bind
+     * is released first, then each package id is tried in order. A bind rejection from the
+     * connector surfaces as `Unavailable(QUERY_FAILED)` via non-suspending `tryEmit` and
+     * never throws.
+     */
+    private fun tryBindLocked(provider: FeedProviderId) {
+        unbindLocked()
+        for (packageName in provider.packageNames) {
+            val accepted = try {
+                connector.bind(connection, packageName)
+            } catch (_: Exception) {
+                false
+            }
+            if (accepted) {
+                boundProvider = provider
+                boundPackage = packageName
+                _state.tryEmit(FeedAvailability.Available(provider))
+                return
+            }
+        }
+        _state.tryEmit(
+            FeedAvailability.Unavailable(FeedAvailability.Unavailable.Reason.QUERY_FAILED),
+        )
     }
 
     private fun deliverToOverlay() {

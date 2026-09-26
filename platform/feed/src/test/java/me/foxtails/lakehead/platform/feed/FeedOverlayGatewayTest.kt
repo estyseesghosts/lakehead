@@ -144,8 +144,115 @@ class FeedOverlayGatewayTest {
         assertEquals(1f, harness.gateway.overlayProgress, 0f)
     }
 
-    private class Harness(scope: TestScope, var installed: Set<String>) {
-        val connector = RecordingConnector()
+    @Test
+    fun startWithProviderAutoBinds() = runTest {
+        val harness = Harness(this, installed = setOf(LAWNFEED_PACKAGE))
+
+        harness.gateway.start(this)
+        advanceUntilIdle()
+
+        assertEquals(listOf(LAWNFEED_PACKAGE), harness.connector.bindCalls)
+        assertEquals(
+            FeedAvailability.Available(FeedProviderId.Lawnfeed),
+            harness.gateway.state.value,
+        )
+    }
+
+    @Test
+    fun startWithoutProviderNoBind() = runTest {
+        val harness = Harness(this, installed = emptySet())
+
+        harness.gateway.start(this)
+        advanceUntilIdle()
+
+        assertTrue(harness.connector.bindCalls.isEmpty())
+        assertEquals(0, harness.connector.unbindCalls)
+        assertEquals(
+            FeedAvailability.Unavailable(FeedAvailability.Unavailable.Reason.NO_PROVIDER),
+            harness.gateway.state.value,
+        )
+    }
+
+    @Test
+    fun packageAppearAutoBinds() = runTest {
+        val harness = Harness(this, installed = emptySet())
+        harness.gateway.start(this)
+        advanceUntilIdle()
+        assertTrue(harness.connector.bindCalls.isEmpty())
+
+        harness.installed = setOf(LAWNFEED_PACKAGE)
+        harness.firePackageChange()
+        advanceUntilIdle()
+
+        assertEquals(listOf(LAWNFEED_PACKAGE), harness.connector.bindCalls)
+        assertEquals(
+            FeedAvailability.Available(FeedProviderId.Lawnfeed),
+            harness.gateway.state.value,
+        )
+
+        // Same provider still bound: re-resolution is a bind no-op.
+        harness.firePackageChange()
+        advanceUntilIdle()
+        assertEquals(listOf(LAWNFEED_PACKAGE), harness.connector.bindCalls)
+    }
+
+    @Test
+    fun packageSwitchRebinds() = runTest {
+        val harness = Harness(this, installed = setOf(LAWNFEED_PACKAGE))
+        harness.gateway.start(this)
+        advanceUntilIdle()
+        assertEquals(listOf(LAWNFEED_PACKAGE), harness.connector.bindCalls)
+
+        harness.installed = setOf(NEO_FEED_PACKAGE)
+        harness.firePackageChange()
+        advanceUntilIdle()
+
+        assertEquals(listOf(LAWNFEED_PACKAGE, NEO_FEED_PACKAGE), harness.connector.bindCalls)
+        assertEquals(1, harness.connector.unbindCalls)
+        assertEquals(
+            FeedAvailability.Available(FeedProviderId.NeoFeed),
+            harness.gateway.state.value,
+        )
+    }
+
+    @Test
+    fun bindRejectionSurfacesQueryFailed() = runTest {
+        val harness = Harness(this, installed = setOf(LAWNFEED_PACKAGE), acceptBind = false)
+
+        harness.gateway.start(this)
+        advanceUntilIdle()
+
+        assertEquals(
+            listOf(LAWNFEED_PACKAGE, LAWNFEED_LEGACY_PACKAGE),
+            harness.connector.bindCalls,
+        )
+        assertEquals(
+            FeedAvailability.Unavailable(FeedAvailability.Unavailable.Reason.QUERY_FAILED),
+            harness.gateway.state.value,
+        )
+    }
+
+    @Test
+    fun doubleStartKeepsSingleBind() = runTest {
+        val harness = Harness(this, installed = setOf(LAWNFEED_PACKAGE))
+
+        harness.gateway.start(this)
+        harness.gateway.start(this)
+        advanceUntilIdle()
+
+        assertEquals(listOf(LAWNFEED_PACKAGE), harness.connector.bindCalls)
+        assertEquals(
+            FeedAvailability.Available(FeedProviderId.Lawnfeed),
+            harness.gateway.state.value,
+        )
+    }
+
+    private class Harness(
+        scope: TestScope,
+        var installed: Set<String>,
+        acceptBind: Boolean = true,
+    ) {
+        val connector = RecordingConnector(acceptBind = acceptBind)
         var packageListener: (() -> Unit)? = null
         val monitor = object : FeedPackageMonitor {
             override fun start(onPackageChanged: () -> Unit) {
