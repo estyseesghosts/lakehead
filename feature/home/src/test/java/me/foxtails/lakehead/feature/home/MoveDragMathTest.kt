@@ -1,5 +1,6 @@
 package me.foxtails.lakehead.feature.home
 
+import me.foxtails.lakehead.core.model.LogicalPosition
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -59,6 +60,14 @@ class MoveDragMathTest {
         val pos = MoveDragMath.cellForPixel(0f, 104f, cellSize, gap, gap, 3L)
         assertEquals(0, pos.column)
         assertEquals(5, pos.row)
+    }
+
+    @Test
+    fun fractionalPointerAboveWindowOrigin_mapsToPreviousRow() {
+        // A pointer fractionally above the window's row origin is in the
+        // preceding row. Floor must happen before adding the window offset.
+        val pos = MoveDragMath.cellForPixel(0f, -0.5f, cellSize, gap, gap, 5L)
+        assertEquals(4, pos.row)
     }
 
     @Test
@@ -145,5 +154,53 @@ class MoveDragMathTest {
             0f, 5200f, cellSize, gap, gap, 1000L, originYPxPx = 260f,
         )
         assertEquals(1095, pos.row)
+    }
+
+    @Test
+    fun scrolledViewport_roundTripsBothAxes() {
+        // Content cell (3, 7) is rendered at (156, 364), but the viewport is
+        // scrolled by (20, 104), so its pointer position is (136, 260).
+        val pos = MoveDragMath.cellForPixel(
+            xPx = 136f,
+            yPx = 260f,
+            cellSizePx = cellSize,
+            columnGapPx = gap,
+            rowGapPx = gap,
+            windowFirstRow = 0L,
+            scrollXPx = 20f,
+            scrollYPx = 104f,
+        )
+        assertEquals(LogicalPosition(3, 7), pos)
+    }
+
+    @Test
+    fun scrolledViewport_mapsUpDownAndDiagonalRowsAndColumns() {
+        val up = MoveDragMath.cellForPixel(
+            0f, 0f, cellSize, gap, gap, 0L, scrollXPx = 52f, scrollYPx = 104f,
+        )
+        val down = MoveDragMath.cellForPixel(
+            0f, 104f, cellSize, gap, gap, 0L, scrollXPx = -52f, scrollYPx = -104f,
+        )
+        val diagonal = MoveDragMath.cellForPixel(
+            104f, 156f, cellSize, gap, gap, 0L, scrollXPx = 52f, scrollYPx = 52f,
+        )
+        assertEquals(LogicalPosition(1, 2), up)
+        assertEquals(LogicalPosition(0, 0), down)
+        assertEquals(LogicalPosition(3, 4), diagonal)
+    }
+
+    @Test
+    fun grabOffset_returnsTileOriginCell() {
+        val pos = MoveDragMath.cellForPixel(
+            xPx = 30f,
+            yPx = 40f,
+            cellSizePx = cellSize,
+            columnGapPx = gap,
+            rowGapPx = gap,
+            windowFirstRow = 0L,
+            grabOffsetXPx = 30f,
+            grabOffsetYPx = 40f,
+        )
+        assertEquals(LogicalPosition(0, 0), pos)
     }
 }

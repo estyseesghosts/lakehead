@@ -378,4 +378,39 @@ class ResizeDragMathTest {
         )
         assertEquals(LogicalSpan(1, 1), withoutRest)
     }
+
+    @Test
+    fun rawSpan_viewportScroll_restoresVerticalAndHorizontalAxes() {
+        // Origin cell (2, 3) is at content (104, 156), while scrolling by
+        // (20, 52) renders it at viewport (84, 104). One cell down/right
+        // therefore still produces a 2x2 span after restoring the scroll.
+        val span = ResizeDragMath.rawSpan(
+            pointerXPx = 84f + stride,
+            pointerYPx = 104f + stride,
+            originPosition = LogicalPosition(2, 3),
+            cellSizePx = cellSize,
+            columnGapPx = gap,
+            rowGapPx = gap,
+            scrollXPx = 20f,
+            scrollYPx = 52f,
+        )
+        assertEquals(LogicalSpan(2, 2), span)
+    }
+
+    @Test
+    fun rawSpan_viewportScroll_withSignedNegativeOrigin() {
+        // A negative signed frame remains meaningful after scroll conversion:
+        // origin top is -20, and viewport y=-8 with scroll 40 is one stride down.
+        val span = ResizeDragMath.rawSpan(
+            pointerXPx = 0f,
+            pointerYPx = -8f,
+            originPosition = LogicalPosition(0, 0),
+            cellSizePx = cellSize,
+            columnGapPx = gap,
+            rowGapPx = gap,
+            originYPxRestPx = -20f,
+            scrollYPx = 40f,
+        )
+        assertEquals(LogicalSpan(1, 2), span)
+    }
 }

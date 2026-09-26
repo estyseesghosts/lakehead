@@ -17,8 +17,8 @@ object ResizeDragMath {
     /**
      * Compute the raw (un-quantized) span from a drag pointer position.
      *
-     * @param pointerXPx horizontal pixel position of the drag pointer (content coordinates)
-     * @param pointerYPx vertical pixel position of the drag pointer (content coordinates)
+     * @param pointerXPx horizontal pixel position of the drag pointer (viewport-local coordinates)
+     * @param pointerYPx vertical pixel position of the drag pointer (viewport-local coordinates)
      * @param originPosition the tile's fixed top-left logical cell
      * @param cellSizePx cell size in pixels
      * @param columnGapPx gap between columns in pixels
@@ -29,6 +29,10 @@ object ResizeDragMath {
      * (typically the content `minRow`); defaults to 0
      * @param originYPxRestPx vertical pixel rest offset applied on top of the rebased
      * frame (G2 `gridOriginY`); defaults to 0
+     * @param scrollXPx horizontal content scroll in pixels. The value is added to the
+     * viewport-local pointer position; defaults to 0.
+     * @param scrollYPx vertical content scroll in pixels. The value is added to the
+     * viewport-local pointer position; defaults to 0.
      * @return raw logical span (may be fractional-cell; caller quantizes). Minimum 1×1.
      */
     fun rawSpan(
@@ -41,6 +45,8 @@ object ResizeDragMath {
         originXPx: Float = 0f,
         rowOrigin: Long = 0L,
         originYPxRestPx: Float = 0f,
+        scrollXPx: Float = 0f,
+        scrollYPx: Float = 0f,
     ): LogicalSpan {
         val cellWidth = cellSizePx + columnGapPx
         val cellHeight = cellSizePx + rowGapPx
@@ -54,8 +60,10 @@ object ResizeDragMath {
             (originPosition.row.toLong() - rowOrigin).toFloat() * cellHeight
 
         // Pointer offset from origin cell's top-left
-        val dxPx = pointerXPx - originLeftPx
-        val dyPx = pointerYPx - originTopPx
+        // Resize pointers are viewport-local too. Convert both axes back to the
+        // content frame before comparing them with the fixed tile origin.
+        val dxPx = pointerXPx + scrollXPx - originLeftPx
+        val dyPx = pointerYPx + scrollYPx - originTopPx
 
         // Raw span = ceil(offset / stride), minimum 1
         val rawColumns = if (cellWidth > 0f) {
