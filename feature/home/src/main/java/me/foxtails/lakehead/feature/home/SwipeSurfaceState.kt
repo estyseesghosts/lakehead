@@ -3,7 +3,6 @@ package me.foxtails.lakehead.feature.home
 import me.foxtails.lakehead.core.designsystem.FloatingOverlayFrame
 import me.foxtails.lakehead.core.designsystem.FrameAnchor
 import me.foxtails.lakehead.core.designsystem.FrameSize
-import me.foxtails.lakehead.core.designsystem.GestureArbitration
 import me.foxtails.lakehead.core.designsystem.HorizontalFrameAnchor
 import me.foxtails.lakehead.core.designsystem.PixelRect
 import me.foxtails.lakehead.core.designsystem.SignedPixelFrame
@@ -11,17 +10,22 @@ import me.foxtails.lakehead.core.designsystem.VerticalFrameAnchor
 import me.foxtails.lakehead.core.model.ItemId
 
 /**
- * Transient pop-out shortcut surface for one home tile (S2).
+ * Transient pop-out shortcut surface state for one home tile (S2).
  *
- * Presentation state only: which tile's shortcut surface is currently exposed, if any.
- * No inventory, platform access, persistence or grid legality lives here. The caller
- * (the home grid) owns the [SwipeSurfaceState] value, resolves rank-ordered rows for
- * the shown tile, and reports execute/pin callbacks upward; persistence of pin choices
- * lands separately.
+ * B1: swipe-to-open is removed — no idle/editing flick ever shows a surface,
+ * so the flick classifier, its thresholds and the show trigger are gone
+ * (deleted: `classifySwipeFlick`, the `SWIPE_SURFACE_*` threshold constants
+ * and `SwipeSurfaceState.showSurface`). The show/hide
+ * machine ([Hidden]/[Shown]/[dismiss]/[dismissOnTileRemoved]) and the
+ * [swipeSurfaceFrame] geometry below are intentionally retained: B4
+ * (edit-mode shortcut menu above the selection) reuses the frame measurement
+ * and dismiss semantics with a selection-driven trigger.
+ *
+ * Presentation state only: which tile's surface is currently exposed, if any.
+ * No inventory, platform access, persistence or grid legality lives here.
  *
  * - [Hidden] exposes no surface.
- * - [Shown] exposes the surface for [tileId]; any swipe direction (left/right/up/down)
- *   opens the same surface and swipe direction never reorders rows.
+ * - [Shown] exposes the surface for [tileId].
  */
 sealed interface SwipeSurfaceState {
     /** No shortcut surface is exposed. */
@@ -30,15 +34,6 @@ sealed interface SwipeSurfaceState {
     /** The shortcut surface for [tileId] is exposed. */
     data class Shown(val tileId: ItemId) : SwipeSurfaceState
 }
-
-/**
- * Exposes the shortcut surface for [tileId].
- *
- * Any tile replaces any other: showing B while A is shown transfers directly to B
- * with no intermediate hidden state.
- */
-fun SwipeSurfaceState.showSurface(tileId: ItemId): SwipeSurfaceState =
-    SwipeSurfaceState.Shown(tileId)
 
 /**
  * Hides any exposed surface: background tap, Back, scroll, pager lock, edit entry.
@@ -58,70 +53,6 @@ fun SwipeSurfaceState.dismissOnTileRemoved(removedId: ItemId): SwipeSurfaceState
     } else {
         this
     }
-
-/**
- * Displacement fraction at or above which a tile swipe commits to [GestureArbitration.Settle.COMPLETE].
- *
- * Kept inside the 0.18–0.25 band: a short deliberate swipe opens the surface while a
- * tap (well below slop) still cancels. Sign is irrelevant; [GestureArbitration.settleDrag]
- * uses the absolute value so every swipe direction is equivalent.
- */
-const val SWIPE_SURFACE_COMPLETE_FRACTION: Float = 0.22f
-
-/**
- * Displacement fraction below [SWIPE_SURFACE_COMPLETE_FRACTION] at which a slow swipe
- * still cancels when velocity is also below flick. Must stay below
- * [SWIPE_SURFACE_COMPLETE_FRACTION]; enforced by [GestureArbitration.settleDrag].
- */
-const val SWIPE_SURFACE_CANCEL_FRACTION: Float = 0.08f
-
-/**
- * Deliberate-flick velocity threshold in dp/s, scaled by screen density at classification
- * time (`px/s = this * density`) so the feel is density-independent rather than a
- * hard-coded pixel constant.
- */
-const val SWIPE_SURFACE_FLICK_DP_PER_SEC: Float = 1000f
-
-/**
- * Scroll movement in dp during a swipe that proves sustained scrolling over a flick.
- *
- * The idle gesture observer suppresses the surface show when the scroll offset moved
- * more than this between pointer-down and pointer-up: a deliberate flick displaces the
- * finger only a short distance (most of it absorbed by slop), while a sustained
- * vertical drag travels much farther. Heuristic pending on-device tuning; the
- * scroll/pager dismiss effects stay authoritative for gestures after a show.
- */
-const val SWIPE_SURFACE_SCROLL_SUPPRESS_DP: Int = 48
-
-/**
- * Classifies a tile swipe as a surface flick ([GestureArbitration.Settle.COMPLETE]) or a
- * non-open ([GestureArbitration.Settle.CANCEL]).
- *
- * Thin delegate to [GestureArbitration.settleDrag] with the S2 thresholds: complete at
- * [SWIPE_SURFACE_COMPLETE_FRACTION], cancel below at [SWIPE_SURFACE_CANCEL_FRACTION],
- * flick velocity [SWIPE_SURFACE_FLICK_DP_PER_SEC] density-scaled to px/s. Both
- * [displacedFraction] (fraction of one grid cell, sign irrelevant) and [velocityPxPerSec]
- * (signed px/s, absolute value used) follow the `settleDrag` contract, so any swipe
- * direction classifies identically.
- *
- * The caller decides the track (one grid cell) and suppresses competing gestures
- * (edit session active, sustained scroll/pager movement); this function only applies
- * the thresholds and never consumes input.
- */
-fun classifySwipeFlick(
-    displacedFraction: Float,
-    velocityPxPerSec: Float,
-    density: Float,
-): GestureArbitration.Settle {
-    require(density > 0f) { "density must be positive, was $density" }
-    return GestureArbitration.settleDrag(
-        displacedFraction = displacedFraction,
-        velocityPxPerSec = velocityPxPerSec,
-        completeFraction = SWIPE_SURFACE_COMPLETE_FRACTION,
-        flickVelocityPxPerSec = SWIPE_SURFACE_FLICK_DP_PER_SEC * density,
-        cancelFraction = SWIPE_SURFACE_CANCEL_FRACTION,
-    )
-}
 
 /**
  * Measures the shortcut-surface overlay frame beside a tile: try beside, flip, clamp.

@@ -1,5 +1,6 @@
 package me.foxtails.lakehead.feature.home
 
+import me.foxtails.lakehead.core.designsystem.GestureArbitration
 import me.foxtails.lakehead.core.grid.GridColumns
 import me.foxtails.lakehead.core.grid.GridRowWindow
 import me.foxtails.lakehead.core.grid.GridVerticalExtent
@@ -7,13 +8,15 @@ import me.foxtails.lakehead.core.model.HomeId
 import me.foxtails.lakehead.core.model.ItemId
 import me.foxtails.lakehead.core.model.LogicalPosition
 import me.foxtails.lakehead.core.model.LogicalSpan
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * A1 truth table for [isHomeHold]: hold iff an edit session is active, wiggle
- * editing is engaged, or a shortcut surface is shown.
+ * A1 truth table for [isHomeHold]: hold iff an edit session is active or wiggle
+ * editing is engaged. B1 removed the shown-surface arm: no idle/editing flick
+ * opens a surface, so there is no shown state left to hold.
  *
  * P0 guards: [gridHoldSignal] forces false on empty tiles (populated→empty
  * must release shell `homeHold`), and [shouldResetCanvasHold] forces false on
@@ -59,7 +62,6 @@ class HomeHoldTest {
             isHomeHold(
                 null,
                 HomeInteractionController.Normal,
-                SwipeSurfaceState.Hidden,
             ),
         )
     }
@@ -70,7 +72,6 @@ class HomeHoldTest {
             isHomeHold(
                 activeSession(),
                 HomeInteractionController.Normal,
-                SwipeSurfaceState.Hidden,
             ),
         )
     }
@@ -81,18 +82,6 @@ class HomeHoldTest {
             isHomeHold(
                 null,
                 HomeInteractionController.Editing(selectedId = tileId),
-                SwipeSurfaceState.Hidden,
-            ),
-        )
-    }
-
-    @Test
-    fun shownOnly_holds() {
-        assertTrue(
-            isHomeHold(
-                null,
-                HomeInteractionController.Normal,
-                SwipeSurfaceState.Shown(tileId),
             ),
         )
     }
@@ -103,40 +92,6 @@ class HomeHoldTest {
             isHomeHold(
                 activeSession(),
                 HomeInteractionController.Editing(selectedId = tileId),
-                SwipeSurfaceState.Hidden,
-            ),
-        )
-    }
-
-    @Test
-    fun activeAndShown_holds() {
-        assertTrue(
-            isHomeHold(
-                activeSession(),
-                HomeInteractionController.Normal,
-                SwipeSurfaceState.Shown(tileId),
-            ),
-        )
-    }
-
-    @Test
-    fun editingAndShown_holds() {
-        assertTrue(
-            isHomeHold(
-                null,
-                HomeInteractionController.Editing(selectedId = tileId),
-                SwipeSurfaceState.Shown(tileId),
-            ),
-        )
-    }
-
-    @Test
-    fun allThree_holds() {
-        assertTrue(
-            isHomeHold(
-                activeSession(),
-                HomeInteractionController.Editing(selectedId = tileId),
-                SwipeSurfaceState.Shown(tileId),
             ),
         )
     }
@@ -147,7 +102,6 @@ class HomeHoldTest {
             isHomeHold(
                 activeResizeSession(),
                 HomeInteractionController.Normal,
-                SwipeSurfaceState.Hidden,
             ),
         )
     }
@@ -158,7 +112,30 @@ class HomeHoldTest {
             isHomeHold(
                 null,
                 HomeInteractionController.Editing(selectedId = null),
-                SwipeSurfaceState.Hidden,
+            ),
+        )
+    }
+
+    // B1 regression: swipe-to-open is removed. An idle tile swipe that
+    // completes at the arbitration layer (COMPLETE under the retired S2
+    // thresholds, inlined here as history) must neither hold the pager via
+    // a surface nor reach any surface callback: the grid exposes no surface
+    // rows/execute/pin API, and the hold covers active/editing only.
+    @Test
+    fun b1_completeIdleSwipe_showsNoSurface() {
+        val settle = GestureArbitration.settleDrag(
+            displacedFraction = 0.30f,
+            velocityPxPerSec = 0f,
+            completeFraction = 0.22f,
+            flickVelocityPxPerSec = 1000f * 2f,
+            cancelFraction = 0.08f,
+        )
+        assertEquals(GestureArbitration.Settle.COMPLETE, settle)
+        assertFalse(
+            gridHoldSignal(
+                tilesEmpty = false,
+                active = null,
+                interaction = HomeInteractionController.Normal,
             ),
         )
     }
@@ -173,19 +150,17 @@ class HomeHoldTest {
                 tilesEmpty = true,
                 active = activeSession(),
                 interaction = HomeInteractionController.Normal,
-                surface = SwipeSurfaceState.Hidden,
             ),
         )
     }
 
     @Test
-    fun gridHoldSignal_emptyWithAllThree_holdsFalse() {
+    fun gridHoldSignal_emptyWithActiveAndEditing_holdsFalse() {
         assertFalse(
             gridHoldSignal(
                 tilesEmpty = true,
                 active = activeResizeSession(),
                 interaction = HomeInteractionController.Editing(selectedId = tileId),
-                surface = SwipeSurfaceState.Shown(tileId),
             ),
         )
     }
@@ -197,7 +172,6 @@ class HomeHoldTest {
                 tilesEmpty = true,
                 active = null,
                 interaction = HomeInteractionController.Editing(selectedId = null),
-                surface = SwipeSurfaceState.Hidden,
             ),
         )
     }
@@ -209,7 +183,6 @@ class HomeHoldTest {
                 tilesEmpty = false,
                 active = null,
                 interaction = HomeInteractionController.Normal,
-                surface = SwipeSurfaceState.Hidden,
             ),
         )
         assertTrue(
@@ -217,7 +190,6 @@ class HomeHoldTest {
                 tilesEmpty = false,
                 active = activeSession(),
                 interaction = HomeInteractionController.Normal,
-                surface = SwipeSurfaceState.Hidden,
             ),
         )
         assertTrue(
@@ -225,7 +197,6 @@ class HomeHoldTest {
                 tilesEmpty = false,
                 active = activeResizeSession(),
                 interaction = HomeInteractionController.Normal,
-                surface = SwipeSurfaceState.Hidden,
             ),
         )
     }

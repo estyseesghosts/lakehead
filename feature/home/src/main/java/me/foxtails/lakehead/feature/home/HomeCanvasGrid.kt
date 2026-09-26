@@ -2,15 +2,12 @@ package me.foxtails.lakehead.feature.home
 
 import androidx.compose.animation.core.Animatable
 import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.awaitDragOrCancellation
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
@@ -26,25 +23,20 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.PointerInputChange
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import me.foxtails.lakehead.core.designsystem.AppTileDefaults
-import me.foxtails.lakehead.core.designsystem.FrameSize
 import me.foxtails.lakehead.core.designsystem.GestureArbitration
 import me.foxtails.lakehead.core.designsystem.GestureArbitration.LockedAxis
 import me.foxtails.lakehead.core.designsystem.PixelRect
 import me.foxtails.lakehead.core.designsystem.RemoveButton
 import me.foxtails.lakehead.core.designsystem.ResizeCandidateOverlay
 import me.foxtails.lakehead.core.designsystem.ResizeHandle
-import me.foxtails.lakehead.core.designsystem.ShortcutSurfaceEntry
-import me.foxtails.lakehead.core.designsystem.ShortcutSurfaceRow
 import me.foxtails.lakehead.core.designsystem.SignedPixelFrame
 import me.foxtails.lakehead.core.designsystem.SpanChild
 import me.foxtails.lakehead.core.designsystem.SquareCellGeometry
@@ -124,17 +116,10 @@ data class HomeCanvasViewportStyle(
  *   [removeButtonOffset] (1×1 center pinned to the tile's top-left corner, larger
  *   spans centered on the tile). Tapping it reports [onRemoveTile] with the active
  *   [ItemId] only; the grid performs no persistence delete and issues no move/resize.
- * - A transient swipe surface (S2) exposes one tile's shortcuts without entering edit
- *   mode: a short deliberate flick on an idle tile (any direction equivalent, classified
- *   by [classifySwipeFlick], never consuming input until COMPLETE) shows the surface
- *   for that tile via [SwipeSurfaceState.showSurface]. The surface is hoisted here
- *   inside `key(requestedHomeId)` so a home switch resets it, and it dismisses on
- *   background tap, Back, scroll movement, pager axis lock, move/resize entry and tile
- *   removal. The overlay is measured with [swipeSurfaceFrame] (try-beside, flip, clamp)
- *   and rendered as a sibling above the tiles: neighbours are overlaid, never reflowed.
- *   Rows come from [surfaceEntries] in caller rank order; row taps report
- *   [onSurfaceExecute]/[onSurfaceTogglePin] with the shown [ItemId] and entry id.
- *   Pin persistence and shortcut execution stay with the caller.
+ * - B1: swipe-to-open shortcuts are removed — no idle/editing flick opens a
+ *   shortcut surface and this grid exposes no surface rows or execute/pin
+ *   callbacks. Shortcuts return in B4 as an edit-mode menu above the selected
+ *   tile; the overlay frame geometry is retained in [swipeSurfaceFrame].
  */
 @Composable
 internal fun HomeCanvasGrid(
@@ -147,15 +132,12 @@ internal fun HomeCanvasGrid(
     onMoveTile: (ItemId, LogicalPosition) -> Unit = { _, _ -> },
     onResizeTile: (ItemId, LogicalSpan) -> Unit = { _, _ -> },
     onRemoveTile: (ItemId) -> Unit = {},
-    surfaceEntries: List<ShortcutSurfaceEntry> = emptyList(),
-    onSurfaceExecute: (ItemId, String) -> Unit = { _, _ -> },
-    onSurfaceTogglePin: (ItemId, String) -> Unit = { _, _ -> },
     // W3 reduced-motion: when true the resize preview snaps to the validated
     // span immediately instead of animating rapidly toward it. Both branches
     // share [resizePreviewFrame] geometry, so the rendered bounds are identical.
     reducedMotion: Boolean = false,
-    // A1 hold signal: reports whether transient home state (active edit, wiggle
-    // editing, or shown shortcut surface) should hold pager swipe. Emitted via
+    // A1 hold signal: reports whether transient home state (active edit or
+    // wiggle editing) should hold pager swipe. Emitted via
     // LaunchedEffect; the caller (shell) owns the pager gate.
     onTransientHoldChange: (Boolean) -> Unit = {},
     // A2 tile-touch hold: true from a tile-origin down until release (tap,
@@ -165,8 +147,8 @@ internal fun HomeCanvasGrid(
     onPagerHoldChange: (Boolean) -> Unit = {},
 ) {
     require(overscanRows >= 0L) { "overscanRows must be non-negative" }
-    // P0 stale-hold guard: the transient hold triple (active edit, wiggle
-    // editing, shown surface) lives inside BoxWithConstraints/key below, which
+    // P0 stale-hold guard: the transient hold pair (active edit, wiggle
+    // editing) lives inside BoxWithConstraints/key below, which
     // never composes when tiles are empty. Hoist a false emission + dispose
     // reset above the early return so shell `homeHold` cannot stick true after
     // a populated→empty transition or grid disposal.
@@ -236,17 +218,11 @@ internal fun HomeCanvasGrid(
             // isHold above. Set once at down via resolveHomeGesture + holdsPager
             // (snapshot-once, never flipped mid-gesture); cleared on release.
             var pagerHold by remember { mutableStateOf(false) }
-            // S2 swipe surface: transient pop-out for one tile's shortcuts. Hoisted
-            // inside key(requestedHomeId) alongside scroll/edit state so a home switch
-            // resets it. Edit entry stays authoritative: entering edit dismisses any
-            // surface (shortcut swipe is disabled while editing per §31).
-            var surface by remember { mutableStateOf<SwipeSurfaceState>(SwipeSurfaceState.Hidden) }
             val columns = loaded.columns.count
             val rows = loaded.extent.totalScrollableRows.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
             val active = editSession as? HomeEditSession.Active
-            val shownSurface = surface as? SwipeSurfaceState.Shown
             val interactionEditing = interaction as? HomeInteractionController.Editing
-            // A1 hold signal: active edit, wiggle editing, or shown surface holds
+            // A1 hold signal: active edit or wiggle editing holds
             // pager swipe. Emitted via LaunchedEffect with the hoisted latest
             // callback so recompositions of the lambda never restart the
             // emission. Tiles are non-empty here (empty returned above), so
@@ -255,7 +231,6 @@ internal fun HomeCanvasGrid(
                 tilesEmpty = false,
                 active = active,
                 interaction = interaction,
-                surface = surface,
             )
             LaunchedEffect(isHold) {
                 latestHoldCallback.value(isHold)
@@ -268,11 +243,9 @@ internal fun HomeCanvasGrid(
                 latestPagerHoldCallback.value(pagerHold)
             }
             BackHandler(
-                enabled = active != null || shownSurface != null || interactionEditing != null,
+                enabled = active != null || interactionEditing != null,
             ) {
-                if (surface is SwipeSurfaceState.Shown) {
-                    surface = surface.dismiss()
-                } else if (editSession as? HomeEditSession.Active != null) {
+                if (editSession as? HomeEditSession.Active != null) {
                     editSession = editSession.cancel()
                 } else {
                     interaction = interaction.exitOnBack()
@@ -284,27 +257,6 @@ internal fun HomeCanvasGrid(
             // navigate-away reloads of the same home.
             LaunchedEffect(loaded.requestedHomeId) {
                 interaction = interaction.exitOnNavigate()
-            }
-            // Removal dismisses via the pure transition: the shown tile is gone from
-            // the loaded tiles (uninstall, removal, regen without it).
-            val shownTileId = shownSurface?.tileId
-            LaunchedEffect(loaded.tiles, shownTileId) {
-                if (shownTileId != null && loaded.tiles.none { it.itemId == shownTileId }) {
-                    surface = surface.dismissOnTileRemoved(shownTileId)
-                }
-            }
-            // Scroll or pager movement while shown dismisses: a new gesture owns the
-            // surface. Same-gesture progress before a show is harmless (Hidden no-op);
-            // the show itself happens on release with a stable scroll value.
-            LaunchedEffect(scrollState.value) {
-                if (surface is SwipeSurfaceState.Shown) {
-                    surface = surface.dismiss()
-                }
-            }
-            LaunchedEffect(pagerAxisLock) {
-                if (pagerAxisLock != LockedAxis.UNDECIDED && surface is SwipeSurfaceState.Shown) {
-                    surface = surface.dismiss()
-                }
             }
             val rowStridePx: Long =
                 geometry.cellSizePx.toLong() + geometry.rowGapPx.toLong()
@@ -397,9 +349,6 @@ internal fun HomeCanvasGrid(
                             isEditActive = active != null,
                             activeItemId = active?.itemId,
                             onEnterEdit = { entered ->
-                                // Edit entry owns the gesture from here: any shown
-                                // surface dismisses (swipe is disabled while editing).
-                                surface = surface.dismiss()
                                 editSession = editSession.enterIfLaunchable(
                                     entered,
                                     loaded.tiles,
@@ -414,14 +363,13 @@ internal fun HomeCanvasGrid(
                             },
                             // W1 recess/select: tap transfers selection directly
                             // (selectOnTap, never launch); long-press enters
-                            // wiggle-editing (enterOnLongPress) and dismisses any
-                            // shown surface. Never enters Active here.
+                            // wiggle-editing (enterOnLongPress).
+                            // Never enters Active here.
                             interactionState = interaction,
                             onSelect = { selectedId ->
                                 interaction = interaction.selectOnTap(selectedId)
                             },
                             onEnterWiggle = { entered ->
-                                surface = surface.dismiss()
                                 interaction = interaction.enterOnLongPress(
                                     entered.itemId,
                                     entered.isLaunchable,
@@ -434,12 +382,13 @@ internal fun HomeCanvasGrid(
             // Latest session for drag callbacks: the pointerInput key stays stable for the
             // session lifetime (item id) so in-flight drags survive candidate recompositions.
             val sessionState = rememberUpdatedState(editSession)
-            val surfaceState = rememberUpdatedState(surface)
             val interactionSnapshot = rememberUpdatedState(interaction)
             // Snapshot holder for the Unit-keyed idle gesture observer below: tiles,
             // geometry and origins stay fresh without restarting in-flight gestures.
-            val swipeInputs = rememberUpdatedState(
-                SwipeShowSnapshot(
+            // B1: the flick-to-show detector is removed, but the down hit-test is
+            // retained for A2 tile-vs-background pager-hold arbitration.
+            val idleHitInputs = rememberUpdatedState(
+                IdleHitSnapshot(
                     tiles = loaded.tiles,
                     geometry = geometry,
                     originX = originX,
@@ -447,18 +396,12 @@ internal fun HomeCanvasGrid(
                     originYPx = originYPx,
                 ),
             )
-            val swipeDensity = density.density
-            val swipeScrollSuppressPx = with(density) {
-                SWIPE_SURFACE_SCROLL_SUPPRESS_DP.dp.roundToPx()
-            }
             // Tap on the grid background (outside any tile) cancels an active edit
-            // session, dismisses any shown swipe surface, and exits W1
-            // wiggle-editing via the pure exitOnEmptyTap transition. Tiles use
-            // combinedClickable which consumes their own taps; this handler only
-            // fires for taps on empty grid area.
-            val tapCancelModifier = Modifier.pointerInput(active?.itemId, shownTileId, interaction) {
+            // session and exits W1 wiggle-editing via the pure exitOnEmptyTap
+            // transition. Tiles use combinedClickable which consumes their own
+            // taps; this handler only fires for taps on empty grid area.
+            val tapCancelModifier = Modifier.pointerInput(active?.itemId, interaction) {
                 if (active?.itemId == null &&
-                    surfaceState.value !is SwipeSurfaceState.Shown &&
                     interactionSnapshot.value !is HomeInteractionController.Editing
                 ) {
                     return@pointerInput
@@ -466,25 +409,18 @@ internal fun HomeCanvasGrid(
                 detectTapGestures(
                     onTap = {
                         editSession = sessionState.value.cancel()
-                        surface = surfaceState.value.dismiss()
                         interaction = interactionSnapshot.value.exitOnEmptyTap()
                     },
                 )
             }
-            // Idle gesture observer: P2 scroll-vs-pager axis tracking plus the S2
-            // flick-to-show detector. Both observe without consuming, so
-            // verticalScroll, tapCancel and tile taps are unaffected. The axis part
-            // keeps the [GestureArbitration.lockAxis] slop gate and the
-            // [GestureArbitration.dominantAxis] diagonal guard: when both axes clear
-            // slop but neither dominates, the pre-commit lock holds UNDECIDED so a
-            // diagonal drag never steals the gesture from either consumer. The flick
-            // part hit-tests the down position to its tile and classifies the
-            // finished gesture with [classifySwipeFlick] (any direction equivalent);
-            // NOTHING here consumes until the classification says COMPLETE — and even
-            // then the surface only shows (no pointer is ever consumed by this
-            // observer). An edit session, sustained scroll movement, or a down
-            // position on empty grid suppresses the show. Installed only while idle;
-            // the edit drag handler below owns the gesture once a session is active.
+            // Idle gesture observer: P2 scroll-vs-pager axis tracking. Observes
+            // without consuming, so verticalScroll, tapCancel and tile taps are
+            // unaffected. The axis part keeps the [GestureArbitration.lockAxis]
+            // slop gate and the [GestureArbitration.dominantAxis] diagonal guard:
+            // when both axes clear slop but neither dominates, the pre-commit
+            // lock holds UNDECIDED so a diagonal drag never steals the gesture
+            // from either consumer. Installed only while idle; the edit drag
+            // handler below owns the gesture once a session is active.
             val idleGestureModifier = Modifier.pointerInput(Unit) {
                 awaitEachGesture {
                     val firstEvent = awaitPointerEvent()
@@ -493,7 +429,7 @@ internal fun HomeCanvasGrid(
                     val downId = down.id
                     val startPos = down.position
                     val slopPx = viewConfiguration.touchSlop.toFloat()
-                    val snapshot = swipeInputs.value
+                    val snapshot = idleHitInputs.value
                     val downCell = MoveDragMath.cellForPixel(
                         xPx = startPos.x,
                         yPx = startPos.y,
@@ -510,7 +446,6 @@ internal fun HomeCanvasGrid(
                             downCell.row in tile.position.row until
                             tile.position.row + tile.span.rows
                     }
-                    val downScroll = scrollState.value
                     // A2 single arbitration for the idle gesture: route the down-hit
                     // through resolveHomeGesture so a tile-origin touch holds the
                     // pager for the whole gesture (snapshot-once, never flipped
@@ -524,16 +459,11 @@ internal fun HomeCanvasGrid(
                         isBackground = downTile == null,
                     )
                     pagerHold = idleWinner.holdsPager()
-                    val tracker = VelocityTracker()
-                    tracker.addPosition(down.uptimeMillis, startPos)
                     var lock = LockedAxis.UNDECIDED
-                    var lastPos = startPos
                     while (true) {
                         val nextEvent = awaitPointerEvent()
                         val nextChange = nextEvent.changes.find { it.id == downId }
                         if (nextChange == null) break
-                        tracker.addPosition(nextChange.uptimeMillis, nextChange.position)
-                        lastPos = nextChange.position
                         if (!nextChange.pressed) break
                         val dx = nextChange.position.x - startPos.x
                         val dy = nextChange.position.y - startPos.y
@@ -563,24 +493,7 @@ internal fun HomeCanvasGrid(
                     if (lock != LockedAxis.UNDECIDED) {
                         pagerAxisLock = LockedAxis.UNDECIDED
                     }
-                    if (downTile != null && sessionState.value is HomeEditSession.Idle) {
-                        val totalDx = lastPos.x - startPos.x
-                        val totalDy = lastPos.y - startPos.y
-                        val fraction = maxOf(abs(totalDx), abs(totalDy)) /
-                            snapshot.geometry.cellSizePx.toFloat()
-                        val velocity = tracker.calculateVelocity()
-                        val speed = maxOf(abs(velocity.x), abs(velocity.y))
-                        val scrolled = abs(scrollState.value - downScroll)
-                        if (classifySwipeFlick(fraction, speed, swipeDensity) ==
-                            GestureArbitration.Settle.COMPLETE &&
-                            scrolled <= swipeScrollSuppressPx
-                        ) {
-                            surface = surfaceState.value.showSurface(downTile.itemId)
-                        }
-                    }
-                    // A2 release: tile-touch hold ends with the gesture. A shown
-                    // surface (if the flick classified COMPLETE above) keeps the
-                    // pager held via the separate A1 isHold signal.
+                    // A2 release: tile-touch hold ends with the gesture.
                     pagerHold = false
                 }
             }
@@ -969,29 +882,6 @@ internal fun HomeCanvasGrid(
                         }
                     }
                 }
-                // S2 swipe surface overlay: sibling above the tiles inside the scrolling
-                // content, so it shares the tiles' coordinate space and tracks scroll.
-                // Measured with swipeSurfaceFrame (try-beside, flip, clamp): neighbouring
-                // tiles are overlaid, never moved — no reflow, no packing, no legality.
-                // Rows render in the caller-supplied rank order; an empty list renders
-                // one honest empty row until shortcut discovery lands.
-                if (shownSurface != null) {
-                    val surfacedTile = loaded.tiles.find { it.itemId == shownSurface.tileId }
-                    if (surfacedTile != null) {
-                        SwipeSurfaceOverlay(
-                            tile = surfacedTile,
-                            entries = surfaceEntries,
-                            geometry = geometry,
-                            originX = originX,
-                            rowOrigin = rowOrigin,
-                            originYPx = originYPx,
-                            availableWidthPx = availableWidthPx,
-                            minHeightPx = minHeightPx,
-                            onSurfaceExecute = onSurfaceExecute,
-                            onSurfaceTogglePin = onSurfaceTogglePin,
-                        )
-                    }
-                }
             }
         }
     }
@@ -1010,25 +900,23 @@ internal const val RESIZE_TOUCH_DP: Int = 48
 /**
  * A1 hold predicate: transient home state that must hold pager swipe.
  *
- * Returns true when an edit session is active ([active] != null), wiggle
- * editing is engaged ([interaction] is [HomeInteractionController.Editing]),
- * or a shortcut surface is shown ([surface] is [SwipeSurfaceState.Shown]).
- * Pure math-free boolean OR, framework-free and unit-testable. The caller
- * (shell) ANDs the negation into `userScrollEnabled`; the pill's programmatic
- * `animateScrollToPage` is unaffected.
+ * B1: returns true when an edit session is active ([active] != null) or wiggle
+ * editing is engaged ([interaction] is [HomeInteractionController.Editing]).
+ * The retired swipe-surface arm is gone: no idle/editing flick opens a surface,
+ * so there is no shown state left to hold. Pure math-free boolean OR,
+ * framework-free and unit-testable. The caller (shell) ANDs the negation into
+ * `userScrollEnabled`; the pill's programmatic `animateScrollToPage` is unaffected.
  */
 internal fun isHomeHold(
     active: HomeEditSession.Active?,
     interaction: HomeInteractionController,
-    surface: SwipeSurfaceState,
 ): Boolean = active != null ||
-    interaction is HomeInteractionController.Editing ||
-    surface is SwipeSurfaceState.Shown
+    interaction is HomeInteractionController.Editing
 
 /**
  * P0 empty-guard hold signal for [HomeCanvasGrid].
  *
- * The grid early-returns on empty tiles before transient edit/surface state
+ * The grid early-returns on empty tiles before transient edit state
  * exists, so an empty grid must never hold regardless of stale inputs: empty
  * forces false, non-empty delegates to [isHomeHold]. Pure, framework-free and
  * unit-testable. The composable emits false via `LaunchedEffect` on the empty
@@ -1039,8 +927,7 @@ internal fun gridHoldSignal(
     tilesEmpty: Boolean,
     active: HomeEditSession.Active?,
     interaction: HomeInteractionController,
-    surface: SwipeSurfaceState,
-): Boolean = if (tilesEmpty) false else isHomeHold(active, interaction, surface)
+): Boolean = if (tilesEmpty) false else isHomeHold(active, interaction)
 
 /**
  * Centered horizontal origin (column 0 left edge) for the home canvas grid.
@@ -1251,110 +1138,22 @@ private fun saturatingAdd(value: Long, increment: Long): Long =
 /** Test tag on the scrolling canvas grid (testing hook only; no behavior change). */
 internal const val HOME_CANVAS_GRID_TAG: String = "home-canvas-grid"
 
-/** Test tag on the swipe-surface overlay (testing hook only; no behavior change). */
-internal const val SWIPE_SURFACE_OVERLAY_TAG: String = "swipe-surface-overlay"
-
 /**
- * Idle-gesture snapshot for the S2 flick-to-show hit test.
+ * Idle-gesture down hit-test snapshot for A2 tile-vs-background arbitration.
  *
- * Carried through `rememberUpdatedState` so the Unit-keyed idle observer always
- * hit-tests current tiles, geometry and origins without restarting in-flight gestures.
+ * B1 renamed this from `SwipeShowSnapshot` when the flick-to-show detector was
+ * removed: the snapshot no longer feeds a surface show, only the tile-origin
+ * hit-test that holds the pager for tile touches. Carried through
+ * `rememberUpdatedState` so the Unit-keyed idle observer always hit-tests
+ * current tiles, geometry and origins without restarting in-flight gestures.
  */
-private data class SwipeShowSnapshot(
+private data class IdleHitSnapshot(
     val tiles: List<HomeRenderTile>,
     val geometry: SquareCellGeometry,
     val originX: Int,
     val rowOrigin: Long,
     val originYPx: Long,
 )
-
-/**
- * Sibling overlay rendering the shown swipe surface for [tile].
- *
- * The frame comes from [swipeSurfaceFrame] against the content-local viewport
- * (`0,0,availableWidthPx,max(minHeightPx, overlayHeight)`), so the overlay lands on
- * the same Box content coordinates as the tiles, tracks scroll, overlays neighbours
- * and never reflows the grid. Rows render [entries] in order (callers pass rank
- * order); an empty list renders one honest empty row until shortcut discovery lands.
- * Row taps report [onSurfaceExecute]/[onSurfaceTogglePin] with the tile's [ItemId]
- * and the entry id; execution and pin persistence stay with the caller.
- */
-@Composable
-private fun SwipeSurfaceOverlay(
-    tile: HomeRenderTile,
-    entries: List<ShortcutSurfaceEntry>,
-    geometry: SquareCellGeometry,
-    originX: Int,
-    rowOrigin: Long,
-    originYPx: Long,
-    availableWidthPx: Int,
-    minHeightPx: Int,
-    onSurfaceExecute: (ItemId, String) -> Unit,
-    onSurfaceTogglePin: (ItemId, String) -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val density = LocalDensity.current
-    val scheme = MaterialTheme.colorScheme
-    val tileFrame = TileBounds.signedBounds(
-        column = tile.position.column,
-        row = tile.position.row.toLong(),
-        span = GridSpan(tile.span.columns, tile.span.rows),
-        geometry = geometry,
-        originX = originX,
-        originRow = rowOrigin,
-        originYPx = originYPx,
-    )
-    val edgeMarginPx = with(density) { 16.dp.roundToPx() }
-    val widthPx = minOf(
-        availableWidthPx - 2 * edgeMarginPx,
-        with(density) { 320.dp.roundToPx() },
-    ).coerceIn(1, availableWidthPx)
-    val rowPx = with(density) { 56.dp.roundToPx() }
-    val heightPx = (
-        rowPx * maxOf(entries.size, 1) + with(density) { 8.dp.roundToPx() }
-        ).coerceAtLeast(1)
-    val viewport = PixelRect(
-        left = 0,
-        top = 0,
-        right = availableWidthPx,
-        bottom = maxOf(minHeightPx, heightPx),
-    )
-    val frame = swipeSurfaceFrame(
-        viewport = viewport,
-        tileBounds = tileFrame,
-        overlaySize = FrameSize(widthPx, heightPx.coerceAtMost(viewport.height)),
-        gapPx = with(density) { 8.dp.roundToPx() },
-    )
-    val widthDp = with(density) { frame.width.toDp() }
-    val heightDp = with(density) { frame.height.toDp() }
-    Box(
-        modifier = modifier
-            .offset { IntOffset(frame.left, frame.top) }
-            .size(widthDp, heightDp)
-            .background(scheme.surfaceContainer)
-            .border(1.dp, scheme.outline)
-            .testTag(SWIPE_SURFACE_OVERLAY_TAG),
-    ) {
-        if (entries.isEmpty()) {
-            Box(
-                modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center,
-            ) {
-                BasicText(text = "No shortcuts yet")
-            }
-        } else {
-            Column(modifier = Modifier.fillMaxSize()) {
-                entries.forEach { entry ->
-                    ShortcutSurfaceRow(
-                        entry = entry,
-                        onExecute = { onSurfaceExecute(tile.itemId, entry.id) },
-                        onTogglePin = { onSurfaceTogglePin(tile.itemId, entry.id) },
-                    )
-                }
-            }
-        }
-    }
-}
 
 /**
  * Fixed logical row origin for the home canvas content: content y=0 is always row 0.

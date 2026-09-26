@@ -161,8 +161,8 @@ internal fun LauncherShell(
             locked = LockedAxis.UNDECIDED,
         )
     }
-    // A1 transient home hold: true while home reports an active edit, wiggle
-    // editing, or a shown shortcut surface. Plain remember: gesture state,
+    // A1 transient home hold: true while home reports an active edit or wiggle
+    // editing. Plain remember: gesture state,
     // never persisted. ANDed into userScrollEnabled below; the pill's
     // programmatic animateScrollToPage is unaffected by userScrollEnabled.
     var homeHold by remember { mutableStateOf(false) }
@@ -278,7 +278,7 @@ internal fun LauncherShell(
 /**
  * A1 pager swipe gate: swipe is enabled only when the picker is not blocking,
  * arbitration did not award the gesture to the picker, and home is not
- * holding (active edit, wiggle editing, or shown shortcut surface).
+ * holding (active edit or wiggle editing).
  *
  * A2 adds the tile-touch hold: swipe is additionally disabled while
  * [pagerHold] is true (tile-origin down until release), so a tile touch never
