@@ -2,65 +2,59 @@ package me.foxtails.lakehead
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxScope
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.systemGestures
-import androidx.compose.foundation.text.BasicText
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.dp
-import me.foxtails.lakehead.core.designsystem.NavigationControlButton
-import me.foxtails.lakehead.core.designsystem.NavigationControlPill
+import kotlinx.coroutines.launch
 import me.foxtails.lakehead.core.model.AppIdentity
 import me.foxtails.lakehead.core.model.ItemId
 import me.foxtails.lakehead.core.model.LogicalPosition
 import me.foxtails.lakehead.core.model.LogicalSpan
-import me.foxtails.lakehead.core.navigation.LauncherDestination
 import me.foxtails.lakehead.feature.allapps.AllAppsScreen
 import me.foxtails.lakehead.feature.allapps.AllAppsViewState
 import me.foxtails.lakehead.feature.home.HomeCanvas
 import me.foxtails.lakehead.feature.home.HomeCanvasViewportStyle
 import me.foxtails.lakehead.feature.home.HomeRenderState
 
-/** Minimum bottom padding applied to All Apps content so the pill never covers the last row. */
-private val MIN_PILL_CLEARANCE = 80.dp
+/** Feed page index in the launcher pager. */
+const val LAUNCHER_PAGE_FEED = 0
+
+/** Home tile page index in the launcher pager. */
+const val LAUNCHER_PAGE_TILE = 1
+
+/** All Apps page index in the launcher pager. */
+const val LAUNCHER_PAGE_ALL_APPS = 2
+
+/** Total page count of the launcher pager. */
+const val LAUNCHER_PAGE_COUNT = 3
 
 /**
- * Minimum bottom safety padding for the navigation pill when the system gesture inset
- * is zero or very small. Prevents the pill from sitting flush with the display edge on
- * devices / orientations where [WindowInsets.systemGestures] reports no bottom zone.
- */
-private val MIN_PILL_BOTTOM_PADDING = 16.dp
-
-/** Glyph characters for each navigation destination, in [LauncherDestination] enum order. */
-private val DESTINATION_GLYPHS = mapOf(
-    LauncherDestination.FEED to "F",
-    LauncherDestination.NOTIFICATIONS to "N",
-    LauncherDestination.HOME to "H",
-    LauncherDestination.ALL_APPS to "A",
-)
-
-/**
- * Top-level navigation shell that hosts Home, All Apps, and stub destinations behind a
- * bottom-aligned [NavigationControlPill].
+ * Top-level 3-page pager shell: Feed, Home tile canvas, All Apps.
  *
- * Destination state is [rememberSaveable] so it survives configuration changes. The pill is
- * always visible and contains one [NavigationControlButton] per [LauncherDestination] in enum
- * order; stub destinations (Feed, Notifications) are rendered with reduced alpha and show
- * honest "not available yet" content when selected. All Apps content has bottom padding to
- * keep the last row above the pill.
+ * Swipe or the floating [LauncherNavPill] navigates; there is no 4th tab and no route
+ * table. The root is opaque in the theme background so all pages share the
+ * colour-milestone background; only empty-cell gaps inside HomeCanvasGrid remain
+ * transparent. Page 0 is the [FeedSurface] host-boundary seam, page 1 is [HomeCanvas]
+ * with the caller's state/icons/callbacks, and page 2 is [AllAppsScreen] with the
+ * caller's state/icons/callbacks. The current page is [rememberSaveable] so it survives
+ * configuration changes. Pager motion uses foundation defaults only (no custom
+ * fade/scale). The pill floats above content with [Alignment.BottomCenter]; content
+ * reserves [LauncherNavPillBottomClearance] (or the system-gesture bottom, whichever is
+ * larger) so the pill never covers the last row.
  */
 @Composable
 internal fun LauncherShell(
@@ -75,92 +69,72 @@ internal fun LauncherShell(
     onResizeTile: (ItemId, LogicalSpan) -> Unit = { _, _ -> },
     onRemoveTile: (ItemId) -> Unit = { },
     modifier: Modifier = Modifier,
-    initialDestination: LauncherDestination = LauncherDestination.HOME,
+    initialPage: Int = LAUNCHER_PAGE_TILE,
     viewportStyle: HomeCanvasViewportStyle = HomeCanvasViewportStyle(),
 ) {
-    var destination by rememberSaveable { mutableStateOf(initialDestination) }
+    var restoredPage by rememberSaveable {
+        mutableIntStateOf(initialPage.coerceIn(0, LAUNCHER_PAGE_COUNT - 1))
+    }
+    val pagerState = rememberPagerState(
+        initialPage = restoredPage,
+        pageCount = { LAUNCHER_PAGE_COUNT },
+    )
+    LaunchedEffect(pagerState.currentPage) {
+        restoredPage = pagerState.currentPage
+    }
+    val scope = rememberCoroutineScope()
 
-    // Gesture inset drives the pill's bottom safety margin so it stays above
-    // Android's system-gesture exclusion zone (immersive.md §125-166).
     val density = LocalDensity.current
-    val gestureBottomDp = with(density) {
+    val gestureBottom = with(density) {
         WindowInsets.systemGestures.getBottom(density).toDp()
     }
-    val pillBottomPadding = maxOf(MIN_PILL_BOTTOM_PADDING, gestureBottomDp)
-    val pillClearancePadding = maxOf(MIN_PILL_CLEARANCE, gestureBottomDp)
+    val bottomClearance = maxOf(LauncherNavPillBottomClearance, gestureBottom)
 
-    Box(modifier = modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
-        when (destination) {
-            LauncherDestination.HOME -> HomeCanvas(
-                state = homeState,
-                iconsByIdentity = homeIcons,
-                onLaunchApp = onLaunchApp,
-                onRequestDefaultHome = onRequestDefaultHome,
-                modifier = Modifier.fillMaxSize(),
-                viewportStyle = viewportStyle,
-                onMoveTile = onMoveTile,
-                onResizeTile = onResizeTile,
-                onRemoveTile = onRemoveTile,
-            )
-
-            LauncherDestination.ALL_APPS -> AllAppsScreen(
-                state = allAppsState,
-                icons = allAppsIcons,
-                onLaunchApp = onLaunchApp,
-                onAddToHome = onAddToHome,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(bottom = pillClearancePadding),
-            )
-
-            LauncherDestination.FEED -> StubContent("Feed")
-            LauncherDestination.NOTIFICATIONS -> StubContent("Notifications")
-        }
-
-        NavigationPillOverlay(
-            currentDestination = destination,
-            onDestinationSelected = { destination = it },
-            gestureBottomPadding = pillBottomPadding,
-        )
-    }
-}
-
-@Composable
-private fun BoxScope.StubContent(label: String) {
-    BasicText(
-        text = "$label is not available yet",
-        modifier = Modifier
+    Box(
+        modifier = modifier
             .fillMaxSize()
-            .padding(horizontal = 16.dp, vertical = 24.dp),
-        style = TextStyle(color = MaterialTheme.colorScheme.onBackground),
-    )
-}
-
-@Composable
-private fun BoxScope.NavigationPillOverlay(
-    currentDestination: LauncherDestination,
-    onDestinationSelected: (LauncherDestination) -> Unit,
-    gestureBottomPadding: Dp,
-) {
-    NavigationControlPill(
-        modifier = Modifier
-            .align(Alignment.BottomCenter)
-            .padding(bottom = gestureBottomPadding),
+            .background(MaterialTheme.colorScheme.background),
     ) {
-        LauncherDestination.entries.forEach { dest ->
-            NavigationControlButton(
-                selected = currentDestination == dest,
-                enabled = !dest.isStub,
-                contentDescription = when (dest) {
-                    LauncherDestination.FEED -> "Feed (not available yet)"
-                    LauncherDestination.NOTIFICATIONS -> "Notifications (not available yet)"
-                    LauncherDestination.HOME -> "Home"
-                    LauncherDestination.ALL_APPS -> "All Apps"
-                },
-                onPress = { onDestinationSelected(dest) },
-            ) {
-                BasicText(text = DESTINATION_GLYPHS.getValue(dest))
+        HorizontalPager(
+            state = pagerState,
+            modifier = Modifier.fillMaxSize(),
+            beyondViewportPageCount = 1,
+        ) { page ->
+            when (page) {
+                LAUNCHER_PAGE_FEED -> FeedSurface(
+                    modifier = Modifier.fillMaxSize(),
+                )
+
+                LAUNCHER_PAGE_ALL_APPS -> AllAppsScreen(
+                    state = allAppsState,
+                    icons = allAppsIcons,
+                    onLaunchApp = onLaunchApp,
+                    onAddToHome = onAddToHome,
+                    modifier = Modifier.fillMaxSize(),
+                    bottomClearance = bottomClearance,
+                )
+
+                else -> HomeCanvas(
+                    state = homeState,
+                    iconsByIdentity = homeIcons,
+                    onLaunchApp = onLaunchApp,
+                    onRequestDefaultHome = onRequestDefaultHome,
+                    modifier = Modifier.fillMaxSize(),
+                    viewportStyle = viewportStyle,
+                    onMoveTile = onMoveTile,
+                    onResizeTile = onResizeTile,
+                    onRemoveTile = onRemoveTile,
+                    bottomClearance = bottomClearance,
+                )
             }
         }
+        LauncherNavPill(
+            selectedPage = pagerState.currentPage,
+            onSelectPage = { page ->
+                scope.launch { pagerState.animateScrollToPage(page) }
+            },
+            modifier = Modifier.align(Alignment.BottomCenter),
+            bottomSafetyInset = gestureBottom,
+        )
     }
 }

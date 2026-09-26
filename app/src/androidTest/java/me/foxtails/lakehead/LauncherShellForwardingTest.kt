@@ -17,7 +17,6 @@ import me.foxtails.lakehead.core.model.ItemId
 import me.foxtails.lakehead.core.model.LogicalPosition
 import me.foxtails.lakehead.core.model.LogicalSpan
 import me.foxtails.lakehead.core.model.ProfileId
-import me.foxtails.lakehead.core.navigation.LauncherDestination
 import me.foxtails.lakehead.feature.allapps.AllAppsViewState
 import me.foxtails.lakehead.feature.home.HomeRenderState
 import me.foxtails.lakehead.feature.home.HomeRenderTile
@@ -86,7 +85,7 @@ class LauncherShellForwardingTest {
                 onAddToHome = {},
                 onRequestDefaultHome = {},
                 onRemoveTile = { removed = it },
-                initialDestination = LauncherDestination.HOME,
+                initialPage = LAUNCHER_PAGE_TILE,
             )
         }
         composeRule.waitForIdle()
