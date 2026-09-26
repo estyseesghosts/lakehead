@@ -328,7 +328,7 @@ class WindowedSpanContainerTest {
     }
 
     @Test
-    fun negativeOverscanOriginAndMinimumAreRejected() {
+    fun negativeOverscanAndOriginXAreRejected() {
         assertThrows(IllegalArgumentException::class.java) {
             WindowedSpanLayout.boundsFor(
                 children = emptyList<SpanChild<String>>(),
@@ -346,15 +346,19 @@ class WindowedSpanContainerTest {
                 originX = -1,
             )
         }
-        assertThrows(IllegalArgumentException::class.java) {
-            WindowedSpanLayout.boundsFor(
-                children = emptyList<SpanChild<String>>(),
-                window = GridRowWindow(0L, 1L),
-                overscanRows = 0L,
-                geometry = referenceGeometry,
-                rowOrigin = -1L,
-            )
-        }
+    }
+
+    @Test
+    fun negativeRowOriginIsSignedTolerant() {
+        // G3 signed renderer: a negative minRow origin is valid and returned as-is.
+        val bounds = WindowedSpanLayout.boundsFor(
+            children = emptyList<SpanChild<String>>(),
+            window = GridRowWindow(-2L, 1L),
+            overscanRows = 0L,
+            geometry = referenceGeometry,
+            rowOrigin = -2L,
+        )
+        assertEquals(-2L, bounds.origin)
     }
 
     @Test
@@ -387,7 +391,6 @@ class WindowedSpanContainerTest {
 
     @Test
     fun invalidWindowsAreRejected() {
-        assertThrows(IllegalArgumentException::class.java) { GridRowWindow(-1L, 0L) }
         assertThrows(IllegalArgumentException::class.java) { GridRowWindow(2L, 1L) }
     }
 

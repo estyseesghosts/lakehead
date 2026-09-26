@@ -3,10 +3,11 @@ package me.foxtails.lakehead.feature.home
 import me.foxtails.lakehead.core.model.LogicalPosition
 
 /**
- * Pixel-to-cell conversion for move drag tracking.
+ * Pixel-to-cell conversion for move-drag gestures.
  * Pure math, framework-free: takes raw Float values.
  */
 object MoveDragMath {
+
     /**
      * Convert a pixel offset to a logical cell position.
      * @param xPx horizontal pixel offset from the grid's left edge

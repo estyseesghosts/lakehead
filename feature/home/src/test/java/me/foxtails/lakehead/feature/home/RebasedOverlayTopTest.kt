@@ -32,14 +32,16 @@ class RebasedOverlayTopTest {
         assertEquals(Int.MIN_VALUE, result)
     }
 
-    @Test(expected = IllegalArgumentException::class)
-    fun negativeAbsoluteTop_throws() {
-        rebasedOverlayTop(absoluteTopPx = -1, rowOrigin = 0L, rowStridePx = 120L)
+    @Test
+    fun negativeAbsoluteTop_isSignedTolerant() {
+        // G3 signed renderer: content above the origin keeps a negative offset.
+        assertEquals(-1, rebasedOverlayTop(absoluteTopPx = -1, rowOrigin = 0L, rowStridePx = 120L))
     }
 
-    @Test(expected = IllegalArgumentException::class)
-    fun negativeOrigin_throws() {
-        rebasedOverlayTop(absoluteTopPx = 0, rowOrigin = -1L, rowStridePx = 120L)
+    @Test
+    fun negativeOrigin_isSignedTolerant() {
+        // Signed minRow origin (e.g. -1) shifts content down by one stride.
+        assertEquals(120, rebasedOverlayTop(absoluteTopPx = 0, rowOrigin = -1L, rowStridePx = 120L))
     }
 
     @Test(expected = IllegalArgumentException::class)

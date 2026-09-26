@@ -95,6 +95,37 @@ class VisibleWindowForTest {
     }
 
     @Test
+    fun nonZeroOrigin_scrollZeroSelectsAbsoluteRows() {
+        // Regression: tiles on rows 5-6 rebased around origin 5 must stay
+        // selected at scroll 0. A zero-based window [0,5) would cull them even
+        // though their rebased top is 0.
+        val stride = 100L
+        val overscan = 0L
+        val window = visibleWindowFor(
+            scrollPx = 0,
+            viewportHeightPx = 500,
+            rowStridePx = stride,
+            overscanRows = overscan,
+            rowOrigin = 5L,
+        )
+        assertEquals(5L, window.firstRow)
+        val placements = listOf(5, 6).map { row ->
+            GridPlacement(
+                id = "tile-$row",
+                position = GridPosition(0, row),
+                span = GridSpan(1, 1),
+            )
+        }
+        val selectedRows = GridVisiblePlacements.select(
+            placements = placements,
+            visibleRows = window,
+            overscanRows = overscan,
+        ).map { it.position.row }.toSet()
+        assertTrue("absolute row 5 must be selected with origin 5 at scroll 0", selectedRows.contains(5))
+        assertTrue("absolute row 6 must be selected with origin 5 at scroll 0", selectedRows.contains(6))
+    }
+
+    @Test
     fun hugeInputs_saturateInsteadOfWrapping() {
         val window = visibleWindowFor(
             scrollPx = Int.MAX_VALUE,

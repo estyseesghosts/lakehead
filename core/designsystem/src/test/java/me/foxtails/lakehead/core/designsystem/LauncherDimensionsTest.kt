@@ -12,6 +12,12 @@ class LauncherDimensionsTest {
         assertEquals(8.dp, DefaultLauncherDimensions.horizontalInset)
         assertEquals(8.dp, DefaultLauncherDimensions.tilePadding)
         assertEquals(40.dp, DefaultLauncherDimensions.symbolSize)
+        assertEquals(40.dp, DefaultLauncherDimensions.unitIconSize)
+    }
+
+    @Test
+    fun unitIconSizeEqualsSymbolSize() {
+        assertEquals(DefaultLauncherDimensions.symbolSize, DefaultLauncherDimensions.unitIconSize)
     }
 
     @Test
@@ -27,5 +33,6 @@ class LauncherDimensionsTest {
         assertEquals(DefaultLauncherDimensions.horizontalInset, custom.horizontalInset)
         assertEquals(DefaultLauncherDimensions.tilePadding, custom.tilePadding)
         assertEquals(48.dp, custom.symbolSize)
+        assertEquals(DefaultLauncherDimensions.unitIconSize, custom.unitIconSize)
     }
 }

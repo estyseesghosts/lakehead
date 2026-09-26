@@ -132,6 +132,7 @@ class AppTileTest {
                         state = AppTileState(label = "Calendar", span = GridSpan(2, 1)),
                         onBodyClick = {}, onSymbolClick = {},
                         icon = { Box(Modifier.testTag("tile-icon").size(24.dp)) },
+                        pinnedCount = 1,
                     )
                 }
             }
@@ -163,6 +164,7 @@ class AppTileTest {
                         state = AppTileState(label = "Calendar", span = GridSpan(1, 2)),
                         onBodyClick = {}, onSymbolClick = {},
                         icon = { Box(Modifier.testTag("tile-icon").size(24.dp)) },
+                        pinnedCount = 1,
                     )
                 }
             }
@@ -173,9 +175,14 @@ class AppTileTest {
         val tileBounds = boundsInRoot(composeRule.onAllNodesWithContentDescription("Calendar")[0])
         val iconBounds = boundsInRoot(composeRule.onNodeWithTag("tile-icon", useUnmergedTree = true))
         assertTrue(
-            "1x2 span must x-center the icon " +
+            "1x2 span with pinned shortcuts must x-center the icon (BottomCenter) " +
                 "(tileCenterX=${tileBounds.center.x} iconCenterX=${iconBounds.center.x})",
             abs(iconBounds.center.x - tileBounds.center.x) <= 1f,
+        )
+        assertTrue(
+            "1x2 span with pinned shortcuts must anchor the icon to the tile bottom " +
+                "(tileCenterY=${tileBounds.center.y} iconCenterY=${iconBounds.center.y})",
+            iconBounds.center.y > tileBounds.center.y,
         )
         assertIconInsideTile(tileBounds, iconBounds)
     }
@@ -189,6 +196,7 @@ class AppTileTest {
                         state = AppTileState(label = "Calendar", span = GridSpan(2, 2)),
                         onBodyClick = {}, onSymbolClick = {},
                         icon = { Box(Modifier.testTag("tile-icon").size(24.dp)) },
+                        pinnedCount = 1,
                     )
                 }
             }
@@ -603,6 +611,159 @@ class AppTileTest {
         composeRule.waitForIdle()
         composeRule.onAllNodesWithContentDescription("Shortcut placeholder 1").assertCountEquals(1)
         composeRule.onAllNodesWithContentDescription("Shortcut placeholder 2").assertCountEquals(0)
+    }
+
+    @Test
+    fun zeroPinned_wideTileCentersSymbolAndRendersNoStrip() {
+        composeRule.setContent {
+            LauncherTheme {
+                Box(Modifier.size(320.dp, 320.dp)) {
+                    AppTile(
+                        state = AppTileState(label = "Calendar", span = GridSpan(2, 2)),
+                        onBodyClick = {}, onSymbolClick = {},
+                        icon = { Box(Modifier.testTag("tile-icon").size(24.dp)) },
+                        pinnedCount = 0,
+                    )
+                }
+            }
+        }
+        composeRule.waitForIdle()
+
+        val tileBounds = boundsInRoot(composeRule.onAllNodesWithContentDescription("Calendar")[0])
+        val iconBounds = boundsInRoot(composeRule.onNodeWithTag("tile-icon", useUnmergedTree = true))
+        assertTrue(
+            "2x2 with zero pinned must x-center the symbol " +
+                "(tileCenterX=${tileBounds.center.x} iconCenterX=${iconBounds.center.x})",
+            abs(iconBounds.center.x - tileBounds.center.x) <= 2f,
+        )
+        assertTrue(
+            "2x2 with zero pinned must y-center the symbol " +
+                "(tileCenterY=${tileBounds.center.y} iconCenterY=${iconBounds.center.y})",
+            abs(iconBounds.center.y - tileBounds.center.y) <= 2f,
+        )
+        composeRule.onAllNodesWithContentDescription("Shortcut placeholder 1").assertCountEquals(0)
+    }
+
+    @Test
+    fun zeroPinned_narrowTileCentersSymbolAndRendersNoStrip() {
+        composeRule.setContent {
+            LauncherTheme {
+                Box(Modifier.size(160.dp, 320.dp)) {
+                    AppTile(
+                        state = AppTileState(label = "Calendar", span = GridSpan(1, 2)),
+                        onBodyClick = {}, onSymbolClick = {},
+                        icon = { Box(Modifier.testTag("tile-icon").size(24.dp)) },
+                        pinnedCount = 0,
+                    )
+                }
+            }
+        }
+        composeRule.waitForIdle()
+
+        val tileBounds = boundsInRoot(composeRule.onAllNodesWithContentDescription("Calendar")[0])
+        val iconBounds = boundsInRoot(composeRule.onNodeWithTag("tile-icon", useUnmergedTree = true))
+        assertTrue(
+            "1x2 with zero pinned must x-center the symbol " +
+                "(tileCenterX=${tileBounds.center.x} iconCenterX=${iconBounds.center.x})",
+            abs(iconBounds.center.x - tileBounds.center.x) <= 2f,
+        )
+        assertTrue(
+            "1x2 with zero pinned must y-center the symbol " +
+                "(tileCenterY=${tileBounds.center.y} iconCenterY=${iconBounds.center.y})",
+            abs(iconBounds.center.y - tileBounds.center.y) <= 2f,
+        )
+        composeRule.onAllNodesWithContentDescription("Shortcut placeholder 1").assertCountEquals(0)
+    }
+
+    @Test
+    fun negativePinnedCountIsRejected() {
+        assertThrows(IllegalArgumentException::class.java) {
+            composeRule.setContent {
+                AppTile(
+                    state = AppTileState(label = "Calendar", span = GridSpan(2, 2)),
+                    onBodyClick = {}, onSymbolClick = {},
+                    pinnedCount = -1,
+                )
+            }
+        }
+    }
+
+    @Test
+    fun wideStrip_anchorsBottomEnd_indexZeroNearestAnchor() {
+        composeRule.setContent {
+            LauncherTheme {
+                Box(Modifier.size(480.dp, 160.dp)) {
+                    AppTile(
+                        // 4x1 capacity is columns - 1 = 3.
+                        state = AppTileState(label = "Calendar", span = GridSpan(4, 1)),
+                        onBodyClick = {}, onSymbolClick = {},
+                        shortcutPlaceholders = 3,
+                        pinnedCount = 3,
+                    )
+                }
+            }
+        }
+        composeRule.waitForIdle()
+
+        val tileBounds = boundsInRoot(composeRule.onAllNodesWithContentDescription("Calendar")[0])
+        val first = boundsInRoot(composeRule.onNodeWithContentDescription("Shortcut placeholder 1"))
+        val third = boundsInRoot(composeRule.onNodeWithContentDescription("Shortcut placeholder 3"))
+        // Strip sits on the bottom edge, anchored to the end.
+        assertTrue(
+            "wide strip must sit on the tile bottom (tileBottom=${tileBounds.bottom} firstBottom=${first.bottom})",
+            first.bottom >= tileBounds.bottom - 12f,
+        )
+        assertTrue(
+            "wide strip index 0 must be nearest the BottomEnd anchor " +
+                "(firstCenterX=${first.center.x} thirdCenterX=${third.center.x})",
+            first.center.x > third.center.x,
+        )
+        // Fixed pitch: centers share the same Y and are evenly spaced.
+        assertTrue(
+            "wide strip slots must share one row (firstY=${first.center.y} thirdY=${third.center.y})",
+            abs(first.center.y - third.center.y) <= 1f,
+        )
+        val second = boundsInRoot(composeRule.onNodeWithContentDescription("Shortcut placeholder 2"))
+        assertTrue(
+            "wide strip pitch must be fixed (1-2=${first.center.x - second.center.x} 2-3=${second.center.x - third.center.x})",
+            abs((first.center.x - second.center.x) - (second.center.x - third.center.x)) <= 1f,
+        )
+    }
+
+    @Test
+    fun narrowStrip_anchorsBottomCenter_indexZeroNearestAnchor() {
+        composeRule.setContent {
+            LauncherTheme {
+                Box(Modifier.size(160.dp, 480.dp)) {
+                    AppTile(
+                        // 1x3 capacity is rows - 1 = 2.
+                        state = AppTileState(label = "Calendar", span = GridSpan(1, 3)),
+                        onBodyClick = {}, onSymbolClick = {},
+                        shortcutPlaceholders = 2,
+                        pinnedCount = 2,
+                    )
+                }
+            }
+        }
+        composeRule.waitForIdle()
+
+        val tileBounds = boundsInRoot(composeRule.onAllNodesWithContentDescription("Calendar")[0])
+        val first = boundsInRoot(composeRule.onNodeWithContentDescription("Shortcut placeholder 1"))
+        val second = boundsInRoot(composeRule.onNodeWithContentDescription("Shortcut placeholder 2"))
+        assertTrue(
+            "narrow strip must x-center on the tile " +
+                "(tileCenterX=${tileBounds.center.x} firstCenterX=${first.center.x})",
+            abs(first.center.x - tileBounds.center.x) <= 2f,
+        )
+        assertTrue(
+            "narrow strip index 0 must be nearest the BottomCenter anchor " +
+                "(firstCenterY=${first.center.y} secondCenterY=${second.center.y})",
+            first.center.y > second.center.y,
+        )
+        assertTrue(
+            "narrow strip slots must share one column (firstX=${first.center.x} secondX=${second.center.x})",
+            abs(first.center.x - second.center.x) <= 1f,
+        )
     }
 
     @Test

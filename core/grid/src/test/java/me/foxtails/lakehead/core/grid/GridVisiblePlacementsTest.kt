@@ -89,10 +89,10 @@ class GridVisiblePlacementsTest {
     }
 
     @Test
-    fun rejectsNegativeAndReversedRangesAndNegativeOverscan() {
-        assertIllegalArgument { GridRowWindow(-1L, 0L) }
+    fun rejectsReversedRangesAndNegativeOverscan() {
         assertIllegalArgument { GridRowWindow(2L, 1L) }
         assertIllegalArgument { GridRowWindow(0L, -1L) }
+        assertIllegalArgument { GridRowWindow(-5L, -10L) }
         assertIllegalArgument { GridRowWindow(0L, 1L).withOverscan(-1L) }
         assertIllegalArgument {
             GridVisiblePlacements.select(
@@ -111,7 +111,7 @@ class GridVisiblePlacementsTest {
             window.withOverscan(3L),
         )
         assertEquals(
-            GridRowWindow(0L, Long.MAX_VALUE),
+            GridRowWindow(-(Long.MAX_VALUE), Long.MAX_VALUE),
             GridRowWindow(0L, Long.MAX_VALUE).withOverscan(Long.MAX_VALUE),
         )
     }
