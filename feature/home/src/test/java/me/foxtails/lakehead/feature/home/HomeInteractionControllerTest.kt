@@ -266,4 +266,49 @@ class HomeInteractionControllerTest {
     private fun assertNotEquals(a: Any?, b: Any?) {
         assertTrue("Expected $a != $b", a != b)
     }
+
+    // ---- unpinIfSelected ----
+
+    @Test
+    fun unpinIfSelected_editingWithMatchingId_clearsSelection() {
+        val editing = HomeInteractionController.Editing(selectedId = tileA)
+        val result = editing.unpinIfSelected(tileA)
+        assertTrue(result is HomeInteractionController.Editing)
+        assertNull((result as HomeInteractionController.Editing).selectedId)
+    }
+
+    @Test
+    fun unpinIfSelected_editingWithDifferentId_unchanged() {
+        val editing = HomeInteractionController.Editing(selectedId = tileB)
+        val result = editing.unpinIfSelected(tileA)
+        assertSame(editing, result)
+        assertEquals(tileB, (result as HomeInteractionController.Editing).selectedId)
+    }
+
+    @Test
+    fun unpinIfSelected_editingWithNullId_unchanged() {
+        val editing = HomeInteractionController.Editing(selectedId = null)
+        val result = editing.unpinIfSelected(tileA)
+        assertSame(editing, result)
+        assertNull((result as HomeInteractionController.Editing).selectedId)
+    }
+
+    @Test
+    fun unpinIfSelected_normal_unchanged() {
+        val result = HomeInteractionController.Normal.unpinIfSelected(tileA)
+        assertSame(HomeInteractionController.Normal, result)
+    }
+
+    @Test
+    fun unpinIfSelected_doubleCall_idempotent() {
+        val editing = HomeInteractionController.Editing(selectedId = tileA)
+        val first = editing.unpinIfSelected(tileA)
+        assertTrue(first is HomeInteractionController.Editing)
+        assertNull((first as HomeInteractionController.Editing).selectedId)
+
+        // Second call on the already-unpinned state is a no-op.
+        val second = first.unpinIfSelected(tileA)
+        assertTrue(second is HomeInteractionController.Editing)
+        assertNull((second as HomeInteractionController.Editing).selectedId)
+    }
 }

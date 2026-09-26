@@ -455,6 +455,82 @@ class GridRulesTest {
         assertEquals(before, mutableInput)
     }
 
+    // ---- move-only invariants ----
+
+    @Test
+    fun move_toSamePosition_isAccepted() {
+        // Moving to the current position is a valid no-op.
+        val existing = listOf(placement("item", GridPosition(2, 3)))
+        val result = accepted(GridRules.move(existing, "item", GridPosition(2, 3), 6, 6))
+        assertEquals(listOf(placement("item", GridPosition(2, 3))), result)
+    }
+
+    @Test
+    fun move_preservesSpan() {
+        // Move only changes position; span is untouched.
+        val existing = listOf(placement("wide", GridPosition(0, 0), 3, 2))
+        val result = accepted(GridRules.move(existing, "wide", GridPosition(2, 2), 6, 6))
+        assertEquals(GridSpan(3, 2), result[0].span)
+        assertEquals(GridPosition(2, 2), result[0].position)
+    }
+
+    @Test
+    fun move_intoOwnFootprint_isAccepted() {
+        // A 2x2 at (0,0) can move to (1,1) which overlaps its old cells — own
+        // footprint is ignored.
+        val existing = listOf(placement("self", GridPosition(0, 0), 2, 2))
+        val result = accepted(GridRules.move(existing, "self", GridPosition(1, 1), 6, 6))
+        assertEquals(GridPosition(1, 1), result[0].position)
+    }
+
+    @Test
+    fun move_blockedByOtherItem_rejected() {
+        val existing = listOf(
+            placement("mover", GridPosition(0, 0)),
+            placement("blocker", GridPosition(2, 0)),
+        )
+        assertRejected(
+            GridRules.move(existing, "mover", GridPosition(2, 0), 6, 4),
+            GridRules.Rejection.COLLISION,
+        )
+    }
+
+    @Test
+    fun move_onlyPositionChanges_unrelatedUntouched() {
+        val before = placement("before", GridPosition(0, 0))
+        val mover = placement("mover", GridPosition(2, 0), 2, 1)
+        val after = placement("after", GridPosition(0, 3))
+        val existing = listOf(before, mover, after)
+
+        val result = accepted(GridRules.move(existing, "mover", GridPosition(4, 2), 6, 6))
+
+        // Order and unrelated entries preserved.
+        assertEquals(before, result[0])
+        assertEquals(mover.copy(position = GridPosition(4, 2)), result[1])
+        assertEquals(after, result[2])
+    }
+
+    @Test
+    fun move_toOriginCorner_isAccepted() {
+        val existing = listOf(placement("item", GridPosition(3, 3)))
+        val result = accepted(GridRules.move(existing, "item", GridPosition(0, 0), 6, 6))
+        assertEquals(GridPosition(0, 0), result[0].position)
+    }
+
+    @Test
+    fun move_rejectedPreservesInputList() {
+        val mover = placement("mover", GridPosition(0, 0))
+        val blocker = placement("blocker", GridPosition(3, 0))
+        val mutableInput = mutableListOf(mover, blocker)
+        val before = mutableInput.toList()
+
+        assertRejected(
+            GridRules.move(mutableInput, "mover", GridPosition(3, 0), 6, 4),
+            GridRules.Rejection.COLLISION,
+        )
+        assertEquals(before, mutableInput)
+    }
+
     private fun placement(
         id: String,
         position: GridPosition,

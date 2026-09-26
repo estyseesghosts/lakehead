@@ -75,4 +75,30 @@ class MoveDragMathTest {
         val pos = MoveDragMath.cellForPixel(156f, 0f, cellSize, gap, gap, 0L)
         assertEquals(3, pos.column)
     }
+
+    @Test
+    fun nonZeroOriginYPx_subtractsRestBeforeRowDivision() {
+        // Signed frame: top(row) = originYPx + (row - rowOrigin) * stride.
+        // rowOrigin = 5, rest = 104f (2 strides): row 5's top is y=104.
+        // Pointer at the row top must map back to row 5; without subtracting
+        // the rest it would read as 5 + 104/52 = 7.
+        val atTop = MoveDragMath.cellForPixel(0f, 104f, cellSize, gap, gap, 5L, originYPxPx = 104f)
+        assertEquals(5, atTop.row)
+    }
+
+    @Test
+    fun nonZeroOriginYPx_oneStrideBelowTop_mapsToNextRow() {
+        // Same origin: one stride below the row-5 top (y=156) → row 6.
+        // Naive (no rest subtraction) would give 5 + 156/52 = 8.
+        val next = MoveDragMath.cellForPixel(0f, 156f, cellSize, gap, gap, 5L, originYPxPx = 104f)
+        assertEquals(6, next.row)
+    }
+
+    @Test
+    fun nonZeroRowOriginWithRest_roundTripsSignedFrame() {
+        // rowOrigin = 2, rest = 26f: row 4's signed top = 26 + (4-2)*52 = 130.
+        // Pointer at y=130 must map to row 4.
+        val pos = MoveDragMath.cellForPixel(0f, 130f, cellSize, gap, gap, 2L, originYPxPx = 26f)
+        assertEquals(4, pos.row)
+    }
 }

@@ -90,3 +90,19 @@ fun HomeInteractionController.exitOnNavigate(): HomeInteractionController {
     if (this !is HomeInteractionController.Editing) return this
     return HomeInteractionController.Normal
 }
+
+/**
+ * Deselect [tileId] if it is the currently selected tile in [HomeInteractionController.Editing].
+ *
+ * [HomeInteractionController.Editing] with [HomeInteractionController.Editing.selectedId]
+ * matching [tileId] → [HomeInteractionController.Editing] with `selectedId = null`.
+ * All other states ([Normal], [Editing] with a different or null selectedId) are
+ * returned unchanged (idempotent).
+ */
+fun HomeInteractionController.unpinIfSelected(
+    tileId: ItemId,
+): HomeInteractionController {
+    if (this !is HomeInteractionController.Editing) return this
+    if (selectedId != tileId) return this
+    return copy(selectedId = null)
+}

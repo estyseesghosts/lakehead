@@ -348,6 +348,11 @@ internal fun HomeCanvasGrid(
                                     columns,
                                     rows,
                                 )
+                                // W4: lock pager axis on Active entry so the
+                                // drag handler can detect pager-flip/scroll-steal.
+                                if (editSession is HomeEditSession.Active) {
+                                    pagerAxisLock = LockedAxis.HORIZONTAL
+                                }
                             },
                             // W1 recess/select: tap transfers selection directly
                             // (selectOnTap, never launch); long-press enters
@@ -599,8 +604,20 @@ internal fun HomeCanvasGrid(
                     if (isOnHandle) {
                         // RESIZE mode: corner-anchored span updates.
                         editSession = sessionState.value.beginResize()
+                        // W4: track initial scroll and pager lock for steal detection.
+                        val resizeStartScroll = scrollState.value
+                        val resizeStartPagerLock = pagerAxisLock
+                        var resizeStolen = false
                         var current: PointerInputChange = slopChange
                         while (true) {
+                            // W4: break on pager flip or scroll delta (steal attempt).
+                            // Steal fails: keeps last-valid, zero-write on cancel.
+                            if (pagerAxisLock != resizeStartPagerLock ||
+                                scrollState.value != resizeStartScroll
+                            ) {
+                                resizeStolen = true
+                                break
+                            }
                             val next = awaitDragOrCancellation(current.id) ?: break
                             next.consume()
                             current = next
@@ -630,7 +647,8 @@ internal fun HomeCanvasGrid(
                         // W3 release: commit the held last-valid span iff it differs
                         // from origin; otherwise snap back. Either way the session
                         // stays in edit mode (stays-editing, never exits on resize).
-                        val commitSpan = sessionState.value.resizeCommitSpan()
+                        // W4: skip commit when stolen (zero-write on cancel).
+                        val commitSpan = if (resizeStolen) null else sessionState.value.resizeCommitSpan()
                         if (final != null && commitSpan != null) {
                             onResizeTile(final.itemId, commitSpan)
                             // Keep session active in MOVE with the committed span as origin.
@@ -663,6 +681,8 @@ internal fun HomeCanvasGrid(
                         } else {
                             editSession = HomeEditSession.Idle
                         }
+                        // W4: reset pager axis lock once after resize release/cancel.
+                        pagerAxisLock = LockedAxis.UNDECIDED
                     } else {
                         // MOVE mode: pointer position maps to a candidate cell.
                         // W3 single-gesture rule (W4 owns arbitration): routing was
@@ -684,8 +704,20 @@ internal fun HomeCanvasGrid(
                             columns,
                             rows,
                         )
+                        // W4: track initial scroll and pager lock for steal detection.
+                        val moveStartScroll = scrollState.value
+                        val moveStartPagerLock = pagerAxisLock
+                        var moveStolen = false
                         var current: PointerInputChange = slopChange
                         while (true) {
+                            // W4: break on pager flip or scroll delta (steal attempt).
+                            // Steal fails: keeps last-valid, zero-write on cancel.
+                            if (pagerAxisLock != moveStartPagerLock ||
+                                scrollState.value != moveStartScroll
+                            ) {
+                                moveStolen = true
+                                break
+                            }
                             val next = awaitDragOrCancellation(current.id) ?: break
                             next.consume()
                             current = next
@@ -708,11 +740,14 @@ internal fun HomeCanvasGrid(
                             )
                         }
                         val final = sessionState.value as? HomeEditSession.Active
-                        val commit = sessionState.value.moveCommitPosition()
+                        // W4: skip commit when stolen (zero-write on cancel).
+                        val commit = if (moveStolen) null else sessionState.value.moveCommitPosition()
                         if (final != null && commit != null) {
                             onMoveTile(final.itemId, commit)
                         }
                         editSession = HomeEditSession.Idle
+                        // W4: reset pager axis lock once after move release/cancel.
+                        pagerAxisLock = LockedAxis.UNDECIDED
                     }
                 }
             }

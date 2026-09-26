@@ -902,6 +902,59 @@ class HomeCanvasTest {
     // ---- Ownership/purity evidence ----
 
     @Test
+    fun tapWhileEditing_neverLaunches_evenOnSelectedTile() {
+        // W4: verify that tapping a tile during editing mode never triggers
+        // onLaunchApp, even for the currently selected tile. Taps transfer
+        // selection or re-select; they never launch.
+        var launched: AppIdentity? = null
+        val tiles = listOf(
+            tile("a", personal, "Alpha App", column = 0, row = 0),
+            tile("b", work, "Beta App", column = 1, row = 0),
+        )
+        setCanvas(loaded(tiles), onLaunchApp = { launched = it })
+        composeRule.waitForIdle()
+
+        // Enter editing via long-press on Alpha App.
+        composeRule.onAllNodesWithContentDescription("Alpha App")[0]
+            .performSemanticsAction(SemanticsActions.OnLongClick) { it() }
+        composeRule.waitForIdle()
+        composeRule.onNode(hasStateDescription("Editing Alpha App, row 0 column 0"))
+            .assertIsDisplayed()
+
+        // Tap the selected tile itself — must not launch.
+        composeRule.onAllNodesWithContentDescription("Alpha App")[0].performClick()
+        composeRule.waitForIdle()
+        composeRule.runOnIdle {
+            assertEquals("tap on selected tile must never launch", null, launched)
+        }
+
+        // Tap the non-selected tile — transfers selection, must not launch.
+        composeRule.onAllNodesWithContentDescription("Beta App")[0].performClick()
+        composeRule.waitForIdle()
+        composeRule.onNode(hasStateDescription("Editing Beta App, row 0 column 1"))
+            .assertIsDisplayed()
+        composeRule.runOnIdle {
+            assertEquals("tap to transfer selection must never launch", null, launched)
+        }
+
+        // Tap the now-selected tile again — re-select, must not launch.
+        composeRule.onAllNodesWithContentDescription("Beta App")[0].performClick()
+        composeRule.waitForIdle()
+        composeRule.runOnIdle {
+            assertEquals("re-tap on selected tile must never launch", null, launched)
+        }
+
+        // Tap the now-recessed tile — transfers back, must not launch.
+        composeRule.onAllNodesWithContentDescription("Alpha App")[0].performClick()
+        composeRule.waitForIdle()
+        composeRule.onNode(hasStateDescription("Editing Alpha App, row 0 column 0"))
+            .assertIsDisplayed()
+        composeRule.runOnIdle {
+            assertEquals("transfer back must never launch", null, launched)
+        }
+    }
+
+    @Test
     fun publicSignatures_referenceOnlyPredecodedSnapshots_noPlatformOrDecodeTypes() {
         // Behavior evidence: icons arrive as already-decoded ImageBitmap snapshots keyed by
         // full identity; the feature never calls LauncherApps/PackageManager/decode/database.
