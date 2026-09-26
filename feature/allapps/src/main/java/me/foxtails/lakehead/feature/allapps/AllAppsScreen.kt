@@ -4,9 +4,12 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.platform.testTag
@@ -15,18 +18,29 @@ import androidx.compose.ui.unit.dp
 import me.foxtails.lakehead.core.model.AppIdentity
 
 /**
- * Flat All Apps list screen.
+ * Grouped All Apps list screen.
  *
  * Presentation only: [state] and [icons] are caller-acquired. Icons are already-decoded
  * snapshots resolved with [Map.get] on the exact [AppIdentity]; this composable performs no
- * decode, catalogue/platform lookup, or database access, preserves the caller's catalogue
- * order, and uses Foundation text/layout only (no Material product components).
+ * decode, catalogue/platform lookup, or database access, and uses Foundation text/layout only
+ * (no Material product components).
  *
  * - [AllAppsViewState.Loading] renders honest loading text.
- * - [AllAppsViewState.Loaded] with no entries renders an honest empty message.
- * - [AllAppsViewState.Loaded] with entries renders a [LazyColumn] of [AllAppsRow] rows in
- *   input order; row taps launch via [onLaunchApp] and Add taps request placement via
- *   [onAddToHome], each with the row's exact [AppIdentity].
+ * - [AllAppsViewState.Loaded] with no entries renders an honest empty message (no headers).
+ * - [AllAppsViewState.Loaded] with entries groups [AllAppsEntry] items into [AppSection]s
+ *   via [toAppSections] (remembered on the entries) and renders a [LazyColumn] where each
+ *   section is a full-row [AllAppsSectionHeader] `item(key = "section:{key}")` followed by
+ *   that section's [AllAppsRow] rows (`items(apps, key = rowKey)`). A single section is
+ *   still headered. Headers scroll with content (plain `item`, never sticky).
+ * - Row taps launch via [onLaunchApp] and Add taps request placement via [onAddToHome],
+ *   each with the row's exact [AppIdentity]. Header taps dispatch the section key via
+ *   [onHeaderTap].
+ * - Optional P4 picker: when [picker] is non-null the list renders inside
+ *   [AlphabetPickerOverlay] (scrim dismiss via [onPickerDismiss], letter jumps via
+ *   [onPickerLetterPicked]). Null renders the bare list, preserving existing callers.
+ *   The [LazyListState] ([listState]) is hoisted above the overlay so dismiss preserves
+ *   scroll position; callers block horizontal paging while `picker?.isOpen == true`
+ *   (see [blocksPager]).
  */
 @Composable
 fun AllAppsScreen(
@@ -36,6 +50,11 @@ fun AllAppsScreen(
     onAddToHome: (AppIdentity) -> Unit,
     modifier: Modifier = Modifier,
     bottomClearance: Dp = 0.dp,
+    onHeaderTap: (String) -> Unit = {},
+    picker: AlphabetPickerState? = null,
+    onPickerDismiss: () -> Unit = {},
+    onPickerLetterPicked: (String) -> Unit = {},
+    listState: LazyListState = rememberLazyListState(),
 ) {
     when (state) {
         is AllAppsViewState.Loading -> BasicText(
@@ -54,21 +73,36 @@ fun AllAppsScreen(
                         .padding(horizontal = 16.dp, vertical = 24.dp),
                 )
             } else {
-                LazyColumn(
-                    modifier = modifier.testTag(ALL_APPS_LIST_TAG),
-                    contentPadding = PaddingValues(bottom = bottomClearance),
-                ) {
-                    items(
-                        items = state.entries,
-                        key = { it.rowKey() },
-                    ) { entry ->
-                        AllAppsRow(
-                            entry = entry,
-                            icon = icons[entry.identity],
+                val sections = remember(state.entries) { state.entries.toAppSections() }
+                if (picker != null) {
+                    AlphabetPickerOverlay(
+                        picker = picker,
+                        onDismiss = onPickerDismiss,
+                        onLetterPicked = onPickerLetterPicked,
+                        modifier = modifier,
+                    ) {
+                        AllAppsList(
+                            sections = sections,
+                            icons = icons,
                             onLaunchApp = onLaunchApp,
                             onAddToHome = onAddToHome,
+                            bottomClearance = bottomClearance,
+                            onHeaderTap = onHeaderTap,
+                            listState = listState,
+                            modifier = Modifier,
                         )
                     }
+                } else {
+                    AllAppsList(
+                        sections = sections,
+                        icons = icons,
+                        onLaunchApp = onLaunchApp,
+                        onAddToHome = onAddToHome,
+                        bottomClearance = bottomClearance,
+                        onHeaderTap = onHeaderTap,
+                        listState = listState,
+                        modifier = modifier,
+                    )
                 }
             }
         }
@@ -93,3 +127,46 @@ const val ALL_APPS_LIST_TAG: String = "allapps-list"
  */
 internal fun AllAppsEntry.rowKey(): String =
     "${identity.profileId.value}\u001F${identity.component.packageName}\u001F${identity.component.className}"
+
+/**
+ * Grouped list body shared by the bare and picker-wrapped presentations.
+ *
+ * Headers are plain `item` rows that scroll with content (never sticky).
+ */
+@Composable
+private fun AllAppsList(
+    sections: List<AppSection>,
+    icons: Map<AppIdentity, ImageBitmap>,
+    onLaunchApp: (AppIdentity) -> Unit,
+    onAddToHome: (AppIdentity) -> Unit,
+    bottomClearance: Dp,
+    onHeaderTap: (String) -> Unit,
+    listState: LazyListState,
+    modifier: Modifier = Modifier,
+) {
+    LazyColumn(
+        modifier = modifier.testTag(ALL_APPS_LIST_TAG),
+        state = listState,
+        contentPadding = PaddingValues(bottom = bottomClearance),
+    ) {
+        sections.forEach { section ->
+            item(key = "section:${section.key}") {
+                AllAppsSectionHeader(
+                    key = section.key,
+                    onHeaderTap = onHeaderTap,
+                )
+            }
+            items(
+                items = section.apps,
+                key = { it.rowKey() },
+            ) { entry ->
+                AllAppsRow(
+                    entry = entry,
+                    icon = icons[entry.identity],
+                    onLaunchApp = onLaunchApp,
+                    onAddToHome = onAddToHome,
+                )
+            }
+        }
+    }
+}

@@ -12,6 +12,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -26,6 +28,10 @@ import me.foxtails.lakehead.core.model.LogicalPosition
 import me.foxtails.lakehead.core.model.LogicalSpan
 import me.foxtails.lakehead.feature.allapps.AllAppsScreen
 import me.foxtails.lakehead.feature.allapps.AllAppsViewState
+import me.foxtails.lakehead.feature.allapps.AlphabetPickerState
+import me.foxtails.lakehead.feature.allapps.blocksPager
+import me.foxtails.lakehead.feature.allapps.toAlphabetPickerState
+import me.foxtails.lakehead.feature.allapps.toAppSections
 import me.foxtails.lakehead.feature.home.HomeCanvas
 import me.foxtails.lakehead.feature.home.HomeCanvasViewportStyle
 import me.foxtails.lakehead.feature.home.HomeRenderState
@@ -55,6 +61,15 @@ const val LAUNCHER_PAGE_COUNT = 3
  * fade/scale). The pill floats above content with [Alignment.BottomCenter]; content
  * reserves [LauncherNavPillBottomClearance] (or the system-gesture bottom, whichever is
  * larger) so the pill never covers the last row.
+ *
+ * P4 picker ownership: the shell hoists transient [AlphabetPickerState] (plain
+ * `remember`, never persisted) so header taps have a production open path and the
+ * pager can block. Tapping a section header opens the picker with enablement derived
+ * from the current All Apps sections and forwards the key to [onHeaderTap]; picking
+ * a letter reports it via [onHeaderTap] then dismisses. While `picker?.isOpen`
+ * ([blocksPager]) the pager sets `userScrollEnabled = false`, so swipe navigation is
+ * held; programmatic pill navigation still works and back dismisses inside the
+ * overlay without reaching the pager.
  */
 @Composable
 internal fun LauncherShell(
@@ -68,6 +83,7 @@ internal fun LauncherShell(
     onMoveTile: (ItemId, LogicalPosition) -> Unit = { _, _ -> },
     onResizeTile: (ItemId, LogicalSpan) -> Unit = { _, _ -> },
     onRemoveTile: (ItemId) -> Unit = { },
+    onHeaderTap: (String) -> Unit = {},
     modifier: Modifier = Modifier,
     initialPage: Int = LAUNCHER_PAGE_TILE,
     viewportStyle: HomeCanvasViewportStyle = HomeCanvasViewportStyle(),
@@ -90,6 +106,17 @@ internal fun LauncherShell(
     }
     val bottomClearance = maxOf(LauncherNavPillBottomClearance, gestureBottom)
 
+    // P4 transient picker, hoisted so the pager can block while it is open. Plain
+    // remember: open/close is gesture state, never persisted. Null means no picker
+    // has been opened yet; AllAppsScreen renders its bare list until then.
+    var picker by remember { mutableStateOf<AlphabetPickerState?>(null) }
+    // Enablement mirrors the sections AllAppsScreen derives from the same entries,
+    // so the opened picker jumps exactly to the rendered sections. Grouping itself
+    // stays owned by the feature; this is a read-only derivation for enablement.
+    val pickerSections = remember(allAppsState) {
+        (allAppsState as? AllAppsViewState.Loaded)?.entries?.toAppSections().orEmpty()
+    }
+
     Box(
         modifier = modifier
             .fillMaxSize()
@@ -99,6 +126,7 @@ internal fun LauncherShell(
             state = pagerState,
             modifier = Modifier.fillMaxSize(),
             beyondViewportPageCount = 1,
+            userScrollEnabled = !picker.blocksPager(),
         ) { page ->
             when (page) {
                 LAUNCHER_PAGE_FEED -> FeedSurface(
@@ -112,6 +140,16 @@ internal fun LauncherShell(
                     onAddToHome = onAddToHome,
                     modifier = Modifier.fillMaxSize(),
                     bottomClearance = bottomClearance,
+                    onHeaderTap = { key ->
+                        picker = pickerSections.toAlphabetPickerState(isOpen = true)
+                        onHeaderTap(key)
+                    },
+                    picker = picker,
+                    onPickerDismiss = { picker = picker?.copy(isOpen = false) },
+                    onPickerLetterPicked = { letter ->
+                        onHeaderTap(letter)
+                        picker = picker?.copy(isOpen = false)
+                    },
                 )
 
                 else -> HomeCanvas(
