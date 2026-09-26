@@ -22,6 +22,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.platform.LocalDensity
 import kotlinx.coroutines.launch
+import me.foxtails.lakehead.core.designsystem.GestureArbitration
+import me.foxtails.lakehead.core.designsystem.GestureArbitration.ArbWinner
+import me.foxtails.lakehead.core.designsystem.GestureArbitration.LockedAxis
 import me.foxtails.lakehead.core.model.AppIdentity
 import me.foxtails.lakehead.core.model.ItemId
 import me.foxtails.lakehead.core.model.LogicalPosition
@@ -70,6 +73,14 @@ const val LAUNCHER_PAGE_COUNT = 3
  * ([blocksPager]) the pager sets `userScrollEnabled = false`, so swipe navigation is
  * held; programmatic pill navigation still works and back dismisses inside the
  * overlay without reaching the pager.
+ *
+ * P2 gesture arbitration: the picker block stays the top guard and a
+ * [GestureArbitration.arbPriority] guard sits alongside it. The shell owns no
+ * drag deltas (page children own their slop/settle thresholds), so the shell
+ * arbitrates with [LockedAxis.UNDECIDED]: picker-open still wins and disables
+ * swipe, anything else leaves the pager enabled. The floating pill always uses
+ * programmatic `animateScrollToPage`, which is unaffected by
+ * `userScrollEnabled`, so it keeps working while swipe is held.
  */
 @Composable
 internal fun LauncherShell(
@@ -117,6 +128,19 @@ internal fun LauncherShell(
         (allAppsState as? AllAppsViewState.Loaded)?.entries?.toAppSections().orEmpty()
     }
 
+    // P2 arbitration alongside the P4 top guard: picker-open wins (swipe held);
+    // the axis lock is UNDECIDED at shell level because drag deltas live in the
+    // page children, so this guard preserves `!blocksPager()` swipe behavior
+    // exactly while routing the decision through the shared predicate.
+    val pickerBlocksPager = picker.blocksPager()
+    val pagerWinner = remember(pickerBlocksPager) {
+        GestureArbitration.arbPriority(
+            isPickerOpen = pickerBlocksPager,
+            isTap = false,
+            locked = LockedAxis.UNDECIDED,
+        )
+    }
+
     Box(
         modifier = modifier
             .fillMaxSize()
@@ -126,7 +150,7 @@ internal fun LauncherShell(
             state = pagerState,
             modifier = Modifier.fillMaxSize(),
             beyondViewportPageCount = 1,
-            userScrollEnabled = !picker.blocksPager(),
+            userScrollEnabled = !picker.blocksPager() && pagerWinner != ArbWinner.PICKER,
         ) { page ->
             when (page) {
                 LAUNCHER_PAGE_FEED -> FeedSurface(

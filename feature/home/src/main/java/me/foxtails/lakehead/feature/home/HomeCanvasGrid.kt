@@ -28,6 +28,8 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import me.foxtails.lakehead.core.designsystem.AppTileDefaults
+import me.foxtails.lakehead.core.designsystem.GestureArbitration
+import me.foxtails.lakehead.core.designsystem.GestureArbitration.LockedAxis
 import me.foxtails.lakehead.core.designsystem.PixelRect
 import me.foxtails.lakehead.core.designsystem.RemoveButton
 import me.foxtails.lakehead.core.designsystem.ResizeCandidateOverlay
@@ -51,6 +53,7 @@ import me.foxtails.lakehead.core.model.AppIdentity
 import me.foxtails.lakehead.core.model.ItemId
 import me.foxtails.lakehead.core.model.LogicalPosition
 import me.foxtails.lakehead.core.model.LogicalSpan
+import kotlin.math.abs
 
 /**
  * Viewport padding/gap inputs for the home canvas grid, in pixels.
@@ -89,8 +92,10 @@ data class HomeCanvasViewportStyle(
  *   via [Map.get] on the exact [AppIdentity]. No decode, catalogue/platform lookup, or
  *   database access occurs in any composable.
  * - Transient editing is hoisted here: long-press on a launchable tile enters a
- *   [HomeEditSession.Active] session in MOVE mode, vertical scroll is disabled while active,
- *   pointer drags update the candidate via [MoveDragMath] with validity from `core:grid`, a
+ *   [HomeEditSession.Active] session in MOVE mode, vertical scroll is disabled while active
+ *   (and while idle a confident horizontal axis lock yields to the pager, so a
+ *   horizontal swipe pages instead of scrolling), pointer drags update the
+ *   candidate via [MoveDragMath] with validity from `core:grid`, a
  *   non-interactive outline marks the candidate, back cancels, and drag end commits via
  *   [onMoveTile] when the candidate differs from the origin. A resize handle on the
  *   bottom-right corner switches to RESIZE mode; handle drags update the candidate span
@@ -145,6 +150,13 @@ internal fun HomeCanvasGrid(
         key(loaded.requestedHomeId) {
             val scrollState = rememberScrollState()
             var editSession by remember { mutableStateOf<HomeEditSession>(HomeEditSession.Idle) }
+            // P2 scroll-vs-pager arbitration: idle-gesture axis lock shared with
+            // verticalScroll below. UNDECIDED by default; set to HORIZONTAL only on
+            // a confident horizontal lock so the pager wins the swipe, otherwise
+            // the vertical scroll keeps the gesture. Diagonal drags hold
+            // UNDECIDED (never steal). Reset at gesture end; writes happen only on
+            // lock transitions so scroll moves don't recompose per frame.
+            var pagerAxisLock by remember { mutableStateOf(LockedAxis.UNDECIDED) }
             val columns = loaded.columns.count
             val rows = loaded.extent.totalScrollableRows.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
             val active = editSession as? HomeEditSession.Active
@@ -227,6 +239,57 @@ internal fun HomeCanvasGrid(
                     onTap = { editSession = sessionState.value.cancel() },
                 )
             }
+            // P2 idle axis observer: tracks the scroll-vs-pager axis without
+            // consuming, so verticalScroll, tapCancel and tile taps are
+            // unaffected. [GestureArbitration.lockAxis] is the slop gate and
+            // [GestureArbitration.dominantAxis] is the diagonal guard: when both
+            // axes clear slop but neither dominates, the pre-commit lock holds
+            // UNDECIDED so a diagonal drag never steals the gesture from either
+            // consumer. Installed only while idle; the edit drag handler below
+            // owns the gesture once a session is active.
+            val axisObserverModifier = Modifier.pointerInput(Unit) {
+                awaitEachGesture {
+                    val firstEvent = awaitPointerEvent()
+                    val down = firstEvent.changes.firstOrNull { it.pressed }
+                        ?: return@awaitEachGesture
+                    val downId = down.id
+                    val startPos = down.position
+                    val slopPx = viewConfiguration.touchSlop.toFloat()
+                    var lock = LockedAxis.UNDECIDED
+                    while (true) {
+                        val nextEvent = awaitPointerEvent()
+                        val nextChange = nextEvent.changes.find { it.id == downId }
+                        if (nextChange == null || !nextChange.pressed) break
+                        val dx = nextChange.position.x - startPos.x
+                        val dy = nextChange.position.y - startPos.y
+                        val locked = GestureArbitration.lockAxis(
+                            dxPx = dx,
+                            dyPx = dy,
+                            slopPx = slopPx,
+                            currentLock = lock,
+                        )
+                        // Diagonal guard applies only to the initial commit: once
+                        // committed the lock is preserved mid-gesture per the
+                        // lockAxis contract and never flips back.
+                        val diagonalHold = lock == LockedAxis.UNDECIDED &&
+                            locked != LockedAxis.UNDECIDED &&
+                            abs(dx) >= slopPx && abs(dy) >= slopPx &&
+                            GestureArbitration.dominantAxis(
+                                dxPx = dx,
+                                dyPx = dy,
+                                jitterPx = slopPx,
+                            ) == LockedAxis.UNDECIDED
+                        val next = if (diagonalHold) LockedAxis.UNDECIDED else locked
+                        if (next != lock) {
+                            lock = next
+                            pagerAxisLock = next
+                        }
+                    }
+                    if (lock != LockedAxis.UNDECIDED) {
+                        pagerAxisLock = LockedAxis.UNDECIDED
+                    }
+                }
+            }
             // Unified move/resize drag handler on the parent Box. The resize handle is
             // visual-only; this handler hit-tests the pointer position against the handle
             // corner once at gesture start (after slop) and routes to RESIZE or MOVE.
@@ -279,7 +342,9 @@ internal fun HomeCanvasGrid(
                         isInHandle(startPos.x, startPos.y, originBounds, handleSizePx)
                     // Wait until the already-pressed pointer moves past touch slop.
                     // Release before slop means no drag (a tap; tapCancel handles it).
-                    val touchSlopPx = viewConfiguration.touchSlop
+                    // P2: the slop gate is the shared [GestureArbitration.lockAxis]
+                    // predicate, not an inline distance check.
+                    val touchSlopPx = viewConfiguration.touchSlop.toFloat()
                     var slop: PointerInputChange? = null
                     while (slop == null) {
                         val nextEvent = awaitPointerEvent()
@@ -289,7 +354,12 @@ internal fun HomeCanvasGrid(
                         }
                         val dx = nextChange.position.x - startPos.x
                         val dy = nextChange.position.y - startPos.y
-                        if (dx * dx + dy * dy > touchSlopPx * touchSlopPx) {
+                        val dragLock = GestureArbitration.lockAxis(
+                            dxPx = dx,
+                            dyPx = dy,
+                            slopPx = touchSlopPx,
+                        )
+                        if (dragLock != LockedAxis.UNDECIDED) {
                             nextChange.consume()
                             slop = nextChange
                         }
@@ -502,9 +572,13 @@ internal fun HomeCanvasGrid(
             }
             Box(
                 modifier = Modifier
-                    .verticalScroll(scrollState, enabled = active == null)
+                    .verticalScroll(
+                        scrollState,
+                        enabled = active == null && pagerAxisLock != LockedAxis.HORIZONTAL,
+                    )
                     .then(tapCancelModifier)
                     .then(if (active != null) dragModifier else Modifier)
+                    .then(if (active != null) Modifier else axisObserverModifier)
                     .testTag(HOME_CANVAS_GRID_TAG),
             ) {
                 WindowedSpanContainer(
