@@ -1,8 +1,10 @@
 # Current execution state
-- Phase: Colour milestone — Phase A+B complete, C1+C2+D1 complete (`513cb3a`, `2501f5b`, `d6605af` on top of `8e090a4`..`34e6f1f`). Phase D next.
-- Active objective: D2 — sibling hit targets (`docs/agents/tasks/colour.md` §6 Phase D).
-- Owner: Next orchestrator.
-- Commit history (colour): `8e090a4` (A1 LauncherTheme), `342f217` (A2 TileColorRole), `3ef5fe8` (A3 theme wiring), `cdead40` (nav pill), `9c6293a` (B3 8dp+centred), `08ef031` (B1 LauncherDimensions), `7a37ada` (B2 5-col), `34e6f1f` (B2 scale-up 48→60dp), `513cb3a` (C1 sharp corners), `2501f5b` (C2 AppSymbol bottom-anchor labelless), `d6605af` (D1 TileHitTarget vocabulary).
-- Latest handoff: [`handoffs/2026-09-26-colour-c1-c2-d1.md`](handoffs/2026-09-26-colour-c1-c2-d1.md).
-- Device: 1080px@3x → 5 cols, cell 187px, originX centred, edge=gap 8dp, LauncherTheme light/dark, pill theme-adaptive. Note: C1 sharp corners, C2 bottom-anchor labelless tiles, D1 type-only no visual change. App-list font still pure black (deferred to E1).
-- Exact next operation: Implement D2 per `docs/agents/tasks/colour.md` D2 + `docs/grid.md` 486–499. Then `assembleDebug` / `test` / `lint` + commit.
+- Phase: Phase 3 + Phase 4 — **NEARLY COMPLETE**. Interaction + Persistent Edit Core committed. W2 + W4 pending commit.
+- Active objective: Phase 4 closeout — commit W2/W4, device manual validation, update to Phase 5 readiness.
+- Owner: Orchestrator → git_handler (commit) → device agent (manual validation).
+- Commit history (phase 3-4): `d26d583` (P2), `af81856` (S2), `7216176` (P5+absorbed), `5bd31be` (P6), `a45912e` (G4), `bffb743` (W1 controller), `44413f9` (W1 UI), `b783240` (W3), `633a47f` (G5), `82d499d` (S4). Prior phase 1-2: `5bd0076`→`f950240`. Prior colour: `3dc1843` and earlier.
+- Latest handoff: [`handoffs/2026-09-26-phase3-4-complete.md`](handoffs/2026-09-26-phase3-4-complete.md).
+- Device: R5CN70E2SGV SM-G986W — Flows G/H PASS, tap launches, picker blocks. Phase 3 S2/G4/P5 NOT-RUN. Phase 4 device NOT-RUN.
+- Build/test/lint: **ALL GREEN** (assembleDebug 303 tasks, test 221 tasks, lint 360 tasks). All audits pass.
+- Known issues: W2 P0 fixed, G4 sign fixed, stale tests fixed. LauncherDimensions harness workaround. Seeded timeout regression non-deterministic.
+- Exact next operation: Commit W2 + W4 worktree changes, then device manual validation for Phase 4 (drag/resize/unpin/origin) on SM-G986W, then update CURRENT to Phase 5 readiness.
