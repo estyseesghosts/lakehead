@@ -102,6 +102,32 @@ fun List<AllAppsEntry>.toAppSections(collator: Collator): List<AppSection> {    
     }
 }
 
+// ── index helpers ────────────────────────────────────────────────────────
+
+/**
+ * Returns the index of the [AppSection] whose [AppSection.key] equals [key],
+ * or `null` if no section matches or [sections] is empty.
+ */
+fun List<AppSection>.sectionIndexForKey(key: String): Int? =
+    indexOfFirst { it.key == key }.takeIf { it >= 0 }
+
+/**
+ * Returns the LazyColumn item index of the header for the section at [sectionIndex].
+ *
+ * Each section contributes 1 header item followed by [AppSection.apps].size row items.
+ * The header of the first section is always at item index 0.
+ *
+ * @throws IllegalArgumentException if [sectionIndex] is out of range.
+ */
+fun List<AppSection>.headerItemIndex(sectionIndex: Int): Int {
+    require(sectionIndex in indices) { "sectionIndex $sectionIndex out of range $indices" }
+    var idx = 0
+    for (i in 0 until sectionIndex) {
+        idx += 1 + this[i].apps.size
+    }
+    return idx
+}
+
 // ── private helpers ──────────────────────────────────────────────────────
 
 /** Pre-defined section order: `#` then `A`–`Z`. */

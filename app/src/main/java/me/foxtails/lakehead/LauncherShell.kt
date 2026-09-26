@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.systemGestures
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material3.MaterialTheme
@@ -33,6 +34,8 @@ import me.foxtails.lakehead.feature.allapps.AllAppsScreen
 import me.foxtails.lakehead.feature.allapps.AllAppsViewState
 import me.foxtails.lakehead.feature.allapps.AlphabetPickerState
 import me.foxtails.lakehead.feature.allapps.blocksPager
+import me.foxtails.lakehead.feature.allapps.headerItemIndex
+import me.foxtails.lakehead.feature.allapps.sectionIndexForKey
 import me.foxtails.lakehead.feature.allapps.toAlphabetPickerState
 import me.foxtails.lakehead.feature.allapps.toAppSections
 import me.foxtails.lakehead.feature.home.HomeCanvas
@@ -128,6 +131,10 @@ internal fun LauncherShell(
         (allAppsState as? AllAppsViewState.Loaded)?.entries?.toAppSections().orEmpty()
     }
 
+    // Hoisted LazyListState so the shell can scroll the All Apps list from
+    // the picker-letter callback without depending on AllAppsScreen internals.
+    val listState = rememberLazyListState()
+
     // P2 arbitration alongside the P4 top guard: picker-open wins (swipe held);
     // the axis lock is UNDECIDED at shell level because drag deltas live in the
     // page children, so this guard preserves `!blocksPager()` swipe behavior
@@ -171,9 +178,17 @@ internal fun LauncherShell(
                     picker = picker,
                     onPickerDismiss = { picker = picker?.copy(isOpen = false) },
                     onPickerLetterPicked = { letter ->
-                        onHeaderTap(letter)
+                        // Dismiss first, then look up the target section header
+                        // and scroll to it. scrollToItem is instant (not animated);
+                        // missing key is a no-op.
                         picker = picker?.copy(isOpen = false)
+                        val sectionIdx = pickerSections.sectionIndexForKey(letter)
+                        if (sectionIdx != null) {
+                            val itemIdx = pickerSections.headerItemIndex(sectionIdx)
+                            scope.launch { listState.scrollToItem(itemIdx) }
+                        }
                     },
+                    listState = listState,
                 )
 
                 else -> HomeCanvas(

@@ -178,6 +178,42 @@ class AllAppsRouteLoaderTest {
     }
 
     @Test
+    fun regen_preservesMembership() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val placements = listOf(
+            AppPlacement(homeId, ItemId("placed"), appA, LogicalPosition(0, 0), LogicalSpan(1, 1), ItemAvailability.AVAILABLE),
+        )
+        val repository = FakeReadRepository(LoadResult.Loaded(placements))
+        val catalogue = FakeCatalogue(listOf(
+            LauncherAppEntry(appA, "App A"),
+            LauncherAppEntry(appB, "App B"),
+        ))
+        val loader = allAppsLoader(repository, dispatcher, catalogue)
+        loader.start(this)
+        advanceUntilIdle()
+
+        val initial = loader.state.value as AllAppsViewState.Loaded
+        assertTrue(initial.entries[0].alreadyOnHome)
+        assertFalse(initial.entries[1].alreadyOnHome)
+
+        // Regen: appB removed, appC added — projectCurrent re-projects with existing membership.
+        catalogue.mutable.value = listOf(
+            LauncherAppEntry(appA, "App A"),
+            LauncherAppEntry(appC, "App C"),
+        )
+        advanceUntilIdle()
+
+        val regened = loader.state.value as AllAppsViewState.Loaded
+        assertEquals(2, regened.entries.size)
+        assertEquals(appA, regened.entries[0].identity)
+        assertTrue(regened.entries[0].alreadyOnHome)   // membership preserved
+        assertEquals(appC, regened.entries[1].identity)
+        assertFalse(regened.entries[1].alreadyOnHome)  // new app not on home
+        assertEquals(1, repository.reads)              // no extra repository read
+        loader.stop()
+    }
+
+    @Test
     fun allIconLookupsReturningNullPreservesLastGoodDecodedIcons() = runTest {
         val dispatcher = StandardTestDispatcher(testScheduler)
         var shouldReturnNull = false

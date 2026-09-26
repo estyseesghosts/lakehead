@@ -296,6 +296,121 @@ class AllAppsSectionsTest {
         )
     }
 
+    // ── sectionIndexForKey ───────────────────────────────────────────────
+
+    @Test
+    fun sectionIndexForKey_hash_returnsZero() {
+        val entries = listOf(
+            entry("1Password", pkg = "com.onepassword"),
+            entry("Apple", pkg = "com.apple"),
+        )
+        val sections = entries.toAppSections(collator)
+        assertEquals(0, sections.sectionIndexForKey("#"))
+    }
+
+    @Test
+    fun sectionIndexForKey_midSection_returnsCorrectIndex() {
+        val entries = listOf(
+            entry("Apple", pkg = "com.apple"),
+            entry("Banana", pkg = "com.banana"),
+            entry("Cherry", pkg = "com.cherry"),
+        )
+        val sections = entries.toAppSections(collator)
+        assertEquals(1, sections.sectionIndexForKey("B"))
+    }
+
+    @Test
+    fun sectionIndexForKey_lastSection_returnsLastIndex() {
+        val entries = listOf(
+            entry("Apple", pkg = "com.apple"),
+            entry("Banana", pkg = "com.banana"),
+            entry("Zebra", pkg = "com.zebra"),
+        )
+        val sections = entries.toAppSections(collator)
+        assertEquals(2, sections.sectionIndexForKey("Z"))
+    }
+
+    @Test
+    fun sectionIndexForKey_nonLatin_returnsCorrectIndex() {
+        val entries = listOf(
+            entry("Apple", pkg = "com.apple"),
+            entry("Яблоко", pkg = "com.cyrillic"),
+        )
+        val sections = entries.toAppSections(collator)
+        assertEquals(1, sections.sectionIndexForKey("Я"))
+    }
+
+    @Test
+    fun sectionIndexForKey_missing_returnsNull() {
+        val entries = listOf(
+            entry("Apple", pkg = "com.apple"),
+            entry("Banana", pkg = "com.banana"),
+        )
+        val sections = entries.toAppSections(collator)
+        assertEquals(null, sections.sectionIndexForKey("Z"))
+    }
+
+    @Test
+    fun sectionIndexForKey_emptySections_returnsNull() {
+        val sections = emptyList<AppSection>()
+        assertEquals(null, sections.sectionIndexForKey("A"))
+    }
+
+    @Test
+    fun sectionIndexForKey_singleSection_returnsZero() {
+        val entries = listOf(entry("Alpha", pkg = "com.alpha"))
+        val sections = entries.toAppSections(collator)
+        assertEquals(0, sections.sectionIndexForKey("A"))
+    }
+
+    // ── headerItemIndex ──────────────────────────────────────────────────
+
+    @Test
+    fun headerItemIndex_firstSection_returnsZero() {
+        val entries = listOf(
+            entry("Apple", pkg = "com.apple"),
+            entry("Avocado", pkg = "com.avocado"),
+            entry("Banana", pkg = "com.banana"),
+        )
+        val sections = entries.toAppSections(collator)
+        assertEquals(0, sections.headerItemIndex(0))
+    }
+
+    @Test
+    fun headerItemIndex_secondSection_skipsFirstHeaderAndApps() {
+        val entries = listOf(
+            entry("Apple", pkg = "com.apple"),
+            entry("Avocado", pkg = "com.avocado"),
+            entry("Banana", pkg = "com.banana"),
+        )
+        val sections = entries.toAppSections(collator)
+        // Section A has 2 apps → header at 0, apps at 1,2 → Section B header at 3
+        assertEquals(3, sections.headerItemIndex(1))
+    }
+
+    @Test
+    fun headerItemIndex_singleAppSection_returnsZero() {
+        val entries = listOf(entry("Only", pkg = "com.only"))
+        val sections = entries.toAppSections(collator)
+        assertEquals(0, sections.headerItemIndex(0))
+    }
+
+    @Test
+    fun headerItemIndex_hashThenLatin_headersAtCorrectIndices() {
+        val entries = listOf(
+            entry("1Password", pkg = "com.onepassword"),
+            entry("9GAG", pkg = "com.ninegag"),
+            entry("Apple", pkg = "com.apple"),
+            entry("Banana", pkg = "com.banana"),
+            entry("Berry", pkg = "com.berry"),
+        )
+        val sections = entries.toAppSections(collator)
+        // #: 2 apps → header 0, apps 1-2 → A header 3, A: 1 app → app 4 → B header 5
+        assertEquals(0, sections.headerItemIndex(0))     // #
+        assertEquals(3, sections.headerItemIndex(1))     // A
+        assertEquals(5, sections.headerItemIndex(2))     // B
+    }
+
     // ── AppSection data class: non-empty invariant ───────────────────────
 
     @Test(expected = IllegalArgumentException::class)

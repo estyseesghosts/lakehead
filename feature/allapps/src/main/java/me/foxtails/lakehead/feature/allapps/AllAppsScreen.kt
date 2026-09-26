@@ -9,6 +9,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ImageBitmap
@@ -73,7 +74,46 @@ fun AllAppsScreen(
                         .padding(horizontal = 16.dp, vertical = 24.dp),
                 )
             } else {
+                val anchorState = remember { AnchorRestoreState() }
+
+                // Capture anchor before sections recomputation: uses the PREVIOUS
+                // sections (still in anchorState) and the current listState (which
+                // still reflects the old LazyColumn layout).
+                if (anchorState.lastEntries != null &&
+                    anchorState.lastEntries != state.entries &&
+                    anchorState.lastSections.isNotEmpty()
+                ) {
+                    anchorState.capturedAnchor = deriveAnchor(listState, anchorState.lastSections)
+                }
+
                 val sections = remember(state.entries) { state.entries.toAppSections() }
+
+                // Snapshot for next recomposition.
+                anchorState.lastEntries = state.entries
+                anchorState.lastSections = sections
+
+                // Restore scroll position after section regen: prefer the exact
+                // entry if it still exists, else fall back to the section header.
+                // Empty sections → null anchor → no-op.
+                LaunchedEffect(sections) {
+                    val anchor = anchorState.capturedAnchor
+                    if (anchor != null && sections.isNotEmpty()) {
+                        val entryIndex = if (anchor.entryKey != null) {
+                            findEntryLazyIndex(sections, anchor.entryKey)
+                        } else null
+
+                        if (entryIndex != null) {
+                            listState.animateScrollToItem(entryIndex)
+                        } else {
+                            val headerIndex = findSectionHeaderLazyIndex(sections, anchor.sectionKey)
+                            if (headerIndex != null) {
+                                listState.animateScrollToItem(headerIndex)
+                            }
+                        }
+                    }
+                    anchorState.capturedAnchor = null
+                }
+
                 if (picker != null) {
                     AlphabetPickerOverlay(
                         picker = picker,
@@ -127,6 +167,99 @@ const val ALL_APPS_LIST_TAG: String = "allapps-list"
  */
 internal fun AllAppsEntry.rowKey(): String =
     "${identity.profileId.value}\u001F${identity.component.packageName}\u001F${identity.component.className}"
+
+/**
+ * Captured scroll-position anchor for restoring the All Apps list after a section regen.
+ *
+ * [entryKey] is the [rowKey] of the first visible entry, or null when the first visible item
+ * was a section header. [sectionKey] is the section key of that entry's parent section,
+ * or the header's own section key when [entryKey] is null.
+ */
+internal data class AllAppsAnchor(
+    val entryKey: String?,
+    val sectionKey: String,
+)
+
+/**
+ * Mutable holder for anchor capture/restore across recompositions.
+ *
+ * Not a Compose State: field writes do not trigger recomposition. The [LaunchedEffect] keyed
+ * on sections handles restore; the composable reads [capturedAnchor] after composition.
+ */
+private class AnchorRestoreState {
+    var lastEntries: List<AllAppsEntry>? = null
+    var lastSections: List<AppSection> = emptyList()
+    var capturedAnchor: AllAppsAnchor? = null
+}
+
+/**
+ * Derives a scroll anchor from the current visible items in [listState] and [sections].
+ *
+ * Scans visible items top-to-bottom: the first entry row yields an anchor with its entry key
+ * and parent section key; if only section headers are visible the anchor has null entry key;
+ * returns null when [sections] is empty or no items are visible.
+ */
+internal fun deriveAnchor(
+    listState: LazyListState,
+    sections: List<AppSection>,
+): AllAppsAnchor? {
+    val visibleItems = listState.layoutInfo.visibleItemsInfo
+    if (visibleItems.isEmpty() || sections.isEmpty()) return null
+
+    val entryToSection = buildMap<String, String> {
+        for (section in sections) {
+            for (app in section.apps) {
+                put(app.rowKey(), section.key)
+            }
+        }
+    }
+
+    var nearestSectionKey: String? = null
+    for (item in visibleItems) {
+        val key = item.key as? String ?: continue
+        if (key.startsWith("section:")) {
+            nearestSectionKey = key.removePrefix("section:")
+        } else {
+            val sectionKey = entryToSection[key] ?: nearestSectionKey
+            if (sectionKey != null) {
+                return AllAppsAnchor(entryKey = key, sectionKey = sectionKey)
+            }
+        }
+    }
+
+    if (nearestSectionKey != null) {
+        return AllAppsAnchor(entryKey = null, sectionKey = nearestSectionKey)
+    }
+
+    return null
+}
+
+/**
+ * Flat-list index of an entry with [entryKey] in [sections] (headers + entries), or null.
+ */
+internal fun findEntryLazyIndex(sections: List<AppSection>, entryKey: String): Int? {
+    var index = 0
+    for (section in sections) {
+        index++ // section header
+        for (entry in section.apps) {
+            if (entry.rowKey() == entryKey) return index
+            index++
+        }
+    }
+    return null
+}
+
+/**
+ * Flat-list index of a section header with [sectionKey] in [sections], or null.
+ */
+internal fun findSectionHeaderLazyIndex(sections: List<AppSection>, sectionKey: String): Int? {
+    var index = 0
+    for (section in sections) {
+        if (section.key == sectionKey) return index
+        index += 1 + section.apps.size
+    }
+    return null
+}
 
 /**
  * Grouped list body shared by the bare and picker-wrapped presentations.

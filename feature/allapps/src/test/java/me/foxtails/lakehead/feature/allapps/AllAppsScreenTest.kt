@@ -1,6 +1,10 @@
 package me.foxtails.lakehead.feature.allapps
 
 import android.graphics.Bitmap
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.semantics.Role
@@ -25,6 +29,8 @@ import me.foxtails.lakehead.core.model.ComponentIdentity
 import me.foxtails.lakehead.core.model.ProfileId
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -63,6 +69,7 @@ class AllAppsScreenTest {
         icons: Map<AppIdentity, ImageBitmap> = emptyMap(),
         onLaunchApp: (AppIdentity) -> Unit = {},
         onAddToHome: (AppIdentity) -> Unit = {},
+        onHeaderTap: (String) -> Unit = {},
     ) {
         composeRule.setContent {
             LauncherTheme {
@@ -71,6 +78,7 @@ class AllAppsScreenTest {
                     icons = icons,
                     onLaunchApp = onLaunchApp,
                     onAddToHome = onAddToHome,
+                    onHeaderTap = onHeaderTap,
                 )
             }
         }
@@ -173,21 +181,24 @@ class AllAppsScreenTest {
     }
 
     @Test
-    fun order_matchesInputOrder() {
-        val entries = listOf(
-            entry(identity("0", "com.example.zebra", "com.example.zebra.Main"), "Zebra"),
-            entry(identity("0", "com.example.apple", "com.example.apple.Main"), "Apple"),
-            entry(identity("0", "com.example.mango", "com.example.mango.Main"), "Mango"),
-        )
+    fun order_followsSectionOrder_withInputOrderWithinSection() {
+        val zebra = entry(identity("0", "com.example.zebra", "com.example.zebra.Main"), "Zebra")
+        val apple = entry(identity("0", "com.example.apple", "com.example.apple.Main"), "Apple")
+        val apricot = entry(identity("0", "com.example.apricot", "com.example.apricot.Main"), "Apricot")
+        val mango = entry(identity("0", "com.example.mango", "com.example.mango.Main"), "Mango")
+        // Input order deliberately unsorted: sections A, M, Z render in section order with
+        // input order preserved within a section (Apple above Apricot).
+        val entries = listOf(zebra, apple, apricot, mango)
         setScreen(AllAppsViewState.Loaded(entries))
 
-        val tops = entries.map { row ->
-            composeRule.onNodeWithContentDescription(row.label)
+        val topsByLabel = entries.associate { row ->
+            row.label to composeRule.onNodeWithContentDescription(row.label)
                 .assertIsDisplayed()
                 .fetchSemanticsNode().positionInRoot.y
         }
+        val tops = listOf("Apple", "Apricot", "Mango", "Zebra").map { topsByLabel.getValue(it) }
         assertTrue(
-            "rows must render top-to-bottom in catalogue order: $tops",
+            "rows must render section-by-section with input order within a section: $topsByLabel",
             tops.zipWithNext().all { (first, second) -> first < second },
         )
     }
@@ -418,8 +429,10 @@ class AllAppsScreenTest {
         // Behavior evidence: icons arrive as already-decoded ImageBitmap snapshots keyed by
         // full identity; the feature never calls LauncherApps/PackageManager/decode/database.
         // Signature evidence: inspect the feature AllAppsScreen entry point for forbidden types.
+        // The compiler mangles the JVM name with a value-class suffix (e.g. AllAppsScreen-PfoAEA0
+        // for the Dp bottomClearance), so match by prefix and skip the synthetic $default stub.
         val methods = Class.forName("me.foxtails.lakehead.feature.allapps.AllAppsScreenKt").declaredMethods
-            .filter { it.name == "AllAppsScreen" }
+            .filter { it.name.startsWith("AllAppsScreen") && !it.isSynthetic }
         assertTrue("AllAppsScreen entry point must exist", methods.isNotEmpty())
         val signature = methods.joinToString("\n") { method ->
             method.genericParameterTypes.joinToString(",") { it.typeName }
@@ -442,5 +455,208 @@ class AllAppsScreenTest {
             "AllAppsScreen must accept pre-decoded ImageBitmap snapshots: $signature",
             signature.contains("ImageBitmap"),
         )
+    }
+
+    // ── P3 section headers ────────────────────────────────────────────────
+
+    @Test
+    fun headersRenderOncePerSection() {
+        setScreen(
+            AllAppsViewState.Loaded(
+                listOf(
+                    entry(personal, "Banana"),
+                    entry(work, "Apple"),
+                    entry(identity("0", "com.example.apricot", "com.example.apricot.Main"), "Apricot"),
+                ),
+            ),
+        )
+
+        // Sections A + B, one header each; "A, application section" names both A rows.
+        composeRule.onAllNodesWithTag(ALL_APPS_SECTION_HEADER_TAG).assertCountEquals(2)
+        composeRule.onNodeWithContentDescription("A, application section").assertIsDisplayed()
+        composeRule.onNodeWithContentDescription("B, application section").assertIsDisplayed()
+        composeRule.onNodeWithText("Apple").assertIsDisplayed()
+        composeRule.onNodeWithText("Apricot").assertIsDisplayed()
+        composeRule.onNodeWithText("Banana").assertIsDisplayed()
+    }
+
+    @Test
+    fun headerTapDispatches() {
+        var tapped: String? = null
+        setScreen(
+            AllAppsViewState.Loaded(
+                listOf(
+                    entry(personal, "Banana"),
+                    entry(work, "Apple"),
+                ),
+            ),
+            onHeaderTap = { tapped = it },
+        )
+
+        composeRule.onNodeWithContentDescription("B, application section").performClick()
+        composeRule.runOnIdle { assertEquals("B", tapped) }
+    }
+
+    @Test
+    fun header_buttonRole_with48dpMinHeight() {
+        setScreen(AllAppsViewState.Loaded(listOf(entry(personal, "Personal App"))))
+
+        composeRule.onNodeWithContentDescription("P, application section")
+            .assertIsDisplayed()
+            .assertHeightIsAtLeast(48.dp)
+        val role = composeRule.onNodeWithContentDescription("P, application section")
+            .fetchSemanticsNode().config[SemanticsProperties.Role]
+        assertEquals(Role.Button, role)
+        val node = composeRule.onNodeWithContentDescription("P, application section")
+            .fetchSemanticsNode()
+        assertTrue(
+            "header must expose a click action",
+            node.config.contains(SemanticsActions.OnClick),
+        )
+    }
+
+    @Test
+    fun emptyNoHeaders() {
+        setScreen(AllAppsViewState.Loaded(emptyList()))
+
+        composeRule.onNodeWithText(EMPTY_TEXT).assertIsDisplayed()
+        composeRule.onAllNodesWithTag(ALL_APPS_SECTION_HEADER_TAG).assertCountEquals(0)
+    }
+
+    @Test
+    fun singleStillHeadered() {
+        setScreen(AllAppsViewState.Loaded(listOf(entry(personal, "Solo App"))))
+
+        composeRule.onAllNodesWithTag(ALL_APPS_SECTION_HEADER_TAG).assertCountEquals(1)
+        composeRule.onNodeWithContentDescription("S, application section").assertIsDisplayed()
+        composeRule.onNodeWithText("Solo App").assertIsDisplayed()
+    }
+
+    // ── P6 anchor derive/restore ───────────────────────────────────────────
+
+    @Test
+    fun anchor_derive_row_returnsEntryKeyAndSectionKey() {
+        val alpha = entry(identity("0", "com.alpha", "com.alpha.Main"), "Alpha")
+        val apple = entry(identity("0", "com.apple", "com.apple.Main"), "Apple")
+        val banana = entry(identity("0", "com.banana", "com.banana.Main"), "Banana")
+        val entries = listOf(alpha, apple, banana)
+        val sections = entries.toAppSections()
+
+        // Flat: [header A(0), Alpha(1), Apple(2), header B(3), Banana(4)]
+        // Start at index 1 → first visible item is Alpha (a row entry).
+        val listState = LazyListState(firstVisibleItemIndex = 1)
+        composeRule.setContent {
+            LauncherTheme {
+                AllAppsScreen(
+                    state = AllAppsViewState.Loaded(entries),
+                    icons = emptyMap(),
+                    onLaunchApp = {},
+                    onAddToHome = {},
+                    listState = listState,
+                )
+            }
+        }
+        composeRule.waitForIdle()
+
+        val anchor = deriveAnchor(listState, sections)
+        assertNotNull("Anchor must not be null when entries are visible", anchor)
+        assertEquals(alpha.rowKey(), anchor!!.entryKey)
+        assertEquals("A", anchor.sectionKey)
+    }
+
+    @Test
+    fun anchor_derive_header_returnsNullEntryKeyAndCorrectSectionKey() {
+        val alpha = entry(identity("0", "com.alpha", "com.alpha.Main"), "Alpha")
+        val apple = entry(identity("0", "com.apple", "com.apple.Main"), "Apple")
+        val banana = entry(identity("0", "com.banana", "com.banana.Main"), "Banana")
+        val entries = listOf(alpha, apple, banana)
+        val sections = entries.toAppSections()
+
+        // Flat: [header A(0), Alpha(1), Apple(2), header B(3), Banana(4)]
+        // findSectionHeaderLazyIndex / findEntryLazyIndex are pure functions that
+        // compute flat-list indices without needing a composed LazyListState.
+        assertEquals(0, findSectionHeaderLazyIndex(sections, "A"))
+        assertEquals(3, findSectionHeaderLazyIndex(sections, "B"))
+        assertNull(findSectionHeaderLazyIndex(sections, "Z"))
+
+        assertEquals(1, findEntryLazyIndex(sections, alpha.rowKey()))
+        assertEquals(2, findEntryLazyIndex(sections, apple.rowKey()))
+        assertEquals(4, findEntryLazyIndex(sections, banana.rowKey()))
+        assertNull(findEntryLazyIndex(sections, "nonexistent-key"))
+
+        // AllAppsAnchor with null entryKey represents a section-header-only anchor.
+        val headerAnchor = AllAppsAnchor(entryKey = null, sectionKey = "A")
+        assertNull(headerAnchor.entryKey)
+        assertEquals("A", headerAnchor.sectionKey)
+    }
+
+    @Test
+    fun anchor_restore_removedEntry_fallsBackToSectionHeader() {
+        val alpha = entry(identity("0", "com.alpha", "com.alpha.Main"), "Alpha")
+        val apple = entry(identity("0", "com.apple", "com.apple.Main"), "Apple")
+        val banana = entry(identity("0", "com.banana", "com.banana.Main"), "Banana")
+
+        var viewState: AllAppsViewState by mutableStateOf(
+            AllAppsViewState.Loaded(listOf(alpha, apple, banana)),
+        )
+
+        // Flat: [header A(0), Alpha(1), Apple(2), header B(3), Banana(4)]
+        // Start at index 2 → Apple (row in section A).
+        val listState = LazyListState(firstVisibleItemIndex = 2)
+        composeRule.setContent {
+            LauncherTheme {
+                AllAppsScreen(
+                    state = viewState,
+                    icons = emptyMap(),
+                    onLaunchApp = {},
+                    onAddToHome = {},
+                    listState = listState,
+                )
+            }
+        }
+        composeRule.waitForIdle()
+
+        // Remove Apple: new sections [A(Alpha), B(Banana)].
+        // Anchor was for Apple in section A; entry is gone → restore falls back to
+        // section A header (index 0).
+        viewState = AllAppsViewState.Loaded(listOf(alpha, banana))
+        composeRule.waitForIdle()
+
+        // Section A header must be visible after restore.
+        composeRule.onNodeWithContentDescription("A, application section").assertIsDisplayed()
+    }
+
+    @Test
+    fun anchor_derive_empty_returnsNull() {
+        val listState = LazyListState()
+        assertNull(deriveAnchor(listState, emptyList()))
+    }
+
+    @Test
+    fun anchor_derive_single_returnsCorrectAnchor() {
+        val solo = entry(identity("0", "com.solo", "com.solo.Main"), "Solo App")
+        val entries = listOf(solo)
+        val sections = entries.toAppSections()
+
+        // Flat: [header S(0), Solo App(1)]
+        // Start at index 1 → Solo App (a row).
+        val listState = LazyListState(firstVisibleItemIndex = 1)
+        composeRule.setContent {
+            LauncherTheme {
+                AllAppsScreen(
+                    state = AllAppsViewState.Loaded(entries),
+                    icons = emptyMap(),
+                    onLaunchApp = {},
+                    onAddToHome = {},
+                    listState = listState,
+                )
+            }
+        }
+        composeRule.waitForIdle()
+
+        val anchor = deriveAnchor(listState, sections)
+        assertNotNull("Anchor must not be null for single-entry list", anchor)
+        assertEquals(solo.rowKey(), anchor!!.entryKey)
+        assertEquals("S", anchor.sectionKey)
     }
 }
