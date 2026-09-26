@@ -28,6 +28,7 @@ import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import me.foxtails.lakehead.core.designsystem.SquareCellGeometry
 import me.foxtails.lakehead.core.designsystem.RESIZE_HANDLE_TAG
+import me.foxtails.lakehead.core.designsystem.REMOVE_BUTTON_TAG
 import me.foxtails.lakehead.core.grid.GridColumns
 import me.foxtails.lakehead.core.grid.GridRowWindow
 import me.foxtails.lakehead.core.grid.GridVerticalExtent
@@ -408,7 +409,9 @@ class HomeCanvasTest {
         composeRule.onNodeWithTag(MOVE_CANDIDATE_OVERLAY_TAG, useUnmergedTree = true)
             .assertDoesNotExist()
         composeRule.onNodeWithTag(RESIZE_HANDLE_TAG, useUnmergedTree = true)
-            .assertDoesNotExist()
+            .assertIsDisplayed()
+        composeRule.onNodeWithTag(REMOVE_BUTTON_TAG, useUnmergedTree = true)
+            .assertIsDisplayed()
         // Tiles retain click for select; body retains long-click for retarget.
         val regions = composeRule.onAllNodesWithContentDescription("Movable App")
         regions.assertCountEquals(2)
@@ -447,7 +450,7 @@ class HomeCanvasTest {
     }
 
     @Test
-    fun longPressLaunchable_entersEditingWithoutResizeHandle() {
+    fun longPressLaunchable_entersEditingWithCornerControls() {
         val tiles = listOf(tile("a", personal, "Resizable App", column = 0, row = 0))
         setCanvas(loaded(tiles))
         composeRule.waitForIdle()
@@ -460,12 +463,14 @@ class HomeCanvasTest {
 
         composeRule.onNodeWithText("Resizable App").assertDoesNotExist()
 
-        // W1 wiggle-editing enters Editing without a move session: no resize
-        // handle and no move overlay; Editing label semantics mark the selection.
+        // W1 wiggle-editing enters Editing without a move session; both corner
+        // controls are already available while the selected tile is editing.
         composeRule.onNode(hasStateDescription("Editing Resizable App, row 0 column 0"))
             .assertIsDisplayed()
         composeRule.onNodeWithTag(RESIZE_HANDLE_TAG, useUnmergedTree = true)
-            .assertDoesNotExist()
+            .assertIsDisplayed()
+        composeRule.onNodeWithTag(REMOVE_BUTTON_TAG, useUnmergedTree = true)
+            .assertIsDisplayed()
         composeRule.onNodeWithTag(MOVE_CANDIDATE_OVERLAY_TAG, useUnmergedTree = true)
             .assertDoesNotExist()
     }
@@ -532,7 +537,9 @@ class HomeCanvasTest {
         composeRule.onNodeWithTag(MOVE_CANDIDATE_OVERLAY_TAG, useUnmergedTree = true)
             .assertDoesNotExist()
         composeRule.onNodeWithTag(RESIZE_HANDLE_TAG, useUnmergedTree = true)
-            .assertDoesNotExist()
+            .assertIsDisplayed()
+        composeRule.onNodeWithTag(REMOVE_BUTTON_TAG, useUnmergedTree = true)
+            .assertIsDisplayed()
     }
 
     // ---- W1 recess/select/exit ----

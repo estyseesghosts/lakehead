@@ -23,6 +23,16 @@ class IsInHandleTest {
     }
 
     @Test
+    fun centeredVisualTarget_hasReachableInwardHalfAtTileEdge() {
+        // The 32dp visual circle and 48dp touch target are centered on (right,
+        // bottom). Only the inward half can be routed by the parent at an edge;
+        // the full inward 48px square remains reachable without a dead zone.
+        assertTrue(isInHandle(200f, 200f, bounds, handlePx))
+        assertTrue(isInHandle(176f, 176f, bounds, handlePx))
+        assertTrue(isInHandle(152f, 152f, bounds, handlePx))
+    }
+
+    @Test
     fun handleTopLeftEdge_isInclusive() {
         // Handle rect is [152, 200] x [152, 200].
         assertTrue(isInHandle(152f, 152f, bounds, handlePx))

@@ -42,7 +42,7 @@ fun RemoveButton(
     val scheme = MaterialTheme.colorScheme
     Box(
         modifier = modifier
-            .size(REMOVE_BUTTON_TOUCH_SIZE.dp)
+            .size(CORNER_CONTROL_TOUCH_SIZE.dp)
             .testTag(REMOVE_BUTTON_TAG)
             .semantics(mergeDescendants = true) {
                 this.contentDescription = "Remove $label"
@@ -55,7 +55,7 @@ fun RemoveButton(
     ) {
         Box(
             modifier = Modifier
-                .size(REMOVE_BUTTON_VISUAL_SIZE.dp)
+                .size(CORNER_CONTROL_VISUAL_SIZE.dp)
                 .border(
                     width = 2.dp,
                     color = scheme.outline,
@@ -79,8 +79,8 @@ fun RemoveButton(
 /** Test tag on the remove-button touch target. */
 const val REMOVE_BUTTON_TAG: String = "remove-button"
 
-/** Touch-target edge of [RemoveButton] in dp. */
-private const val REMOVE_BUTTON_TOUCH_SIZE = 48
+/** Shared touch-target edge of the home corner controls in dp. */
+const val CORNER_CONTROL_TOUCH_SIZE = 48
 
-/** Visual circle diameter of [RemoveButton] in dp (within the 32–40dp range). */
-private const val REMOVE_BUTTON_VISUAL_SIZE = 32
+/** Shared visual circle diameter of the home corner controls in dp. */
+const val CORNER_CONTROL_VISUAL_SIZE = 32

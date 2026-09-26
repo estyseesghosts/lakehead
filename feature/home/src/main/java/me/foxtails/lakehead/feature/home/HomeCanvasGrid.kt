@@ -31,6 +31,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import me.foxtails.lakehead.core.designsystem.AppTileDefaults
+import me.foxtails.lakehead.core.designsystem.CORNER_CONTROL_TOUCH_SIZE
 import me.foxtails.lakehead.core.designsystem.GestureArbitration
 import me.foxtails.lakehead.core.designsystem.GestureArbitration.LockedAxis
 import me.foxtails.lakehead.core.designsystem.PixelRect
@@ -101,9 +102,10 @@ data class HomeCanvasViewportStyle(
  *   horizontal swipe pages instead of scrolling), pointer drags update the
  *   candidate via [MoveDragMath] with validity from `core:grid`, a
  *   non-interactive outline marks the candidate, back cancels, and drag end commits via
- *   [onMoveTile] when the candidate differs from the origin. A single bottom-right
- *   (BR-only, top-left fixed) resize handle switches to RESIZE mode when the
- *   press-hold/slop position hits its [RESIZE_TOUCH_DP] inward corner rect; handle
+ *   [onMoveTile] when the candidate differs from the origin. A single bottom-right,
+ *   center-pinned resize handle switches to RESIZE mode when the pointer-down/start
+ *   position is in its [RESIZE_TOUCH_DP] inward corner rect; it never promotes a
+ *   MOVE route based on the later slop position. The handle
  *   drags update the preview span via [ResizeDragMath] and [RenderableSpans.quantize]
  *   with last-valid hold (blocked proposals keep the preview, overlay flips to
  *   error), and drag end commits the held last-valid span via [onResizeTile]
@@ -112,11 +114,13 @@ data class HomeCanvasViewportStyle(
  *   mid-gesture (gated for W4). Persistence itself stays
  *   with the caller: this grid only reports the committed [ItemId] and [LogicalPosition] or
  *   [LogicalSpan].
- * - A remove affordance floats as a sibling overlay over the active tile in both MOVE
- *   and RESIZE modes: a 48dp [RemoveButton] (`"Remove {label}"`) positioned via
- *   [removeButtonOffset] (1×1 center pinned to the tile's top-left corner, larger
- *   spans centered on the tile). Tapping it reports [onRemoveTile] with the active
- *   [ItemId] only; the grid performs no persistence delete and issues no move/resize.
+ * - Corner controls appear for a selected [HomeInteractionController.Editing] tile as
+ *   well as [HomeEditSession.Active]. Each uses a 32dp visual circle in a 48dp touch
+ *   target: [RemoveButton] is top-right center pinned and [ResizeHandle] is bottom-right
+ *   center pinned via [cornerControlOffset]. The remove affordance floats as a sibling
+ *   overlay in both MOVE and RESIZE modes and is announced as `"Remove {label}"`.
+ *   Tapping it reports [onRemoveTile] with the selected/active [ItemId] only; the
+ *   grid performs no persistence delete and issues no move/resize.
  * - B1: swipe-to-open shortcuts are removed — no idle/editing flick opens a
  *   shortcut surface and this grid exposes no swipe rows. Shortcuts return in
  *   B4 as an edit-mode menu above the selected tile: [EditShortcutMenu] follows
@@ -378,8 +382,9 @@ internal fun HomeCanvasGrid(
                     },
                 )
             }
-            // Latest session for drag callbacks: the pointerInput key stays stable for the
-            // session lifetime (item id) so in-flight drags survive candidate recompositions.
+            // Latest session for drag callbacks: drag pointerInput is keyed by
+            // loaded.requestedHomeId (not item id), so it stays stable through candidate
+            // recomposition and resets on home switch.
             val sessionState = rememberUpdatedState(editSession)
             val interactionSnapshot = rememberUpdatedState(interaction)
             // Snapshot holder for the Unit-keyed idle gesture observer below: tiles,
@@ -509,8 +514,9 @@ internal fun HomeCanvasGrid(
             // visual-only; this handler hit-tests the pointer position against the handle
             // corner once at gesture start (after slop) and routes to RESIZE or MOVE.
             // A single detector avoids the slop competition that made a separate
-            // handle detector unreachable. Keyed on the active item id (stable for the
-            // session lifetime) so in-flight drags survive candidate recompositions;
+            // handle detector unreachable. Drag pointerInput is keyed by
+            // loaded.requestedHomeId (not item id), so the gesture scope stays stable
+            // through candidate recomposition and resets on home switch;
             // scroll is disabled while active so scrollState/geometry stay fixed.
             //
             // This handler is also used for a selected tile in wiggle editing;
@@ -546,8 +552,27 @@ internal fun HomeCanvasGrid(
                             downCell.row in tile.position.row until
                             tile.position.row + tile.span.rows
                     }
+                    val selectedTile = (interactionAtDown as? HomeInteractionController.Editing)
+                        ?.selectedId
+                        ?.let { selectedId -> hitSnapshot.tiles.firstOrNull { it.itemId == selectedId } }
+                    val selectedBounds = selectedTile?.let { tile ->
+                        TileBounds.signedBounds(
+                            column = tile.position.column,
+                            row = tile.position.row.toLong(),
+                            span = GridSpan(tile.span.columns, tile.span.rows),
+                            geometry = geometry,
+                            originX = originX,
+                            originRow = rowOrigin,
+                            originYPx = originYPx,
+                        )
+                    }
+                    val selectedResize = selectedBounds?.let {
+                        isInHandle(startPos.x, startPos.y, it, with(density) { RESIZE_TOUCH_DP.dp.roundToPx() })
+                    } == true
                     val selectedDrag = interactionAtDown is HomeInteractionController.Editing &&
-                        interactionAtDown.selectedId == downTile?.itemId
+                        interactionAtDown.selectedId == (downTile?.itemId ?: selectedTile?.itemId) &&
+                        (downTile != null || selectedResize)
+                    val dragTile = downTile ?: selectedTile?.takeIf { selectedResize }
                     var currentSession: HomeEditSession = sessionState.value
                     var sessionAtDown = currentSession as? HomeEditSession.Active
                     if (sessionAtDown == null && !selectedDrag) return@awaitEachGesture
@@ -581,7 +606,7 @@ internal fun HomeCanvasGrid(
                     if (sessionAtDown == null) {
                         val entered = currentSession.enterSelectedDrag(
                             interaction = interactionAtDown,
-                            tile = downTile,
+                            tile = dragTile,
                             placements = loaded.tiles,
                             columns = columns,
                             rows = rows,
@@ -841,28 +866,33 @@ internal fun HomeCanvasGrid(
                         originYPx = originYPx,
                     )
                 }
-                // Resize handle overlay: positioned over the active tile's bottom-right
-                // corner INSIDE the scrolling content so it shares the tiles/overlays
+                // Resize handle overlay: the centered 48dp visual/touch Box is positioned
+                // over the selected/active tile's bottom-right corner. It is separate from
+                // the parent's inward-only 48dp routing hit rect: the parent receives only
+                // points in the tile's [right - touch, right] × [bottom - touch, bottom]
+                // corner, while this Box remains center-pinned and may extend outward.
+                // It is INSIDE the scrolling content so it shares the tiles/overlays
                 // coordinate space and tracks scroll. W3 single-BR-only: the touch
                 // target is exactly RESIZE_TOUCH_DP inward over the corner
                 // ([right - touch, right] x [bottom - touch, bottom]), never
                 // outward, so edge tiles never clip.
-                if (active != null) {
-                    val activeTile = loaded.tiles.find { it.itemId == active.itemId }
+                val controlItemId = active?.itemId ?: interactionEditing?.selectedId
+                if (controlItemId != null) {
+                    val activeTile = loaded.tiles.find { it.itemId == controlItemId }
                     if (activeTile != null) {
                         // Handle tracks the live last-valid preview span (not the
                         // persisted span) so it stays on the growing/shrinking
                         // corner during a resize drag.
                         // Signed frame: already rebased around `rowOrigin` with the G2
                         // rest offset, so its top is final Box content coordinates.
-                        val previewSpan = if (active.mode == EditMode.RESIZE) {
-                            active.lastValidSpan
-                        } else {
-                            active.candidateSpan
-                        }
+                        val previewSpan = if (active == null) {
+                            GridSpan(activeTile.span.columns, activeTile.span.rows)
+                        } else if (active.mode == EditMode.RESIZE) {
+                            GridSpan(active.lastValidSpan.columns, active.lastValidSpan.rows)
+                        } else GridSpan(active.candidateSpan.columns, active.candidateSpan.rows)
                         val tileBounds = TileBounds.signedBounds(
-                            column = active.origin.column,
-                            row = active.origin.row.toLong(),
+                            column = active?.origin?.column ?: activeTile.position.column,
+                            row = active?.origin?.row?.toLong() ?: activeTile.position.row.toLong(),
                             span = GridSpan(previewSpan.columns, previewSpan.rows),
                             geometry = geometry,
                             originX = originX,
@@ -870,15 +900,17 @@ internal fun HomeCanvasGrid(
                             originYPx = originYPx,
                         )
                         val touchPx = with(density) { RESIZE_TOUCH_DP.dp.roundToPx() }
-                        val handleTopPx = tileBounds.bottom - touchPx
-                        val handleLeftPx = tileBounds.right - touchPx
-                        val rebaseTop = handleTopPx
+                        val handleOffset = cornerControlOffset(
+                            tileBounds = tileBounds,
+                            controlSizePx = touchPx,
+                            corner = ControlCorner.BOTTOM_RIGHT,
+                        )
                         // Visual-only handle: the parent Box's unified drag handler
                         // hit-tests this corner and routes to RESIZE mode. No gesture
                         // detector here (a second detector loses the slop race).
                         Box(
                             modifier = Modifier
-                                .offset { IntOffset(handleLeftPx, rebaseTop) }
+                                .offset { handleOffset }
                                 .size(RESIZE_TOUCH_DP.dp),
                         ) {
                             ResizeHandle()
@@ -893,30 +925,27 @@ internal fun HomeCanvasGrid(
                         } else {
                             activeTile.label
                         }
-                        val buttonPx = with(density) { 48.dp.roundToPx() }
-                        val removeAbsolute = removeButtonOffset(
+                        val buttonPx = with(density) { CORNER_CONTROL_TOUCH_SIZE.dp.roundToPx() }
+                        val removeAbsolute = cornerControlOffset(
                             tileBounds = tileBounds,
-                            buttonSizePx = buttonPx,
-                            span = GridSpan(
-                                previewSpan.columns,
-                                previewSpan.rows,
-                            ),
+                            controlSizePx = buttonPx,
+                            corner = ControlCorner.TOP_RIGHT,
                         )
                         // Signed frame already carries the row origin + rest offset, so
                         // the remove anchor is final Box content coordinates.
                         val removeTop = removeAbsolute.y
                         Box(
                             modifier = Modifier
-                                .offset { IntOffset(removeAbsolute.x.coerceAtLeast(0), removeTop) }
-                                .size(48.dp),
+                                .offset { IntOffset(removeAbsolute.x, removeTop) }
+                                .size(CORNER_CONTROL_TOUCH_SIZE.dp),
                         ) {
                             RemoveButton(
                                 label = removeLabel,
                                 onRemove = {
-                                    onRemoveTile(active.itemId)
+                                    onRemoveTile(controlItemId)
                                     // B2: unpin selection → Editing(null) + cancel
                                     // Active → Idle; stays in wiggle-edit.
-                                    interaction = interaction.unpinIfSelected(active.itemId)
+                                    interaction = interaction.unpinIfSelected(controlItemId)
                                     editSession = editSession.cancel()
                                 },
                             )
@@ -962,10 +991,11 @@ internal fun HomeCanvasGrid(
  *
  * The resize handle's hit rect is exactly this size, extending INWARD over the
  * active tile's bottom-right corner (`[right - touch, right] x [bottom - touch,
- * bottom]`), never outward — edge tiles never clip. Visual marker stays 16dp
- * (see `ResizeHandle`); the surrounding touch square meets the ≥40dp minimum.
+ * bottom]`), never outward — edge tiles never clip. The visual marker is the shared
+ * 32dp circle (see `ResizeHandle`); the surrounding touch square is the shared 48dp
+ * target.
  */
-internal const val RESIZE_TOUCH_DP: Int = 48
+internal const val RESIZE_TOUCH_DP: Int = CORNER_CONTROL_TOUCH_SIZE
 
 /**
  * A1 hold predicate: transient home state that must hold pager swipe.
@@ -1321,7 +1351,11 @@ internal fun resizePreviewSpan(
  *
  * The handle occupies the bottom-right [handlePx] square of [originBounds]:
  * `x in [right - handlePx, right]` and `y in [bottom - handlePx, bottom]`
- * (inclusive). The bounds are the FIXED origin footprint snapshotted at gesture
+ * (inclusive). The centered visual/touch target extends outward from the corner,
+ * but the parent pointer route cannot receive points outside the tile at an edge.
+ * Therefore the parent deliberately uses this exact inward policy: the reachable
+ * portion is the full [right - handlePx, right] × [bottom - handlePx, bottom] square,
+ * with no visual dead zone inside the tile. The bounds are the FIXED origin footprint snapshotted at gesture
  * start, never the live candidate bounds that move during the drag. Pure math,
  * framework-free, so drag routing stays unit-testable and `core:grid` legality
  * stays untouched.
@@ -1389,58 +1423,41 @@ internal fun rebasedOverlayTop(
 }
 
 /**
- * Positions the remove affordance for the active tile in absolute content pixels.
+ * Positions a corner control for the selected/active tile in absolute content pixels.
  *
- * - 1×1 spans pin the button's center to the tile's top-left corner:
- *   `(left - button/2, top - button/2)` (integer division; may be negative on the
- *   first row/column — callers clamp for rendering so the target stays visible).
- * - Larger spans center the button on the tile:
- *   `(left + (width - button)/2, top + (height - button)/2)`.
+ * - [ControlCorner.TOP_RIGHT] pins the control center to `(right, top)`.
+ * - [ControlCorner.BOTTOM_RIGHT] pins the control center to `(right, bottom)`.
+ * In both cases the returned top-left is the corner minus half the control size;
+ * it may extend outside the tile because the visual contract is center-pinned.
  *
  * Pure math, framework-free; signed G3 callers pass a [SignedPixelFrame] via the
  * overload below (already rebased around the signed origin plus the rest offset).
- * [span] selects the rule; legality stays owned by `core:grid`.
+ * Legality stays owned by `core:grid`.
  */
-internal fun removeButtonOffset(
+internal enum class ControlCorner { TOP_RIGHT, BOTTOM_RIGHT }
+
+internal fun cornerControlOffset(
     tileBounds: PixelRect,
-    buttonSizePx: Int,
-    span: GridSpan,
+    controlSizePx: Int,
+    corner: ControlCorner,
 ): IntOffset {
-    require(buttonSizePx > 0) { "buttonSizePx must be positive" }
-    return if (span == GridSpan(1, 1)) {
-        IntOffset(
-            tileBounds.left - buttonSizePx / 2,
-            tileBounds.top - buttonSizePx / 2,
-        )
-    } else {
-        IntOffset(
-            tileBounds.left + (tileBounds.width - buttonSizePx) / 2,
-            tileBounds.top + (tileBounds.height - buttonSizePx) / 2,
-        )
-    }
+    require(controlSizePx > 0) { "controlSizePx must be positive" }
+    val top = if (corner == ControlCorner.TOP_RIGHT) tileBounds.top else tileBounds.bottom
+    return IntOffset(tileBounds.right - controlSizePx / 2, top - controlSizePx / 2)
 }
 
 /**
- * Signed-frame overload of [removeButtonOffset] for G3 renderer frames.
+ * Signed-frame overload of [cornerControlOffset] for G3 renderer frames.
  *
- * Same 1×1 pin vs larger-span center rule over a [SignedPixelFrame] (top may be
- * negative above the row origin). Pure math, framework-free.
+ * Same corner rule over a [SignedPixelFrame] (top may be negative above the row
+ * origin). Pure math, framework-free.
  */
-internal fun removeButtonOffset(
+internal fun cornerControlOffset(
     tileBounds: SignedPixelFrame,
-    buttonSizePx: Int,
-    span: GridSpan,
+    controlSizePx: Int,
+    corner: ControlCorner,
 ): IntOffset {
-    require(buttonSizePx > 0) { "buttonSizePx must be positive" }
-    return if (span == GridSpan(1, 1)) {
-        IntOffset(
-            tileBounds.left - buttonSizePx / 2,
-            tileBounds.top - buttonSizePx / 2,
-        )
-    } else {
-        IntOffset(
-            tileBounds.left + (tileBounds.widthPx - buttonSizePx) / 2,
-            tileBounds.top + (tileBounds.heightPx - buttonSizePx) / 2,
-        )
-    }
+    require(controlSizePx > 0) { "controlSizePx must be positive" }
+    val top = if (corner == ControlCorner.TOP_RIGHT) tileBounds.top else tileBounds.bottom
+    return IntOffset(tileBounds.right - controlSizePx / 2, top - controlSizePx / 2)
 }
