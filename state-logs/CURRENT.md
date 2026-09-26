@@ -1,10 +1,10 @@
 # Current execution state
-- Phase: Phase 3 + Phase 4 — **NEARLY COMPLETE**. Interaction + Persistent Edit Core committed. W2 + W4 pending commit.
-- Active objective: Phase 4 closeout — commit W2/W4, device manual validation, update to Phase 5 readiness.
-- Owner: Orchestrator → git_handler (commit) → device agent (manual validation).
-- Commit history (phase 3-4): `d26d583` (P2), `af81856` (S2), `7216176` (P5+absorbed), `5bd31be` (P6), `a45912e` (G4), `bffb743` (W1 controller), `44413f9` (W1 UI), `b783240` (W3), `633a47f` (G5), `82d499d` (S4). Prior phase 1-2: `5bd0076`→`f950240`. Prior colour: `3dc1843` and earlier.
-- Latest handoff: [`handoffs/2026-09-26-phase3-4-complete.md`](handoffs/2026-09-26-phase3-4-complete.md).
-- Device: R5CN70E2SGV SM-G986W — Flows G/H PASS, tap launches, picker blocks. Phase 3 S2/G4/P5 NOT-RUN. Phase 4 device NOT-RUN.
-- Build/test/lint: **ALL GREEN** (assembleDebug 303 tasks, test 221 tasks, lint 360 tasks). All audits pass.
-- Known issues: W2 P0 fixed, G4 sign fixed, stale tests fixed. LauncherDimensions harness workaround. Seeded timeout regression non-deterministic.
-- Exact next operation: Commit W2 + W4 worktree changes, then device manual validation for Phase 4 (drag/resize/unpin/origin) on SM-G986W, then update CURRENT to Phase 5 readiness.
+- Phase: Fix-plan Phase 0+A+B — **CODE-COMPLETE, DEVICE-PENDING**. Code + unit validation complete; device proof NOT-RUN for all of Phase A and Phase B.
+- Active objective: Device validation Phase A+B on SM-G986W, then fix-plan Phase C (C1->C2->C3 feed host).
+- Owner: device agent (manual validation).
+- Commit history (fix-plan): `3fc4aea` (Phase-0 closeout), `5eec785` (A1), `8937e95` (A2), `5a014ec` (A3), `e6b0115` (B1), `d47fa7c` (B2), `0dd00ec` (B3), `0959b0b` (B4, HEAD). Branch `main`.
+- Latest handoff: [`handoffs/2026-09-26-fixplan-AB-complete.md`](handoffs/2026-09-26-fixplan-AB-complete.md).
+- Device: SM-G986W R5CN70E2SGV — NOT-RUN for Phase A+B (edit swipe block, tile vs gap paging, top vs bottom region, flick nothing, move commit, resize block, menu above). B4 9 compose androidTest NOT-RUN.
+- Build/test/lint: **SUCCESS** — assembleDebug SUCCESS (303 tasks), test SUCCESS (221 tasks, 898 tests 0 fail), lint SUCCESS (360 tasks, 0 errors, pre-existing warnings only). Audits: repo_map PASS, module_graph 21 edges no new, function/compose pre-existing only.
+- Known issues: Doc drift docs/Oneshot/00/00_fixplan.md:20 still quotes pre-closeout state — follow-up. B4 production surfaceEntries empty until platform:shortcuts gateway (partial deferral).
+- Exact next operation: Device agent runs Phase A+B manual proofs starting A2/A3 + B1. Exit when every proof recorded PASS/FAIL.
