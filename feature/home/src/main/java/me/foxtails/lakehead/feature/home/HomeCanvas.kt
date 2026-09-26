@@ -8,6 +8,9 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -41,9 +44,14 @@ import me.foxtails.lakehead.core.model.LogicalSpan
  *   tile (empty until shortcut discovery lands), and row taps report
  *   [onSurfaceExecute]/[onSurfaceTogglePin] with the shown [ItemId] and entry id.
  *   Execution and pin persistence stay with the caller.
+ * - A1 hold signal: [onTransientHoldChange] reports transient hold state owned by
+ *   [HomeCanvasGrid] (active edit, wiggle editing, or shown surface) so the shell
+ *   can gate pager swipe. Programmatic pill navigation is unaffected.
  *
  * @param onRequestDefaultHome retained for a future settings entry; currently unused by
  * this canvas (no HOME-role overlay is rendered).
+ * @param onTransientHoldChange pass-through hold callback forwarded to
+ * [HomeCanvasGrid]; invoked with true while held, false when released.
  */
 @Suppress("UNUSED_PARAMETER")
 @Composable
@@ -62,8 +70,24 @@ fun HomeCanvas(
     onSurfaceExecute: (ItemId, String) -> Unit = { _, _ -> },
     onSurfaceTogglePin: (ItemId, String) -> Unit = { _, _ -> },
     bottomClearance: Dp = 0.dp,
+    onTransientHoldChange: (Boolean) -> Unit = {},
 ) {
     require(overscanRows >= 0L) { "overscanRows must be non-negative" }
+    // P0 stale-hold guard: Loading/NotFound never compose HomeCanvasGrid, so
+    // the grid's hold emission cannot run to reset shell `homeHold`. Hoist a
+    // false emission + dispose reset here; Loaded (empty or populated) stays
+    // owned by the grid.
+    val latestHoldCallback = rememberUpdatedState(onTransientHoldChange)
+    LaunchedEffect(state) {
+        if (shouldResetCanvasHold(state)) {
+            latestHoldCallback.value(false)
+        }
+    }
+    DisposableEffect(Unit) {
+        onDispose {
+            latestHoldCallback.value(false)
+        }
+    }
     when (state) {
         is HomeRenderState.Loading -> BasicText(
             text = "Loading home…",
@@ -94,6 +118,7 @@ fun HomeCanvas(
                     surfaceEntries = surfaceEntries,
                     onSurfaceExecute = onSurfaceExecute,
                     onSurfaceTogglePin = onSurfaceTogglePin,
+                    onTransientHoldChange = onTransientHoldChange,
                 )
                 Spacer(
                     modifier = Modifier.fillMaxWidth().height(bottomClearance),
@@ -111,3 +136,15 @@ const val HOME_ROLE_LAYER_ID: String = "home-role-request"
  * control. No longer rendered by [HomeCanvas]; kept for test compat.
  */
 const val HOME_ROLE_DESCRIPTION: String = "Set ProtoLaunch as default home"
+
+/**
+ * P0 canvas hold-reset predicate for [HomeCanvas].
+ *
+ * Loading/NotFound never compose [HomeCanvasGrid], so the grid's hold emission
+ * cannot reset shell `homeHold` on those transitions: they must force false
+ * here. Loaded (empty or populated) stays owned by the grid, which emits its
+ * own false on the empty path and on dispose. Pure, framework-free and
+ * unit-testable.
+ */
+internal fun shouldResetCanvasHold(state: HomeRenderState): Boolean =
+    state !is HomeRenderState.Loaded

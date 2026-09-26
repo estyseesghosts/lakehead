@@ -147,6 +147,11 @@ internal fun LauncherShell(
             locked = LockedAxis.UNDECIDED,
         )
     }
+    // A1 transient home hold: true while home reports an active edit, wiggle
+    // editing, or a shown shortcut surface. Plain remember: gesture state,
+    // never persisted. ANDed into userScrollEnabled below; the pill's
+    // programmatic animateScrollToPage is unaffected by userScrollEnabled.
+    var homeHold by remember { mutableStateOf(false) }
 
     Box(
         modifier = modifier
@@ -157,7 +162,7 @@ internal fun LauncherShell(
             state = pagerState,
             modifier = Modifier.fillMaxSize(),
             beyondViewportPageCount = 1,
-            userScrollEnabled = !picker.blocksPager() && pagerWinner != ArbWinner.PICKER,
+            userScrollEnabled = isPagerSwipeEnabled(pickerBlocksPager, pagerWinner, homeHold),
         ) { page ->
             when (page) {
                 LAUNCHER_PAGE_FEED -> FeedSurface(
@@ -202,6 +207,7 @@ internal fun LauncherShell(
                     onResizeTile = onResizeTile,
                     onRemoveTile = onRemoveTile,
                     bottomClearance = bottomClearance,
+                    onTransientHoldChange = { homeHold = it },
                 )
             }
         }
@@ -215,3 +221,18 @@ internal fun LauncherShell(
         )
     }
 }
+
+/**
+ * A1 pager swipe gate: swipe is enabled only when the picker is not blocking,
+ * arbitration did not award the gesture to the picker, and home is not
+ * holding (active edit, wiggle editing, or shown shortcut surface).
+ *
+ * Pure boolean AND, framework-free and unit-testable. Programmatic pill
+ * navigation via `animateScrollToPage` bypasses `userScrollEnabled` and is
+ * unaffected by this gate.
+ */
+internal fun isPagerSwipeEnabled(
+    pickerBlocksPager: Boolean,
+    pagerWinner: ArbWinner,
+    homeHold: Boolean,
+): Boolean = !pickerBlocksPager && pagerWinner != ArbWinner.PICKER && !homeHold

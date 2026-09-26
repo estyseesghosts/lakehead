@@ -17,6 +17,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -153,9 +154,30 @@ internal fun HomeCanvasGrid(
     // span immediately instead of animating rapidly toward it. Both branches
     // share [resizePreviewFrame] geometry, so the rendered bounds are identical.
     reducedMotion: Boolean = false,
+    // A1 hold signal: reports whether transient home state (active edit, wiggle
+    // editing, or shown shortcut surface) should hold pager swipe. Emitted via
+    // LaunchedEffect; the caller (shell) owns the pager gate.
+    onTransientHoldChange: (Boolean) -> Unit = {},
 ) {
     require(overscanRows >= 0L) { "overscanRows must be non-negative" }
-    if (loaded.tiles.isEmpty()) {
+    // P0 stale-hold guard: the transient hold triple (active edit, wiggle
+    // editing, shown surface) lives inside BoxWithConstraints/key below, which
+    // never composes when tiles are empty. Hoist a false emission + dispose
+    // reset above the early return so shell `homeHold` cannot stick true after
+    // a populated→empty transition or grid disposal.
+    val latestHoldCallback = rememberUpdatedState(onTransientHoldChange)
+    val tilesEmpty = loaded.tiles.isEmpty()
+    LaunchedEffect(tilesEmpty, loaded.requestedHomeId) {
+        if (tilesEmpty) {
+            latestHoldCallback.value(false)
+        }
+    }
+    DisposableEffect(loaded.requestedHomeId) {
+        onDispose {
+            latestHoldCallback.value(false)
+        }
+    }
+    if (tilesEmpty) {
         BasicText(
             text = "Home is empty",
             modifier = modifier,
@@ -209,6 +231,20 @@ internal fun HomeCanvasGrid(
             val active = editSession as? HomeEditSession.Active
             val shownSurface = surface as? SwipeSurfaceState.Shown
             val interactionEditing = interaction as? HomeInteractionController.Editing
+            // A1 hold signal: active edit, wiggle editing, or shown surface holds
+            // pager swipe. Emitted via LaunchedEffect with the hoisted latest
+            // callback so recompositions of the lambda never restart the
+            // emission. Tiles are non-empty here (empty returned above), so
+            // this delegates to the same predicate the empty guard forces false.
+            val isHold = gridHoldSignal(
+                tilesEmpty = false,
+                active = active,
+                interaction = interaction,
+                surface = surface,
+            )
+            LaunchedEffect(isHold) {
+                latestHoldCallback.value(isHold)
+            }
             BackHandler(
                 enabled = active != null || shownSurface != null || interactionEditing != null,
             ) {
@@ -913,6 +949,41 @@ internal fun HomeCanvasGrid(
  * (see `ResizeHandle`); the surrounding touch square meets the ≥40dp minimum.
  */
 internal const val RESIZE_TOUCH_DP: Int = 48
+
+/**
+ * A1 hold predicate: transient home state that must hold pager swipe.
+ *
+ * Returns true when an edit session is active ([active] != null), wiggle
+ * editing is engaged ([interaction] is [HomeInteractionController.Editing]),
+ * or a shortcut surface is shown ([surface] is [SwipeSurfaceState.Shown]).
+ * Pure math-free boolean OR, framework-free and unit-testable. The caller
+ * (shell) ANDs the negation into `userScrollEnabled`; the pill's programmatic
+ * `animateScrollToPage` is unaffected.
+ */
+internal fun isHomeHold(
+    active: HomeEditSession.Active?,
+    interaction: HomeInteractionController,
+    surface: SwipeSurfaceState,
+): Boolean = active != null ||
+    interaction is HomeInteractionController.Editing ||
+    surface is SwipeSurfaceState.Shown
+
+/**
+ * P0 empty-guard hold signal for [HomeCanvasGrid].
+ *
+ * The grid early-returns on empty tiles before transient edit/surface state
+ * exists, so an empty grid must never hold regardless of stale inputs: empty
+ * forces false, non-empty delegates to [isHomeHold]. Pure, framework-free and
+ * unit-testable. The composable emits false via `LaunchedEffect` on the empty
+ * path and on dispose, so shell `homeHold` resets on populated→empty
+ * transitions and on grid removal.
+ */
+internal fun gridHoldSignal(
+    tilesEmpty: Boolean,
+    active: HomeEditSession.Active?,
+    interaction: HomeInteractionController,
+    surface: SwipeSurfaceState,
+): Boolean = if (tilesEmpty) false else isHomeHold(active, interaction, surface)
 
 /**
  * Centered horizontal origin (column 0 left edge) for the home canvas grid.
