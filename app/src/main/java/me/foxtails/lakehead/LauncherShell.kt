@@ -4,7 +4,9 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.systemGestures
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
@@ -15,7 +17,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import me.foxtails.lakehead.core.designsystem.NavigationControlButton
 import me.foxtails.lakehead.core.designsystem.NavigationControlPill
@@ -30,8 +34,15 @@ import me.foxtails.lakehead.feature.home.HomeCanvas
 import me.foxtails.lakehead.feature.home.HomeCanvasViewportStyle
 import me.foxtails.lakehead.feature.home.HomeRenderState
 
-/** Bottom padding applied to All Apps content so the pill never covers the last row. */
-private val PILL_CLEARANCE_PADDING = 80.dp
+/** Minimum bottom padding applied to All Apps content so the pill never covers the last row. */
+private val MIN_PILL_CLEARANCE = 80.dp
+
+/**
+ * Minimum bottom safety padding for the navigation pill when the system gesture inset
+ * is zero or very small. Prevents the pill from sitting flush with the display edge on
+ * devices / orientations where [WindowInsets.systemGestures] reports no bottom zone.
+ */
+private val MIN_PILL_BOTTOM_PADDING = 16.dp
 
 /** Glyph characters for each navigation destination, in [LauncherDestination] enum order. */
 private val DESTINATION_GLYPHS = mapOf(
@@ -68,6 +79,15 @@ internal fun LauncherShell(
 ) {
     var destination by rememberSaveable { mutableStateOf(initialDestination) }
 
+    // Gesture inset drives the pill's bottom safety margin so it stays above
+    // Android's system-gesture exclusion zone (immersive.md §125-166).
+    val density = LocalDensity.current
+    val gestureBottomDp = with(density) {
+        WindowInsets.systemGestures.getBottom(density).toDp()
+    }
+    val pillBottomPadding = maxOf(MIN_PILL_BOTTOM_PADDING, gestureBottomDp)
+    val pillClearancePadding = maxOf(MIN_PILL_CLEARANCE, gestureBottomDp)
+
     Box(modifier = modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         when (destination) {
             LauncherDestination.HOME -> HomeCanvas(
@@ -88,7 +108,7 @@ internal fun LauncherShell(
                 onAddToHome = onAddToHome,
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(bottom = PILL_CLEARANCE_PADDING),
+                    .padding(bottom = pillClearancePadding),
             )
 
             LauncherDestination.FEED -> StubContent("Feed")
@@ -98,6 +118,7 @@ internal fun LauncherShell(
         NavigationPillOverlay(
             currentDestination = destination,
             onDestinationSelected = { destination = it },
+            gestureBottomPadding = pillBottomPadding,
         )
     }
 }
@@ -117,11 +138,12 @@ private fun BoxScope.StubContent(label: String) {
 private fun BoxScope.NavigationPillOverlay(
     currentDestination: LauncherDestination,
     onDestinationSelected: (LauncherDestination) -> Unit,
+    gestureBottomPadding: Dp,
 ) {
     NavigationControlPill(
         modifier = Modifier
             .align(Alignment.BottomCenter)
-            .padding(bottom = 16.dp),
+            .padding(bottom = gestureBottomPadding),
     ) {
         LauncherDestination.entries.forEach { dest ->
             NavigationControlButton(
