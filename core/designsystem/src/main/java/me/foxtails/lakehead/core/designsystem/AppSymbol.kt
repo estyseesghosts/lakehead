@@ -9,7 +9,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.unit.Dp
 import me.foxtails.lakehead.core.grid.GridSpan
+import me.foxtails.lakehead.core.grid.ShortcutStripGeometry
 
 /**
  * Pre-resolved app symbol.
@@ -42,8 +44,46 @@ fun AppSymbol(
 /**
  * Pure alignment rule for an app symbol inside its tile.
  *
- * Tall 1x2 tiles bottom-center the symbol; every other span bottom-ends it.
- * No placement legality or span-support checks: those stay owned by `core:grid`.
+ * Single-span form delegates to [symbolAlignment] with `hasPinned = true`: it
+ * preserves the compact shortcut-layout anchor (reuse the existing anchor, no new
+ * offset) for the current strip caller. No placement legality or span-support
+ * checks: those stay owned by `core:grid`.
  */
-fun symbolAlignment(span: GridSpan): Alignment =
-    if (span.columns == 1 && span.rows == 2) Alignment.BottomCenter else Alignment.BottomEnd
+fun symbolAlignment(span: GridSpan): Alignment = symbolAlignment(span, hasPinned = true)
+
+/**
+ * Pure alignment rule for an app symbol inside its tile, given pin state.
+ *
+ * Zero pinned shortcuts means centered icon (`docs/Oneshot/00/shortcuts.md`
+ * section 2.2: enlarged, aspect-preserved, no reserved shortcut space). One or
+ * more pinned shortcuts reuses the compact large-tile anchor by delegating to
+ * the `core:grid` strip-geometry anchor contract
+ * ([ShortcutStripGeometry.anchorFor]): `BOTTOM_CENTER` maps to bottom-center,
+ * `BOTTOM_RIGHT` maps to bottom-end. A 1×1 tile anchors bottom-end (wide) per
+ * `docs/design.md` and `docs/grid.md` §4; narrow single-column multi-row tiles
+ * (1×2, 1×3 and future 1×N forms) anchor bottom-center.
+ *
+ * Alignment mapping only, no legality checks: placement legality stays owned
+ * by `core:grid`.
+ *
+ * @param hasPinned whether the tile has at least one launcher-pinned shortcut
+ * (launcher-tile pinning, not Android-platform pinning).
+ */
+fun symbolAlignment(span: GridSpan, hasPinned: Boolean): Alignment {
+    if (!hasPinned) return Alignment.Center
+    return when (ShortcutStripGeometry.anchorFor(span)) {
+        ShortcutStripGeometry.ShortcutAnchor.BOTTOM_CENTER -> Alignment.BottomCenter
+        ShortcutStripGeometry.ShortcutAnchor.BOTTOM_RIGHT -> Alignment.BottomEnd
+    }
+}
+
+/**
+ * Centered icon extent for a large tile with zero pinned shortcuts.
+ *
+ * `docs/Oneshot/00/shortcuts.md` section 2.2: the icon scales proportionally to
+ * the tile's content area without reserving shortcut space, so the binding
+ * dimension is the smaller of the available width/height (callers subtract
+ * insets before calling; aspect preservation stays with `ContentScale.Fit`).
+ */
+fun centeredIconExtent(availableWidth: Dp, availableHeight: Dp): Dp =
+    minOf(availableWidth, availableHeight)

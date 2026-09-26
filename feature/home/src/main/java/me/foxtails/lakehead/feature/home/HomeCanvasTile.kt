@@ -12,6 +12,7 @@ import me.foxtails.lakehead.core.designsystem.AppTileState
 import me.foxtails.lakehead.core.grid.GridSpan
 import me.foxtails.lakehead.core.model.AppIdentity
 import me.foxtails.lakehead.core.model.ItemId
+import me.foxtails.lakehead.core.model.LogicalSpan
 
 /**
  * Maps one [HomeRenderTile] to the reusable [AppTile] primitive.
@@ -46,6 +47,14 @@ import me.foxtails.lakehead.core.model.ItemId
  *   `0..TileShortcutPolicy.maxShortcutSlots(tile.span)` so over-counts render
  *   max instead of crashing; no shortcut inventory, platform wiring or
  *   slot click handling lives here.
+ * - [pinnedCount] forwards the launcher-tile pinned shortcut count to [AppTile]
+ *   (default 0 → centered symbol anchor), validated `>= 0` and passed through
+ *   unclamped: it is never derived from [shortcutPlaceholders] (placeholder dots
+ *   are test/mock-only visuals, not pin state) and never clamped to
+ *   [TileShortcutPolicy] capacity (capacity bounds the visible strip, not the
+ *   anchor-driving pin state). Until the pin model lands there is no persisted
+ *   `pinnedIds` source, so callers leave the default 0; swipe/menu/persistence
+ *   wiring is deferred.
  */
 @Composable
 internal fun HomeCanvasTile(
@@ -57,14 +66,17 @@ internal fun HomeCanvasTile(
     activeItemId: ItemId? = null,
     onEnterEdit: (HomeRenderTile) -> Unit = {},
     shortcutPlaceholders: Int = 0,
+    pinnedCount: Int = 0,
 ) {
     val rawLabel = tile.label
     val label = if (rawLabel.isNullOrBlank()) UNAVAILABLE_LABEL else rawLabel
     val isEditing = isEditActive && tile.itemId == activeItemId
     // Bottom-edge capacity: the icon occupies one slot, so clamp forwarded
     // placeholders to 0..max (over-counts render max, never crash).
-    val clampedPlaceholders =
-        shortcutPlaceholders.coerceIn(0, TileShortcutPolicy.maxShortcutSlots(tile.span))
+    // Pin state stays independent: validated pass-through, never derived from
+    // placeholders and never clamped to strip capacity.
+    val clampedPlaceholders = clampedShortcutPlaceholders(shortcutPlaceholders, tile.span)
+    val resolvedPinnedCount = validatedPinnedCount(pinnedCount)
     val tileModifier = when {
         isEditing -> modifier.semantics {
             stateDescription =
@@ -109,9 +121,38 @@ internal fun HomeCanvasTile(
             null
         },
         shortcutPlaceholders = clampedPlaceholders,
+        pinnedCount = resolvedPinnedCount,
         isInteractionEnabled = !isEditActive,
     )
 }
+
+/**
+ * Validates the caller-supplied pinned shortcut count for [HomeCanvasTile].
+ *
+ * Pass-through: returns [pinnedCount] unchanged so `APP_WITH_PINNED` (`> 0`)
+ * reaches [AppTile] exactly as supplied. Never derived from placeholder dots
+ * and never clamped to [TileShortcutPolicy] capacity — capacity bounds the
+ * visible strip, not the anchor-driving pin state (a 1×1 tile keeps its pin
+ * state even though its strip capacity is 0).
+ *
+ * Until the pin model (persisted `pinnedIds`) lands there is no production
+ * source; callers leave the default 0.
+ *
+ * @throws IllegalArgumentException when [pinnedCount] is negative.
+ */
+internal fun validatedPinnedCount(pinnedCount: Int): Int {
+    require(pinnedCount >= 0) { "pinnedCount must be >= 0" }
+    return pinnedCount
+}
+
+/**
+ * Clamps requested visual placeholder dots into `0..max` strip capacity for
+ * [span] via [TileShortcutPolicy]; over-counts render max instead of crashing.
+ * Independent of [validatedPinnedCount]: placeholders are test/mock-only
+ * visuals, never pin state.
+ */
+internal fun clampedShortcutPlaceholders(requested: Int, span: LogicalSpan): Int =
+    requested.coerceIn(0, TileShortcutPolicy.maxShortcutSlots(span))
 
 /** Label fallback when a tile has no joined metadata label. */
 internal const val UNAVAILABLE_LABEL: String = "Unavailable app"

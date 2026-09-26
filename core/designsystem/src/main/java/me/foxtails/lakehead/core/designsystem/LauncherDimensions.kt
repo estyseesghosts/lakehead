@@ -17,6 +17,11 @@ import androidx.compose.ui.unit.dp
  * @param horizontalInset screen-edge inset, equal to [gridGap] per the edge == gap contract.
  * @param tilePadding inner padding applied inside an app tile (8.dp).
  * @param symbolSize preferred icon/symbol size inside a tile (40.dp).
+ * @param unitIconSize reference 1x1 icon visual size reused for the compact app icon
+ * and each pinned shortcut icon in customized large tiles (40.dp, equal to
+ * [symbolSize]). See `docs/Oneshot/00/shortcuts.md` sections 2.1 and 13: pinned
+ * shortcut icons and the compact app icon share one visual metric instead of
+ * scaling with the large tile.
  */
 @Immutable
 data class LauncherDimensions(
@@ -24,6 +29,7 @@ data class LauncherDimensions(
     val horizontalInset: Dp,
     val tilePadding: Dp,
     val symbolSize: Dp,
+    val unitIconSize: Dp,
 )
 
 /** CompositionLocal carrying the ambient [LauncherDimensions]; provided by [LauncherTheme]. */
@@ -37,4 +43,5 @@ val DefaultLauncherDimensions = LauncherDimensions(
     horizontalInset = 8.dp,
     tilePadding = 8.dp,
     symbolSize = 40.dp,
+    unitIconSize = 40.dp,
 )

@@ -7,6 +7,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
@@ -26,6 +27,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.dp
 import me.foxtails.lakehead.core.grid.GridSpan
+import me.foxtails.lakehead.core.grid.ShortcutStripGeometry
 
 /**
  * Presentation-only state for a small reusable app tile.
@@ -125,19 +127,23 @@ internal fun resolveTileColors(
  *   Body-only `onLongClick`, [Role.Button]) with `semantics(mergeDescendants = true)`.
  * - AppLaunchButton: [Box.clickable] (`onClick = onSymbolClick`, [Role.Button])
  *   wrapping the [icon] slot, with `semantics(mergeDescendants = true)`.
- * - ShortcutSlot [Row]: visual-only bottom strip of neutral placeholder dots
+ * - ShortcutSlot strip: visual-only bottom strip of neutral placeholder dots
  *   (`shortcutPlaceholders` count, default 0 renders none): non-clickable, never
  *   focusable, no [Role.Button]; each dot is a distinct semantics node
  *   ("Shortcut placeholder i+1"). A trailing sibling so order stays Body → Symbol →
- *   slots.
+ *   slots. Wide spans anchor the strip [Alignment.BottomEnd] as a [Row];
+ *   narrow single-column spans anchor [Alignment.BottomCenter] as a [Column].
+ *   Index 0 sits nearest the anchor (rightmost in a row, bottommost in a column)
+ *   with a fixed pitch, so pin order stays spatially stable.
  *
  * A 1x1 tile is full-bleed (no [LauncherDimensions.tilePadding] inset; the tile
  * background fills the whole cell) while the symbol hit region stays icon-sized
  * ([LauncherDimensions.symbolSize] coerced to the 48.dp minimum) centered on the
  * tile, so ring/edge touches reach TileBody; larger spans keep the tile-padding inset with
- * the caller's natural symbol size anchored via [symbolAlignment]: tall 1x2 tiles
- * bottom-center the symbol, every other span bottom-ends it, so icons are never
- * centered.
+ * the caller's natural symbol size anchored via [symbolAlignment] with
+ * `hasPinned = pinnedCount > 0`: zero pinned shortcuts centers the symbol,
+ * while pinned shortcuts reuse the compact large-tile anchor (tall 1x2 tiles
+ * bottom-center, every other span bottom-ends).
  *
  * Accessibility: TileBody merges descendants into a focusable node with the resolved
  * content description, the `selected` flag for [AppTileState.isSelected], and
@@ -155,10 +161,13 @@ internal fun resolveTileColors(
  * @param shortcutPlaceholders test/mock-only count of visual-only neutral-dot
  * shortcut glyphs in the ShortcutSlot strip (default 0, so 1x1 tiles show none).
  * Glyphs are inert: no click/long-click handling and no text labels. The count
- * is defensively clamped to the bottom-edge capacity for [AppTileState.span]
- * (the icon occupies one slot: single-column tiles allow `rows - 1`, wider
- * tiles allow `columns - 1`, coerced to >= 0), so over-counts render max
- * instead of crashing; negative counts are still rejected.
+ * is clamped via [ShortcutStripGeometry.visibleCount] for [AppTileState.span],
+ * so over-counts render max instead of crashing; negative counts are still
+ * rejected.
+ * @param pinnedCount launcher-tile pinned shortcut count driving the symbol anchor
+ * (default 0 → centered via `symbolAlignment(span, false)`). One or more reuses
+ * the compact large-tile anchor. Negative counts are rejected. Today this is
+ * caller-supplied test state; swipe/menu/persistence wiring lands separately.
  * @param isInteractionEnabled when false both hit regions keep their minima,
  * merged-descendants semantics, [Role.Button], descriptions and border visuals
  * but expose no click/long-click actions (`enabled = false` on TileBody's
@@ -177,6 +186,7 @@ fun AppTile(
     symbolContentDescription: String? = null,
     onLongClick: (() -> Unit)? = null,
     shortcutPlaceholders: Int = 0,
+    pinnedCount: Int = 0,
     isInteractionEnabled: Boolean = true,
 ) {
     require(contentDescription == null || contentDescription.isNotBlank()) {
@@ -188,14 +198,12 @@ fun AppTile(
     require(shortcutPlaceholders >= 0) {
         "shortcutPlaceholders must be >= 0"
     }
-    // Bottom-edge capacity: the icon occupies one slot, so clamp over-counts to
-    // max for this span (single-column: rows - 1; wider: columns - 1).
-    val maxShortcutSlots = if (state.span.columns == 1) {
-        (state.span.rows - 1).coerceAtLeast(0)
-    } else {
-        (state.span.columns - 1).coerceAtLeast(0)
+    require(pinnedCount >= 0) {
+        "pinnedCount must be >= 0"
     }
-    val renderedPlaceholders = shortcutPlaceholders.coerceAtMost(maxShortcutSlots)
+    // Bottom-edge capacity owned by core:grid: the icon occupies one slot.
+    val renderedPlaceholders = ShortcutStripGeometry.visibleCount(shortcutPlaceholders, state.span)
+    val hasPinned = pinnedCount > 0
     val resolvedDescription = contentDescription ?: state.label
     val resolvedSymbolDescription = symbolContentDescription ?: resolvedDescription
     val tileColors = resolveTileColors(
@@ -268,7 +276,7 @@ fun AppTile(
         } else {
             Box(
                 modifier = Modifier
-                    .align(symbolAlignment(state.span))
+                    .align(symbolAlignment(state.span, hasPinned))
                     .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
                     .padding(dimensions.tilePadding)
                     .semantics(mergeDescendants = true) {
@@ -286,27 +294,53 @@ fun AppTile(
                 }
             }
         }
-        // ShortcutSlot row: visual-only bottom strip of neutral placeholder dots.
+        // ShortcutSlot strip: visual-only bottom strip of neutral placeholder dots.
         // No clickable, never focusable, no Role.Button; each dot keeps its own
         // semantics node ("Shortcut placeholder i+1"), so the strip itself must not
-        // merge descendants. Dots stay ~12-16dp visual glyphs and never force a 48dp
-        // per-slot target, so 1x1 tiles (default 0, renders none) stay full-bleed.
+        // merge descendants. Wide spans anchor BottomEnd as a Row extending leftward;
+        // narrow single-column spans anchor BottomCenter as a Column extending upward
+        // (core:grid strip-geometry contract). Index 0 sits nearest the anchor with
+        // fixed pitch, so pin order stays spatially stable. Dots render at
+        // unitIconSize visual weight and never force a 48dp per-slot target, so
+        // 1x1 tiles (default 0, renders none) stay full-bleed.
         val placeholderTint = MaterialTheme.colorScheme.outlineVariant
-        Row(
-            modifier = Modifier
-                .align(Alignment.BottomStart)
-                .padding(dimensions.tilePadding),
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
-            repeat(renderedPlaceholders) { index ->
-                Box(
+        if (renderedPlaceholders > 0) {
+            if (ShortcutStripGeometry.isNarrow(state.span)) {
+                Column(
                     modifier = Modifier
-                        .size(14.dp)
-                        .background(placeholderTint, CircleShape)
-                        .semantics {
-                            this.contentDescription = "Shortcut placeholder ${index + 1}"
-                        },
-                )
+                        .align(Alignment.BottomCenter)
+                        .padding(dimensions.tilePadding),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    for (index in renderedPlaceholders - 1 downTo 0) {
+                        Box(
+                            modifier = Modifier
+                                .size(dimensions.unitIconSize)
+                                .background(placeholderTint, CircleShape)
+                                .semantics {
+                                    this.contentDescription = "Shortcut placeholder ${index + 1}"
+                                },
+                        )
+                    }
+                }
+            } else {
+                Row(
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(dimensions.tilePadding),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    for (index in renderedPlaceholders - 1 downTo 0) {
+                        Box(
+                            modifier = Modifier
+                                .size(dimensions.unitIconSize)
+                                .background(placeholderTint, CircleShape)
+                                .semantics {
+                                    this.contentDescription = "Shortcut placeholder ${index + 1}"
+                                },
+                        )
+                    }
+                }
             }
         }
     }
