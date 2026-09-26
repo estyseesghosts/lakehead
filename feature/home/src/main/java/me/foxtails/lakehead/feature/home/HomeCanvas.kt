@@ -1,20 +1,16 @@
 package me.foxtails.lakehead.feature.home
 
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import me.foxtails.lakehead.core.designsystem.FloatingControlOverlay
-import me.foxtails.lakehead.core.designsystem.FrameAnchor
-import me.foxtails.lakehead.core.designsystem.FrameInsets
-import me.foxtails.lakehead.core.designsystem.FrameSize
-import me.foxtails.lakehead.core.designsystem.HorizontalFrameAnchor
-import me.foxtails.lakehead.core.designsystem.OverlayFocusPolicy
-import me.foxtails.lakehead.core.designsystem.OverlayLayer
-import me.foxtails.lakehead.core.designsystem.VerticalFrameAnchor
 import me.foxtails.lakehead.core.model.AppIdentity
 import me.foxtails.lakehead.core.model.ItemId
 import me.foxtails.lakehead.core.model.LogicalPosition
@@ -31,16 +27,19 @@ import me.foxtails.lakehead.core.model.LogicalSpan
  * - [HomeRenderState.Loading] renders honest loading text.
  * - [HomeRenderState.NotFound] renders an honest not-found message and creates nothing.
  * - [HomeRenderState.Loaded] with no tiles renders an honest empty message as the scrolling
- *   background; populated states render the scrolling tile grid. Both loaded cases float
- *   exactly one truthful `home-role-request` layer above the canvas (the existing
- *   HOME-role callback) with [OverlayFocusPolicy.LEAVE_FOCUS_UNCHANGED], at least 48dp
- *   touch target, explicit description/anchor/insets, and no fake destinations.
+ *   background; populated states render the scrolling tile grid. No HOME-role overlay is
+ *   rendered here; [onRequestDefaultHome] is retained (currently unused) for a future
+ *   settings entry so callers in `:app` keep a stable signature.
  * - Edit mode is transient presentation state owned by [HomeCanvasGrid]: [onMoveTile]
  *   reports a drag-committed [ItemId] and [LogicalPosition] to the caller, [onResizeTile]
  *   reports a resize-committed [ItemId] and [LogicalSpan], and [onRemoveTile] reports a
  *   remove-tap [ItemId]. The caller owns persistence. This composable performs no
  *   writes itself.
+ *
+ * @param onRequestDefaultHome retained for a future settings entry; currently unused by
+ * this canvas (no HOME-role overlay is rendered).
  */
+@Suppress("UNUSED_PARAMETER")
 @Composable
 fun HomeCanvas(
     state: HomeRenderState,
@@ -53,6 +52,7 @@ fun HomeCanvas(
     onMoveTile: (ItemId, LogicalPosition) -> Unit = { _, _ -> },
     onResizeTile: (ItemId, LogicalSpan) -> Unit = { _, _ -> },
     onRemoveTile: (ItemId) -> Unit = {},
+    bottomClearance: Dp = 0.dp,
 ) {
     require(overscanRows >= 0L) { "overscanRows must be non-negative" }
     when (state) {
@@ -71,50 +71,31 @@ fun HomeCanvas(
         )
 
         is HomeRenderState.Loaded -> {
-            val roleLayer = OverlayLayer(
-                id = HOME_ROLE_LAYER_ID,
-                priority = 10,
-                anchor = FrameAnchor(
-                    horizontal = HorizontalFrameAnchor.CENTER,
-                    vertical = VerticalFrameAnchor.BOTTOM,
-                ),
-                size = FrameSize(widthPx = 240, heightPx = 72),
-                insets = FrameInsets(bottomPx = 16),
-                contentDescription = HOME_ROLE_DESCRIPTION,
-                content = {
-                    BasicText(text = HOME_ROLE_DESCRIPTION)
-                },
-            )
-            FloatingControlOverlay(
-                modifier = modifier.fillMaxSize(),
-                backgroundContent = {
-                    HomeCanvasGrid(
-                        loaded = state,
-                        iconsByIdentity = iconsByIdentity,
-                        onLaunchApp = onLaunchApp,
-                        overscanRows = overscanRows,
-                        viewportStyle = viewportStyle,
-                        modifier = Modifier.fillMaxSize(),
-                        onMoveTile = onMoveTile,
-                        onResizeTile = onResizeTile,
-                        onRemoveTile = onRemoveTile,
-                    )
-                },
-                overlays = listOf(roleLayer),
-                focusPolicy = OverlayFocusPolicy.LEAVE_FOCUS_UNCHANGED,
-                minTouchTargetDp = 48.dp,
-                onOverlayActivated = { id ->
-                    if (id == HOME_ROLE_LAYER_ID) {
-                        onRequestDefaultHome()
-                    }
-                },
-            )
+            Column(modifier = modifier.fillMaxSize()) {
+                HomeCanvasGrid(
+                    loaded = state,
+                    iconsByIdentity = iconsByIdentity,
+                    onLaunchApp = onLaunchApp,
+                    overscanRows = overscanRows,
+                    viewportStyle = viewportStyle,
+                    modifier = Modifier.weight(1f).fillMaxWidth(),
+                    onMoveTile = onMoveTile,
+                    onResizeTile = onResizeTile,
+                    onRemoveTile = onRemoveTile,
+                )
+                Spacer(
+                    modifier = Modifier.fillMaxWidth().height(bottomClearance),
+                )
+            }
         }
     }
 }
 
-/** Stable id for the single truthful HOME-role request overlay layer. */
+/** Legacy stable id for the removed HOME-role request overlay layer; kept for test compat. */
 const val HOME_ROLE_LAYER_ID: String = "home-role-request"
 
-/** Accessible description and visible label for the HOME-role request control. */
+/**
+ * Legacy accessible description and visible label for the removed HOME-role request
+ * control. No longer rendered by [HomeCanvas]; kept for test compat.
+ */
 const val HOME_ROLE_DESCRIPTION: String = "Set ProtoLaunch as default home"

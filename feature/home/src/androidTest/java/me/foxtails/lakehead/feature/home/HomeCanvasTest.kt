@@ -145,7 +145,7 @@ class HomeCanvasTest {
     }
 
     @Test
-    fun loadedEmpty_showsEmptyMessage_withSingleRoleOverlay() {
+    fun loadedEmpty_showsEmptyMessage_withNoRoleOverlay() {
         var requested = false
         setCanvas(
             loaded(emptyList()),
@@ -155,11 +155,9 @@ class HomeCanvasTest {
         composeRule.onNodeWithText("Home is empty").assertIsDisplayed()
         composeRule.onNodeWithText("Loading home…").assertDoesNotExist()
         composeRule.onNodeWithText("Home not found").assertDoesNotExist()
-        composeRule.onNodeWithText(HOME_ROLE_DESCRIPTION)
-            .assertIsDisplayed()
-            .assert(hasClickAction())
-            .performClick()
-        composeRule.runOnIdle { assertTrue(requested) }
+        composeRule.onNodeWithText(HOME_ROLE_DESCRIPTION).assertDoesNotExist()
+        composeRule.onAllNodes(hasText(HOME_ROLE_DESCRIPTION)).assertCountEquals(0)
+        composeRule.runOnIdle { assertFalse(requested) }
     }
 
     // ---- Populated labels/roles/launch ----
@@ -344,34 +342,22 @@ class HomeCanvasTest {
     // ---- Overlay: request/focus/target, no fakes ----
 
     @Test
-    fun overlay_hasExactlyOneTruthfulRequest_leavesFocus_andMeetsTouchTarget() {
+    fun overlay_hasNoRoleRequest_gridStillRenders() {
         val tiles = listOf(tile("a", personal, "Overlay App", column = 0, row = 0))
         var requested = false
         setCanvas(loaded(tiles), onRequestDefaultHome = { requested = true })
 
-        // Exactly one truthful HOME-role control; no fake destinations.
-        composeRule.onAllNodes(hasText(HOME_ROLE_DESCRIPTION)).assertCountEquals(1)
+        // No HOME-role control after removal; no fake destinations either.
+        composeRule.onAllNodes(hasText(HOME_ROLE_DESCRIPTION)).assertCountEquals(0)
+        composeRule.onNodeWithText(HOME_ROLE_DESCRIPTION).assertDoesNotExist()
         composeRule.onNodeWithText("News").assertDoesNotExist()
         composeRule.onNodeWithText("Message Center").assertDoesNotExist()
         composeRule.onNodeWithText("All Apps").assertDoesNotExist()
 
-        // Background canvas stays in the merged accessibility tree (no focus trap).
+        // Background canvas still renders.
         composeRule.onAllNodesWithContentDescription("Overlay App").assertCountEquals(2)
         composeRule.onNodeWithText("Overlay App").assertDoesNotExist()
-        composeRule.onNodeWithText(HOME_ROLE_DESCRIPTION).assertIsDisplayed()
-
-        // At least 48dp interactive target, derived from runtime density.
-        val minTouchPx = with(composeRule.density) { 48.dp.roundToPx() }
-        val nodeSize = composeRule
-            .onNodeWithText(HOME_ROLE_DESCRIPTION)
-            .fetchSemanticsNode().size
-        composeRule.runOnIdle {
-            assertTrue("overlay width ${nodeSize.width} must meet 48dp ($minTouchPx px)", nodeSize.width >= minTouchPx)
-            assertTrue("overlay height ${nodeSize.height} must meet 48dp ($minTouchPx px)", nodeSize.height >= minTouchPx)
-        }
-
-        composeRule.onNodeWithText(HOME_ROLE_DESCRIPTION).performClick()
-        composeRule.runOnIdle { assertTrue(requested) }
+        composeRule.runOnIdle { assertFalse(requested) }
     }
 
     @Test

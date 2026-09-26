@@ -1,5 +1,6 @@
 package me.foxtails.lakehead.feature.allapps
 
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
@@ -9,6 +10,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import me.foxtails.lakehead.core.model.AppIdentity
 
@@ -33,6 +35,7 @@ fun AllAppsScreen(
     onLaunchApp: (AppIdentity) -> Unit,
     onAddToHome: (AppIdentity) -> Unit,
     modifier: Modifier = Modifier,
+    bottomClearance: Dp = 0.dp,
 ) {
     when (state) {
         is AllAppsViewState.Loading -> BasicText(
@@ -53,6 +56,7 @@ fun AllAppsScreen(
             } else {
                 LazyColumn(
                     modifier = modifier.testTag(ALL_APPS_LIST_TAG),
+                    contentPadding = PaddingValues(bottom = bottomClearance),
                 ) {
                     items(
                         items = state.entries,
