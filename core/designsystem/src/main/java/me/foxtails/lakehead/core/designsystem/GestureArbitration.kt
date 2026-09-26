@@ -209,4 +209,37 @@ object GestureArbitration {
             LockedAxis.UNDECIDED -> ArbWinner.UNDECIDED
         }
     }
+
+    // ── bottom start region ──────────────────────────────────────────────────
+
+    /**
+     * Returns true when a gesture's initial down position falls in the bottom
+     * page-swipe region of the shell.
+     *
+     * The region is the bottom `(1 - fraction)` of the shell height: the down
+     * position [yPx] must satisfy `yPx >= heightPx * fraction`. The default
+     * [fraction] of `0.67f` keeps the bottom ~33% swipeable and reserves the
+     * top ~67% for content gestures.
+     *
+     * Defensive (never throws except for an invalid [fraction]): returns false
+     * when [heightPx] is non-finite or ≤ 0, or when [yPx] is non-finite or
+     * outside `[0, heightPx]`.
+     *
+     * @param yPx      Y of the initial down in pixels, shell-local.
+     * @param heightPx Measured shell height in pixels.
+     * @param fraction Top-boundary fraction of the swipe region in `(0, 1]`.
+     * @return True when the down starts inside the bottom swipe region.
+     */
+    fun isBottomRegionStart(
+        yPx: Float,
+        heightPx: Float,
+        fraction: Float = 0.67f,
+    ): Boolean {
+        require(fraction.isFinite() && fraction > 0f && fraction <= 1f) {
+            "fraction must be in (0,1], was $fraction"
+        }
+        if (!heightPx.isFinite() || heightPx <= 0f) return false
+        if (!yPx.isFinite() || yPx < 0f || yPx > heightPx) return false
+        return yPx >= heightPx * fraction
+    }
 }

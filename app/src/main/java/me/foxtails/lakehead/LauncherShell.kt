@@ -1,6 +1,7 @@
 package me.foxtails.lakehead
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
@@ -12,6 +13,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -21,6 +23,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import kotlinx.coroutines.launch
 import me.foxtails.lakehead.core.designsystem.GestureArbitration
@@ -84,6 +89,15 @@ const val LAUNCHER_PAGE_COUNT = 3
  * swipe, anything else leaves the pager enabled. The floating pill always uses
  * programmatic `animateScrollToPage`, which is unaffected by
  * `userScrollEnabled`, so it keeps working while swipe is held.
+ *
+ * A3 bottom-33% start region: the outer Box measures its height via
+ * `onSizeChanged` and passively observes each gesture's first down in the
+ * Initial pointer pass (never consuming, so tiles/scroll/pager are
+ * unaffected). The latch [pagerRegionAllowed] records whether that down fell
+ * in the bottom strip per [GestureArbitration.isBottomRegionStart] and is
+ * ANDed into `userScrollEnabled` alongside the picker/winner/homeHold/
+ * pagerHold guards. Top-67% starts never page; bottom-33% starts page unless
+ * another guard holds. The pill bypasses `userScrollEnabled` and always works.
  */
 @Composable
 internal fun LauncherShell(
@@ -157,17 +171,50 @@ internal fun LauncherShell(
     // page swipe. Plain remember alongside homeHold; ANDed into
     // userScrollEnabled below; the pill is unaffected.
     var pagerHold by remember { mutableStateOf(false) }
+    // A3 bottom-33% start region: measured shell height (px) for the
+    // isBottomRegionStart gate, plus a per-gesture latch recording whether
+    // the current gesture's first down fell in the bottom strip. Both are
+    // plain remember transient gesture state, never persisted. pagerRegionAllowed
+    // defaults to true so the pager behaves as before until the first
+    // measured down latches a region; ANDed into userScrollEnabled below
+    // alongside picker/winner/homeHold/pagerHold. The pill is unaffected.
+    var shellHeightPx by remember { mutableFloatStateOf(0f) }
+    var pagerRegionAllowed by remember { mutableStateOf(true) }
 
     Box(
         modifier = modifier
             .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background),
+            .background(MaterialTheme.colorScheme.background)
+            .onSizeChanged { shellHeightPx = it.height.toFloat() }
+            .pointerInput(shellHeightPx) {
+                // Passive Initial-pass observer: latch the first down's Y only,
+                // never consume, so tiles, scroll and the pager receive every
+                // event untouched. The remainder of the gesture is drained
+                // passively until release.
+                awaitEachGesture {
+                    val first = awaitPointerEvent(PointerEventPass.Initial)
+                    val down = first.changes.firstOrNull { it.pressed }
+                        ?: return@awaitEachGesture
+                    val height = shellHeightPx
+                    if (height > 0f) {
+                        pagerRegionAllowed =
+                            GestureArbitration.isBottomRegionStart(
+                                yPx = down.position.y,
+                                heightPx = height,
+                            )
+                    }
+                    while (true) {
+                        val next = awaitPointerEvent(PointerEventPass.Initial)
+                        if (next.changes.none { it.pressed }) break
+                    }
+                }
+            },
     ) {
         HorizontalPager(
             state = pagerState,
             modifier = Modifier.fillMaxSize(),
             beyondViewportPageCount = 1,
-            userScrollEnabled = isPagerSwipeEnabled(pickerBlocksPager, pagerWinner, homeHold, pagerHold),
+            userScrollEnabled = isPagerSwipeEnabled(pickerBlocksPager, pagerWinner, homeHold, pagerHold, pagerRegionAllowed),
         ) { page ->
             when (page) {
                 LAUNCHER_PAGE_FEED -> FeedSurface(
@@ -237,6 +284,11 @@ internal fun LauncherShell(
  * [pagerHold] is true (tile-origin down until release), so a tile touch never
  * becomes a page swipe. Background-origin gestures leave [pagerHold] false.
  *
+ * A3 adds the bottom-33% start-region latch: swipe is additionally enabled
+ * only when [pagerRegionAllowed] is true (the current gesture's first down
+ * fell in the bottom strip per `isBottomRegionStart`). Top-67% starts never
+ * page on any page. Defaults to true so pre-measurement behavior matches A2.
+ *
  * Pure boolean AND, framework-free and unit-testable. Programmatic pill
  * navigation via `animateScrollToPage` bypasses `userScrollEnabled` and is
  * unaffected by this gate.
@@ -246,4 +298,5 @@ internal fun isPagerSwipeEnabled(
     pagerWinner: ArbWinner,
     homeHold: Boolean,
     pagerHold: Boolean = false,
-): Boolean = !pickerBlocksPager && pagerWinner != ArbWinner.PICKER && !homeHold && !pagerHold
+    pagerRegionAllowed: Boolean = true,
+): Boolean = !pickerBlocksPager && pagerWinner != ArbWinner.PICKER && !homeHold && !pagerHold && pagerRegionAllowed

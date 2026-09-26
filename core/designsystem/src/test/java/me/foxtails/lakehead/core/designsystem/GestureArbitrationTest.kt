@@ -4,7 +4,9 @@ import me.foxtails.lakehead.core.designsystem.GestureArbitration.ArbWinner
 import me.foxtails.lakehead.core.designsystem.GestureArbitration.LockedAxis
 import me.foxtails.lakehead.core.designsystem.GestureArbitration.Settle
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertThrows
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class GestureArbitrationTest {
@@ -438,6 +440,98 @@ class GestureArbitrationTest {
                 "picker=$picker tap=$tap axis=$axis",
                 expected,
                 GestureArbitration.arbPriority(picker, tap, axis),
+            )
+        }
+    }
+
+    // ── isBottomRegionStart (A3) ─────────────────────────────────────────────
+
+    @Test
+    fun bottomRegionDefaultBoundary() {
+        // Default fraction 0.67 on height 1000 → threshold 670.
+        assertFalse(GestureArbitration.isBottomRegionStart(yPx = 0f, heightPx = 1000f))
+        assertFalse(GestureArbitration.isBottomRegionStart(yPx = 669.9f, heightPx = 1000f))
+        assertTrue(GestureArbitration.isBottomRegionStart(yPx = 670f, heightPx = 1000f))
+        assertTrue(GestureArbitration.isBottomRegionStart(yPx = 1000f, heightPx = 1000f))
+    }
+
+    @Test
+    fun bottomRegionDefaultArgMatchesExplicitFraction() {
+        // Omitted fraction must behave exactly like 0.67f.
+        val ys = listOf(0f, 500f, 669.9f, 670f, 999f, 1000f)
+        for (y in ys) {
+            assertEquals(
+                "y=$y",
+                GestureArbitration.isBottomRegionStart(y, 1000f, 0.67f),
+                GestureArbitration.isBottomRegionStart(y, 1000f),
+            )
+        }
+    }
+
+    @Test
+    fun bottomRegionCustomFraction() {
+        // Fraction 0.5 on height 1000 → threshold 500.
+        assertFalse(GestureArbitration.isBottomRegionStart(yPx = 499.9f, heightPx = 1000f, fraction = 0.5f))
+        assertTrue(GestureArbitration.isBottomRegionStart(yPx = 500f, heightPx = 1000f, fraction = 0.5f))
+        // Fraction 1.0: only the very bottom edge pages.
+        assertFalse(GestureArbitration.isBottomRegionStart(yPx = 999.9f, heightPx = 1000f, fraction = 1f))
+        assertTrue(GestureArbitration.isBottomRegionStart(yPx = 1000f, heightPx = 1000f, fraction = 1f))
+    }
+
+    @Test
+    fun bottomRegionZeroOrNegativeHeightReturnsFalse() {
+        assertFalse(GestureArbitration.isBottomRegionStart(yPx = 0f, heightPx = 0f))
+        assertFalse(GestureArbitration.isBottomRegionStart(yPx = 500f, heightPx = 0f))
+        assertFalse(GestureArbitration.isBottomRegionStart(yPx = 0f, heightPx = -100f))
+    }
+
+    @Test
+    fun bottomRegionOutOfRangeYReturnsFalse() {
+        // Negative or beyond-height downs are never in-region, even bottom ones.
+        assertFalse(GestureArbitration.isBottomRegionStart(yPx = -1f, heightPx = 1000f))
+        assertFalse(GestureArbitration.isBottomRegionStart(yPx = -0.001f, heightPx = 1000f))
+        assertFalse(GestureArbitration.isBottomRegionStart(yPx = 1000.001f, heightPx = 1000f))
+        assertFalse(GestureArbitration.isBottomRegionStart(yPx = 1500f, heightPx = 1000f))
+    }
+
+    @Test
+    fun bottomRegionNonFiniteInputsReturnFalse() {
+        assertFalse(
+            GestureArbitration.isBottomRegionStart(yPx = Float.NaN, heightPx = 1000f),
+        )
+        assertFalse(
+            GestureArbitration.isBottomRegionStart(yPx = Float.POSITIVE_INFINITY, heightPx = 1000f),
+        )
+        assertFalse(
+            GestureArbitration.isBottomRegionStart(yPx = 800f, heightPx = Float.NaN),
+        )
+        assertFalse(
+            GestureArbitration.isBottomRegionStart(yPx = 800f, heightPx = Float.POSITIVE_INFINITY),
+        )
+        assertFalse(
+            GestureArbitration.isBottomRegionStart(yPx = 800f, heightPx = Float.NEGATIVE_INFINITY),
+        )
+    }
+
+    @Test
+    fun bottomRegionRejectsInvalidFraction() {
+        assertThrows(IllegalArgumentException::class.java) {
+            GestureArbitration.isBottomRegionStart(yPx = 800f, heightPx = 1000f, fraction = 0f)
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            GestureArbitration.isBottomRegionStart(yPx = 800f, heightPx = 1000f, fraction = -0.5f)
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            GestureArbitration.isBottomRegionStart(yPx = 800f, heightPx = 1000f, fraction = 1.5f)
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            GestureArbitration.isBottomRegionStart(yPx = 800f, heightPx = 1000f, fraction = Float.NaN)
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            GestureArbitration.isBottomRegionStart(
+                yPx = 800f,
+                heightPx = 1000f,
+                fraction = Float.POSITIVE_INFINITY,
             )
         }
     }
