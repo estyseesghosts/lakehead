@@ -44,8 +44,10 @@ object WindowedSpanLayout {
      * Resolves the effective logical row origin: the caller override when supplied,
      * otherwise the overscanned window's first row.
      *
-     * @throws IllegalArgumentException when [overscanRows] or a supplied [rowOrigin] is
-     * negative.
+     * The origin is signed and may be negative (e.g. a signed content `minRow`
+     * above row zero). Only [overscanRows] must be non-negative.
+     *
+     * @throws IllegalArgumentException when [overscanRows] is negative.
      */
     fun resolveRowOrigin(
         window: GridRowWindow,
@@ -54,7 +56,6 @@ object WindowedSpanLayout {
     ): Long {
         require(overscanRows >= 0L) { "overscanRows must be non-negative, was $overscanRows" }
         if (rowOrigin != null) {
-            require(rowOrigin >= 0L) { "rowOrigin must be non-negative, was $rowOrigin" }
             // Touch the window's overscan validation so an invalid overscan is still
             // reported explicitly even when the caller overrides the origin.
             window.withOverscan(overscanRows)
@@ -73,7 +74,11 @@ object WindowedSpanLayout {
      * No empty-row spacers are produced: the result contains exactly the selected
      * children.
      *
-     * @throws IllegalArgumentException for negative [overscanRows]/[originX]/[rowOrigin],
+     * The [rowOrigin] is signed and may be negative (a signed content `minRow`);
+     * [checkedTop] stays signed-tolerant (negative tops for spans starting above the
+     * origin) while [checkedLeft] remains non-negative.
+     *
+     * @throws IllegalArgumentException for negative [overscanRows]/[originX],
      * or when a selected child's rebased frame cannot be represented in [Int] pixels
      * (reported explicitly instead of silently dropping the child).
      */
@@ -188,7 +193,8 @@ object WindowedSpanLayout {
  *
  * Rows are rebased around [rowOrigin] (defaulting to the overscanned window's first row)
  * using checked arithmetic, so a single distant [Int]-bounded logical row renders at a
- * small safe local offset instead of overflowing pixel [Int] arithmetic. The container's
+ * small safe local offset instead of overflowing pixel [Int] arithmetic. [rowOrigin] is
+ * signed and may be negative (the signed content `minRow`, e.g. rows above zero). The container's
  * extent wraps the selected children ([minHeightPx] floors the height, e.g. a viewport
  * minimum); callers that need scrolling supply their own [modifier] arrangement.
  *
@@ -198,7 +204,7 @@ object WindowedSpanLayout {
  * geometry to pixels, and overlapping placements render overlapped in list order.
  *
  * @throws IllegalArgumentException for negative [overscanRows], [originX], [minHeightPx]
- * or [rowOrigin], or when a selected child's rebased frame (or the resulting container
+ * or when a selected child's rebased frame (or the resulting container
  * extent over sparse selected children) cannot be represented in [Int] pixels. An
  * unrepresentably wide/tall selected extent fails explicitly instead of silently
  * dropping children.
@@ -217,9 +223,6 @@ fun <T : Any> WindowedSpanContainer(
     require(overscanRows >= 0L) { "overscanRows must be non-negative, was $overscanRows" }
     require(originX >= 0) { "originX must be non-negative, was $originX" }
     require(minHeightPx >= 0) { "minHeightPx must be non-negative, was $minHeightPx" }
-    if (rowOrigin != null) {
-        require(rowOrigin >= 0L) { "rowOrigin must be non-negative, was $rowOrigin" }
-    }
 
     val layout = WindowedSpanLayout.boundsFor(
         children = children,

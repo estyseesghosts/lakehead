@@ -20,10 +20,14 @@ import me.foxtails.lakehead.core.grid.GridSpan
  * Renders a non-interactive outline at the candidate span position. Valid candidates draw
  * a 2dp outline in `scheme.primary`; invalid candidates draw in `scheme.error`.
  *
- * Position reuses [TileBounds.bounds] for the absolute candidate frame, rebased via the
- * caller-provided [rowOrigin]. Horizontal placement includes [originX]: the caller-centered
- * remainder split, so column 0 starts at [originX] rather than 0 and left/right slack
- * stays equal within 1px.
+ * Position reuses [TileBounds.signedBounds] for the signed candidate frame rebased
+ * around the caller-provided [rowOrigin] plus the G2 rest [originYPx] offset, so the
+ * outline lands on the same Box content coordinates the windowed tiles are placed
+ * at. Horizontal placement includes [originX]: the caller-centered remainder
+ * split, so column 0 starts at [originX] rather than 0 and left/right slack
+ * stays equal within 1px. [originYPx] carries short-content bias centering
+ * (e.g. 540px) or zero for tall content; omitting it ghosts short content
+ * off-origin.
  */
 @Composable
 fun ResizeCandidateOverlay(
@@ -34,19 +38,16 @@ fun ResizeCandidateOverlay(
     isValid: Boolean,
     modifier: Modifier = Modifier,
     originX: Int = 0,
+    originYPx: Long = 0L,
 ) {
     val density = LocalDensity.current
-    val absolute = TileBounds.bounds(
-        position = originPosition,
-        span = candidateSpan,
+    val frame = resizeCandidateFrame(
+        originPosition = originPosition,
+        candidateSpan = candidateSpan,
         geometry = geometry,
         originX = originX,
-    )
-    val rowStridePx = geometry.cellSizePx.toLong() + geometry.rowGapPx.toLong()
-    val topPx = rebasedOverlayTopPx(
-        absoluteTopPx = absolute.top,
         rowOrigin = rowOrigin,
-        rowStridePx = rowStridePx,
+        originYPx = originYPx,
     )
     val scheme = MaterialTheme.colorScheme
     val borderColor = if (isValid) {
@@ -54,11 +55,11 @@ fun ResizeCandidateOverlay(
     } else {
         scheme.error
     }
-    val widthDp = with(density) { absolute.width.toDp() }
-    val heightDp = with(density) { absolute.height.toDp() }
+    val widthDp = with(density) { frame.widthPx.toDp() }
+    val heightDp = with(density) { frame.heightPx.toDp() }
     Box(
         modifier = modifier
-            .offset { IntOffset(absolute.left, topPx) }
+            .offset { IntOffset(frame.left, frame.top) }
             .size(widthDp, heightDp)
             .border(2.dp, borderColor, AppTileDefaults.TileShape)
             .testTag(RESIZE_CANDIDATE_OVERLAY_TAG),
@@ -69,21 +70,26 @@ fun ResizeCandidateOverlay(
 const val RESIZE_CANDIDATE_OVERLAY_TAG: String = "resize-candidate-overlay"
 
 /**
- * Rebases an absolute [TileBounds] top edge into windowed-container content coordinates.
- * Same logic as the internal rebasedOverlayTop in HomeCanvasGrid; exposed here for overlay use.
+ * Signed candidate frame for [ResizeCandidateOverlay] in Box content coordinates.
+ *
+ * Delegates to [TileBounds.signedBounds] with the candidate origin/span rebased
+ * around [rowOrigin] plus the G2 rest [originYPx] offset. Pure math,
+ * framework-free, so short-content bias centering stays unit-testable and
+ * `core:grid` legality stays untouched.
  */
-private fun rebasedOverlayTopPx(
-    absoluteTopPx: Int,
-    rowOrigin: Long,
-    rowStridePx: Long,
-): Int {
-    return try {
-        val rebased = Math.subtractExact(
-            absoluteTopPx.toLong(),
-            Math.multiplyExact(rowOrigin, rowStridePx),
-        )
-        rebased.coerceIn(Int.MIN_VALUE.toLong(), Int.MAX_VALUE.toLong()).toInt()
-    } catch (_: ArithmeticException) {
-        Int.MIN_VALUE
-    }
-}
+fun resizeCandidateFrame(
+    originPosition: GridPosition,
+    candidateSpan: GridSpan,
+    geometry: SquareCellGeometry,
+    originX: Int = 0,
+    rowOrigin: Long = 0L,
+    originYPx: Long = 0L,
+): SignedPixelFrame = TileBounds.signedBounds(
+    column = originPosition.column,
+    row = originPosition.row.toLong(),
+    span = candidateSpan,
+    geometry = geometry,
+    originX = originX,
+    originRow = rowOrigin,
+    originYPx = originYPx,
+)

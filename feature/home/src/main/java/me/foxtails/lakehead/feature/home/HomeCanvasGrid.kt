@@ -32,15 +32,21 @@ import me.foxtails.lakehead.core.designsystem.PixelRect
 import me.foxtails.lakehead.core.designsystem.RemoveButton
 import me.foxtails.lakehead.core.designsystem.ResizeCandidateOverlay
 import me.foxtails.lakehead.core.designsystem.ResizeHandle
+import me.foxtails.lakehead.core.designsystem.SignedPixelFrame
 import me.foxtails.lakehead.core.designsystem.SpanChild
 import me.foxtails.lakehead.core.designsystem.SquareCellGeometry
 import me.foxtails.lakehead.core.designsystem.TileBounds
 import me.foxtails.lakehead.core.designsystem.WindowedSpanContainer
+import me.foxtails.lakehead.core.grid.ContentBounds
+import me.foxtails.lakehead.core.grid.GridContentBounds
 import me.foxtails.lakehead.core.grid.GridPlacement
 import me.foxtails.lakehead.core.grid.GridPosition
+import me.foxtails.lakehead.core.grid.GridRest
+import me.foxtails.lakehead.core.grid.GridRestOrigin
 import me.foxtails.lakehead.core.grid.GridRowWindow
 import me.foxtails.lakehead.core.grid.GridSpan
 import me.foxtails.lakehead.core.grid.GridVerticalExtent
+import me.foxtails.lakehead.core.grid.SignedGridPlacement
 import me.foxtails.lakehead.core.model.AppIdentity
 import me.foxtails.lakehead.core.model.ItemId
 import me.foxtails.lakehead.core.model.LogicalPosition
@@ -147,27 +153,41 @@ internal fun HomeCanvasGrid(
             }
             val rowStridePx: Long =
                 geometry.cellSizePx.toLong() + geometry.rowGapPx.toLong()
+            // Signed renderer origin (G3): the logical row the windowed container
+            // rebases pixel frames around plus the G2 rest pixel offset computed in
+            // rebased coordinates. `rowOrigin` is the signed content `minRow` (may be
+            // negative for rows above zero); `originYPx` is the G2 `gridOriginY`
+            // (bias centering for short content, zero anchor for tall content).
+            // Tiles use `TileBounds.signedBounds(..., originRow = rowOrigin,
+            // originYPx = originYPx)`; the container is shifted by `originYPx` so its
+            // rebased tiles land on the same Box coordinates as the signed overlays.
+            // The visible window is absolute: scroll 0 shows `rowOrigin` at the top,
+            // so it must be computed after the origin.
+            val contentBounds = contentBoundsForTiles(loaded.tiles, columns)
+            val rowOrigin = rendererRowOrigin(contentBounds)
             val window = visibleWindowFor(
                 scrollPx = scrollState.value,
                 viewportHeightPx = availableHeightPx,
                 rowStridePx = rowStridePx,
                 overscanRows = overscanRows,
+                rowOrigin = rowOrigin,
             )
-            // Logical row origin the windowed container rebases pixel frames around:
-            // content y=0 corresponds to this row. This MUST stay fixed at row 0 and
-            // must not track the scroll offset: deriving it from the scroll-derived
-            // window feeds the rebased scroll position back into the layout origin,
-            // shifting tiles by one extra stride per scrolled stride and driving the
-            // selection window away from the visible rows once scrolled past overscan.
-            // With a fixed origin, content coordinates are absolute: scrollPx maps to
-            // absolute row scrollPx/stride, minHeightPx is the absolute content height,
-            // and overlays/drag math share the same origin through this value.
-            val rowOrigin = HOME_CANVAS_ROW_ORIGIN
-            val minHeightPx = contentMinHeightPx(
+            val baseContentHeightPx = contentMinHeightPxSigned(
                 extent = loaded.extent,
                 cellSizePx = geometry.cellSizePx,
                 rowGapPx = geometry.rowGapPx,
-            ).coerceAtLeast(availableHeightPx)
+            )
+            val rest = signedRestFor(
+                viewportHeightPx = availableHeightPx,
+                contentHeightPx = baseContentHeightPx,
+                rowStridePx = rowStridePx,
+            )
+            val originYPx = rendererOriginYPx(rest)
+            val originYOffsetPx = originYPx.coerceIn(
+                Int.MIN_VALUE.toLong(),
+                Int.MAX_VALUE.toLong(),
+            ).toInt()
+            val minHeightPx = baseContentHeightPx.coerceAtLeast(availableHeightPx)
             val children: List<SpanChild<ItemId>> = loaded.tiles.map { tile ->
                 val iconBitmap = iconsByIdentity[tile.appIdentity]
                 SpanChild(
@@ -234,17 +254,17 @@ internal fun HomeCanvasGrid(
                         sessionState.value as? HomeEditSession.Active ?: return@awaitEachGesture
                     // Snapshot the origin corner at gesture start (fixed anchor, not the
                     // live candidate bounds which move during the drag).
-                    val originBounds = TileBounds.bounds(
-                        position = GridPosition(
-                            sessionAtDown.origin.column,
-                            sessionAtDown.origin.row,
-                        ),
+                    val originBounds = TileBounds.signedBounds(
+                        column = sessionAtDown.origin.column,
+                        row = sessionAtDown.origin.row.toLong(),
                         span = GridSpan(
                             sessionAtDown.originSpan.columns,
                             sessionAtDown.originSpan.rows,
                         ),
                         geometry = geometry,
                         originX = originX,
+                        originRow = rowOrigin,
+                        originYPx = originYPx,
                     )
                     val handleSizePx = with(density) { 48.dp.roundToPx() }
                     // Hit-test in content-local coords: the pointer position observed
@@ -305,6 +325,8 @@ internal fun HomeCanvasGrid(
                                 columnGapPx = geometry.columnGapPx.toFloat(),
                                 rowGapPx = geometry.rowGapPx.toFloat(),
                                 originXPx = originX.toFloat(),
+                                rowOrigin = rowOrigin,
+                                originYPxRestPx = originYPx.toFloat(),
                             )
                             val quantized = RenderableSpans.quantize(rawSpan, columns)
                             editSession = sessionState.value.updateResizeCandidate(
@@ -354,6 +376,7 @@ internal fun HomeCanvasGrid(
                             rowGapPx = geometry.rowGapPx.toFloat(),
                             windowFirstRow = rowOrigin,
                             originXPx = originX.toFloat(),
+                            originYPxPx = originYPx.toFloat(),
                         )
                         editSession = sessionState.value.updateMoveCandidate(
                             slopCell,
@@ -384,6 +407,8 @@ internal fun HomeCanvasGrid(
                                     columnGapPx = geometry.columnGapPx.toFloat(),
                                     rowGapPx = geometry.rowGapPx.toFloat(),
                                     originXPx = originX.toFloat(),
+                                    rowOrigin = rowOrigin,
+                                    originYPxRestPx = originYPx.toFloat(),
                                 )
                                 val quantized = RenderableSpans.quantize(rawSpan, columns)
                                 editSession = sessionState.value.updateResizeCandidate(
@@ -403,6 +428,7 @@ internal fun HomeCanvasGrid(
                                 rowGapPx = geometry.rowGapPx.toFloat(),
                                 windowFirstRow = rowOrigin,
                                 originXPx = originX.toFloat(),
+                                originYPxPx = originYPx.toFloat(),
                             )
                             editSession = sessionState.value.updateMoveCandidate(
                                 cell,
@@ -426,6 +452,8 @@ internal fun HomeCanvasGrid(
                                     columnGapPx = geometry.columnGapPx.toFloat(),
                                     rowGapPx = geometry.rowGapPx.toFloat(),
                                     originXPx = originX.toFloat(),
+                                    rowOrigin = rowOrigin,
+                                    originYPxRestPx = originYPx.toFloat(),
                                 )
                                 val quantized = RenderableSpans.quantize(rawSpan, columns)
                                 editSession = sessionState.value.updateResizeCandidate(
@@ -480,6 +508,7 @@ internal fun HomeCanvasGrid(
                     .testTag(HOME_CANVAS_GRID_TAG),
             ) {
                 WindowedSpanContainer(
+                    modifier = Modifier.offset { IntOffset(0, originYOffsetPx) },
                     children = children,
                     window = window,
                     overscanRows = overscanRows,
@@ -493,6 +522,7 @@ internal fun HomeCanvasGrid(
                         active = active,
                         geometry = geometry,
                         rowOrigin = rowOrigin,
+                        originYPx = originYPx,
                         originX = originX,
                     )
                 }
@@ -504,6 +534,7 @@ internal fun HomeCanvasGrid(
                         rowOrigin = rowOrigin,
                         isValid = active.candidateValidity == CandidateValidity.VALID,
                         originX = originX,
+                        originYPx = originYPx,
                     )
                 }
                 // Resize handle overlay: positioned over the active tile's bottom-right
@@ -514,15 +545,20 @@ internal fun HomeCanvasGrid(
                     if (activeTile != null) {
                         // Handle tracks the live candidate span (not the persisted span)
                         // so it stays on the growing/shrinking corner during a resize drag.
-                        val tileBounds = TileBounds.bounds(
-                            position = GridPosition(active.origin.column, active.origin.row),
+                        // Signed frame: already rebased around `rowOrigin` with the G2
+                        // rest offset, so its top is final Box content coordinates.
+                        val tileBounds = TileBounds.signedBounds(
+                            column = active.origin.column,
+                            row = active.origin.row.toLong(),
                             span = GridSpan(active.candidateSpan.columns, active.candidateSpan.rows),
                             geometry = geometry,
                             originX = originX,
+                            originRow = rowOrigin,
+                            originYPx = originYPx,
                         )
                         val handleTopPx = tileBounds.bottom - with(density) { 48.dp.roundToPx() }
                         val handleLeftPx = tileBounds.right - with(density) { 48.dp.roundToPx() }
-                        val rebaseTop = rebasedOverlayTop(handleTopPx, rowOrigin, rowStridePx)
+                        val rebaseTop = handleTopPx
                         // Visual-only handle: the parent Box's unified drag handler
                         // hit-tests this corner and routes to RESIZE mode. No gesture
                         // detector here (a second detector loses the slop race).
@@ -552,11 +588,9 @@ internal fun HomeCanvasGrid(
                                 active.candidateSpan.rows,
                             ),
                         )
-                        val removeTop = rebasedOverlayTop(
-                            absoluteTopPx = removeAbsolute.y.coerceAtLeast(0),
-                            rowOrigin = rowOrigin,
-                            rowStridePx = rowStridePx,
-                        )
+                        // Signed frame already carries the row origin + rest offset, so
+                        // the remove anchor is final Box content coordinates.
+                        val removeTop = removeAbsolute.y
                         Box(
                             modifier = Modifier
                                 .offset { IntOffset(removeAbsolute.x.coerceAtLeast(0), removeTop) }
@@ -597,9 +631,12 @@ internal fun centeredOriginX(
 /**
  * Derives the visible logical row window from scroll/viewport/stride inputs.
  *
- * `firstRow = scrollPx / rowStridePx` (floor) is an ABSOLUTE row: the canvas content
- * origin is fixed at row 0 ([HOME_CANVAS_ROW_ORIGIN]), so the scroll offset measured
- * from the content top maps directly to absolute rows. The visible count covers the
+ * `firstRow = rowOrigin + scrollPx / rowStridePx` (floor) is an absolute content
+ * row: the scroll offset measured from the content top advances from the signed
+ * renderer origin ([rendererRowOrigin]). Scroll 0 shows `rowOrigin` at the
+ * viewport top, so content rebased around a non-zero origin (for example tiles
+ * on rows 5-6 with origin 5) stays selected instead of being culled by a
+ * zero-based window. The visible count covers the
  * viewport height with ceiling division plus one extra row for a partially visible
  * boundary row. The upper boundary saturates at [Long.MAX_VALUE] instead of wrapping.
  * Overscan is not applied here; the caller passes it separately to
@@ -610,12 +647,13 @@ internal fun visibleWindowFor(
     viewportHeightPx: Int,
     rowStridePx: Long,
     overscanRows: Long,
+    rowOrigin: Long = 0L,
 ): GridRowWindow {
     require(scrollPx >= 0) { "scrollPx must be non-negative" }
     require(viewportHeightPx >= 0) { "viewportHeightPx must be non-negative" }
     require(rowStridePx > 0L) { "rowStridePx must be positive" }
     require(overscanRows >= 0L) { "overscanRows must be non-negative" }
-    val firstRow: Long = scrollPx.toLong() / rowStridePx
+    val firstRow: Long = saturatingAdd(rowOrigin, scrollPx.toLong() / rowStridePx)
     val visibleCount: Long = if (viewportHeightPx == 0) {
         1L
     } else {
@@ -629,15 +667,102 @@ internal fun visibleWindowFor(
 }
 
 /**
+ * Signed renderer row origin (G3): the logical row the windowed container rebases
+ * pixel frames around.
+ *
+ * Returns the signed content [ContentBounds.minRow], or `0L` when no bounds are
+ * available (empty content). The value may be negative for content above row zero.
+ * It must NOT track the scroll offset: the scroll position is measured from the
+ * content top, so a scroll-derived origin would feed the rebased offset back into
+ * placement and selection.
+ */
+internal fun rendererRowOrigin(bounds: ContentBounds?): Long = bounds?.minRow ?: 0L
+
+/**
+ * Signed renderer vertical pixel origin (G3, from G2): the pixel offset applied on
+ * top of the rebased `(row - originRow) * stride` frame.
+ *
+ * Returns the G2 rest [GridRest.gridOriginY], or `0L` when no rest is available.
+ * The value may be negative (tall content anchored above) or positive (short
+ * content bias centering). Callers pass it as `originYPx` to
+ * [TileBounds.signedBounds].
+ */
+internal fun rendererOriginYPx(rest: GridRest?): Long = rest?.gridOriginY ?: 0L
+
+/**
+ * Derives signed content bounds from the loaded render tiles for the renderer
+ * origin.
+ *
+ * Maps each tile to a [SignedGridPlacement] and delegates to
+ * [GridContentBounds.contentBoundsOf]; returns `null` for empty input. Column
+ * legality stays owned by `core:grid`.
+ */
+internal fun contentBoundsForTiles(tiles: List<HomeRenderTile>, columns: Int): ContentBounds? {
+    if (tiles.isEmpty()) return null
+    val placements = tiles.map { tile ->
+        SignedGridPlacement(
+            id = tile.itemId,
+            column = tile.position.column,
+            row = tile.position.row,
+            span = GridSpan(tile.span.columns, tile.span.rows),
+        )
+    }
+    return GridContentBounds.contentBoundsOf(placements, columns)
+}
+
+/**
+ * Computes the G2 rest for signed renderer content in rebased coordinates.
+ *
+ * The rest is computed with `minRow = 0` because the container already rebases
+ * rows around [rendererRowOrigin]: `gridOriginY` is the container offset applied
+ * on top of local `(row - origin) * stride` frames (bias centering for short
+ * content, zero anchor for tall content). Returns `null` when the viewport height
+ * is not positive or the rest arithmetic overflows; callers fall back to `0L`
+ * via [rendererOriginYPx].
+ */
+internal fun signedRestFor(
+    viewportHeightPx: Int,
+    contentHeightPx: Int,
+    rowStridePx: Long,
+): GridRest? {
+    if (viewportHeightPx <= 0) return null
+    if (rowStridePx <= 0L) return null
+    return try {
+        GridRestOrigin.rest(
+            viewportHeightPx = viewportHeightPx.toLong(),
+            viewportTopPx = 0L,
+            contentHeightPx = contentHeightPx.toLong(),
+            minRow = 0L,
+            cellStridePx = rowStridePx,
+        )
+    } catch (e: ArithmeticException) {
+        null
+    }
+}
+
+/**
  * Derives a safe minimum content height in pixels from the loaded extent only.
  *
+ * Kept for backward compatibility; delegates to [contentMinHeightPxSigned].
+ * See [contentMinHeightPxSigned] for the row-count height contract.
+ */
+internal fun contentMinHeightPx(
+    extent: GridVerticalExtent,
+    cellSizePx: Int,
+    rowGapPx: Int,
+): Int = contentMinHeightPxSigned(extent, cellSizePx, rowGapPx)
+
+/**
+ * Derives a safe minimum content height in pixels from the loaded extent only,
+ * for use with the signed renderer origin.
+ *
  * Height is `totalScrollableRows * cellSizePx + (totalScrollableRows - 1) * rowGapPx`,
- * measured in ABSOLUTE content coordinates: the canvas origin is fixed at row 0
- * ([HOME_CANVAS_ROW_ORIGIN]), so no origin offset is subtracted here. Overflow or
+ * a row-count height independent of the signed origin: rebasing around `minRow`
+ * preserves row counts, so no origin offset is subtracted here. Overflow or
  * results beyond [Int] saturate to [Int.MAX_VALUE] instead of wrapping; no
  * second extent policy is computed here.
  */
-internal fun contentMinHeightPx(
+internal fun contentMinHeightPxSigned(
     extent: GridVerticalExtent,
     cellSizePx: Int,
     rowGapPx: Int,
@@ -660,7 +785,11 @@ internal fun contentMinHeightPx(
 }
 
 private fun saturatingAdd(value: Long, increment: Long): Long =
-    if (Long.MAX_VALUE - value < increment) Long.MAX_VALUE else value + increment
+    try {
+        Math.addExact(value, increment)
+    } catch (e: ArithmeticException) {
+        if (value >= 0L) Long.MAX_VALUE else Long.MIN_VALUE
+    }
 
 /** Test tag on the scrolling canvas grid (testing hook only; no behavior change). */
 internal const val HOME_CANVAS_GRID_TAG: String = "home-canvas-grid"
@@ -668,12 +797,12 @@ internal const val HOME_CANVAS_GRID_TAG: String = "home-canvas-grid"
 /**
  * Fixed logical row origin for the home canvas content: content y=0 is always row 0.
  *
- * The origin is deliberately NOT derived from the scroll position. The scroll offset
- * is measured from the content top, so an origin that tracks scroll would feed the
- * rebased offset back into tile placement, overlay rebasing, drag mapping, and the
- * container height, shifting tiles and losing visible-row selection once scrolled
- * past overscan. A fixed zero origin keeps every consumer in absolute coordinates.
+ * @deprecated The signed G3 renderer derives the origin from the content bounds via
+ * [rendererRowOrigin] (signed `minRow`, may be negative) plus the G2 rest offset via
+ * [rendererOriginYPx]. This constant is kept only for backward compatibility and is
+ * no longer used by [HomeCanvasGrid].
  */
+@Deprecated("Use rendererRowOrigin(contentBounds) with the signed content minRow.")
 internal const val HOME_CANVAS_ROW_ORIGIN: Long = 0L
 
 /** Test tag on the move-candidate validity outline (testing hook only; no behavior change). */
@@ -682,10 +811,11 @@ internal const val MOVE_CANDIDATE_OVERLAY_TAG: String = "move-candidate-overlay"
 /**
  * Non-interactive outline marking the active move candidate cell.
  *
- * Position reuses [TileBounds.bounds] for the absolute candidate frame, rebased around the
- * windowed container's [rowOrigin] via [rebasedOverlayTop] so the outline lands on the same
- * content coordinates the tiles are placed at. A valid candidate draws a 2dp outline in
- * `scheme.primary`; any other validity draws `scheme.error`.
+ * Position uses [TileBounds.signedBounds] with the signed [rowOrigin] plus the G2
+ * rest [originYPx] offset, so the outline lands on the same Box content coordinates
+ * the windowed tiles are placed at (rebased container plus rest offset). A valid
+ * candidate draws a 2dp outline in `scheme.primary`; any other validity draws
+ * `scheme.error`.
  */
 @Composable
 private fun MoveCandidateOverlay(
@@ -694,31 +824,30 @@ private fun MoveCandidateOverlay(
     rowOrigin: Long,
     modifier: Modifier = Modifier,
     originX: Int = 0,
+    originYPx: Long = 0L,
 ) {
     val density = LocalDensity.current
-    val absolute = TileBounds.bounds(
-        position = GridPosition(active.candidatePosition.column, active.candidatePosition.row),
+    val frame = TileBounds.signedBounds(
+        column = active.candidatePosition.column,
+        row = active.candidatePosition.row.toLong(),
         span = GridSpan(active.candidateSpan.columns, active.candidateSpan.rows),
         geometry = geometry,
         originX = originX,
+        originRow = rowOrigin,
+        originYPx = originYPx,
     )
-    val rowStridePx = geometry.cellSizePx.toLong() + geometry.rowGapPx.toLong()
-    val topPx = rebasedOverlayTop(
-        absoluteTopPx = absolute.top,
-        rowOrigin = rowOrigin,
-        rowStridePx = rowStridePx,
-    )
+    val topPx = frame.top
     val scheme = MaterialTheme.colorScheme
     val borderColor = if (active.candidateValidity == CandidateValidity.VALID) {
         scheme.primary
     } else {
         scheme.error
     }
-    val widthDp = with(density) { absolute.width.toDp() }
-    val heightDp = with(density) { absolute.height.toDp() }
+    val widthDp = with(density) { frame.widthPx.toDp() }
+    val heightDp = with(density) { frame.heightPx.toDp() }
     Box(
         modifier = modifier
-            .offset { IntOffset(absolute.left, topPx) }
+            .offset { IntOffset(frame.left, topPx) }
             .size(widthDp, heightDp)
             .border(2.dp, borderColor, AppTileDefaults.TileShape)
             .testTag(MOVE_CANDIDATE_OVERLAY_TAG),
@@ -751,19 +880,40 @@ internal fun isInHandle(
 }
 
 /**
+ * Signed-frame overload of [isInHandle] for G3 renderer frames.
+ *
+ * Same bottom-right corner rule over a [SignedPixelFrame] (whose top may be
+ * negative above the row origin). Pure math, framework-free.
+ */
+internal fun isInHandle(
+    x: Float,
+    y: Float,
+    originBounds: SignedPixelFrame,
+    handlePx: Int,
+): Boolean {
+    require(handlePx > 0) { "handlePx must be positive" }
+    val handleLeft = originBounds.right - handlePx
+    val handleTop = originBounds.bottom - handlePx
+    return x >= handleLeft.toFloat() &&
+        x <= originBounds.right.toFloat() &&
+        y >= handleTop.toFloat() &&
+        y <= originBounds.bottom.toFloat()
+}
+
+/**
  * Rebases an absolute [TileBounds] top edge into windowed-container content coordinates.
  *
- * The container places rows at `(row - origin) * stride`, so the overlay subtracts the same
- * origin stride from the absolute frame. Results outside [Int] saturate instead of wrapping;
- * callers treat the outline as best-effort feedback.
+ * Signed-tolerant (G3): both [absoluteTopPx] and [rowOrigin] may be negative (content
+ * above row zero, signed `minRow` origin). The container places rows at
+ * `(row - origin) * stride`, so the overlay subtracts the same origin stride from
+ * the absolute frame. Results outside [Int] saturate instead of wrapping; callers
+ * treat the outline as best-effort feedback.
  */
 internal fun rebasedOverlayTop(
     absoluteTopPx: Int,
     rowOrigin: Long,
     rowStridePx: Long,
 ): Int {
-    require(absoluteTopPx >= 0) { "absoluteTopPx must be non-negative" }
-    require(rowOrigin >= 0L) { "rowOrigin must be non-negative" }
     require(rowStridePx > 0L) { "rowStridePx must be positive" }
     return try {
         val rebased = Math.subtractExact(
@@ -785,8 +935,9 @@ internal fun rebasedOverlayTop(
  * - Larger spans center the button on the tile:
  *   `(left + (width - button)/2, top + (height - button)/2)`.
  *
- * Pure math, framework-free; the caller rebases the Y via [rebasedOverlayTop] like
- * other overlays. [span] selects the rule; legality stays owned by `core:grid`.
+ * Pure math, framework-free; signed G3 callers pass a [SignedPixelFrame] via the
+ * overload below (already rebased around the signed origin plus the rest offset).
+ * [span] selects the rule; legality stays owned by `core:grid`.
  */
 internal fun removeButtonOffset(
     tileBounds: PixelRect,
@@ -803,6 +954,31 @@ internal fun removeButtonOffset(
         IntOffset(
             tileBounds.left + (tileBounds.width - buttonSizePx) / 2,
             tileBounds.top + (tileBounds.height - buttonSizePx) / 2,
+        )
+    }
+}
+
+/**
+ * Signed-frame overload of [removeButtonOffset] for G3 renderer frames.
+ *
+ * Same 1×1 pin vs larger-span center rule over a [SignedPixelFrame] (top may be
+ * negative above the row origin). Pure math, framework-free.
+ */
+internal fun removeButtonOffset(
+    tileBounds: SignedPixelFrame,
+    buttonSizePx: Int,
+    span: GridSpan,
+): IntOffset {
+    require(buttonSizePx > 0) { "buttonSizePx must be positive" }
+    return if (span == GridSpan(1, 1)) {
+        IntOffset(
+            tileBounds.left - buttonSizePx / 2,
+            tileBounds.top - buttonSizePx / 2,
+        )
+    } else {
+        IntOffset(
+            tileBounds.left + (tileBounds.widthPx - buttonSizePx) / 2,
+            tileBounds.top + (tileBounds.heightPx - buttonSizePx) / 2,
         )
     }
 }
