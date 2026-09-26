@@ -1,5 +1,7 @@
 package me.foxtails.lakehead.feature.home
 
+import androidx.activity.ComponentActivity
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.SemanticsActions
@@ -8,10 +10,11 @@ import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.click
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasStateDescription
 import androidx.compose.ui.test.hasText
-import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -58,7 +61,7 @@ import org.junit.runner.RunWith
 class HomeCanvasTest {
 
     @get:Rule
-    val composeRule = createComposeRule()
+    val composeRule = createAndroidComposeRule<ComponentActivity>()
 
     private val homeId = HomeId("home-test")
 
@@ -385,9 +388,10 @@ class HomeCanvasTest {
     }
 
     @Test
-    fun longPressBody_entersMoveMode_withSelectedStateDescription() {
+    fun longPressBody_entersEditing_withSelectedStateDescription() {
         val tiles = listOf(tile("a", personal, "Movable App", column = 0, row = 0))
-        setCanvas(loaded(tiles))
+        var launched: AppIdentity? = null
+        setCanvas(loaded(tiles), onLaunchApp = { launched = it })
         composeRule.waitForIdle()
 
         // Index 0 is TileBody (first sibling in composition order): the only region
@@ -396,21 +400,38 @@ class HomeCanvasTest {
             .performSemanticsAction(SemanticsActions.OnLongClick) { it() }
         composeRule.waitForIdle()
 
+        // W1 wiggle-editing: selected tile announces Editing label semantics.
         composeRule.onNode(hasStateDescription("Editing Movable App, row 0 column 0"))
             .assertIsDisplayed()
         composeRule.onNodeWithText("Movable App").assertDoesNotExist()
+        // No move-session artifacts: Active is never entered from the wiggle path.
         composeRule.onNodeWithTag(MOVE_CANDIDATE_OVERLAY_TAG, useUnmergedTree = true)
-            .assertExists()
+            .assertDoesNotExist()
+        composeRule.onNodeWithTag(RESIZE_HANDLE_TAG, useUnmergedTree = true)
+            .assertDoesNotExist()
+        // Tiles retain click for select; body retains long-click for retarget.
+        val regions = composeRule.onAllNodesWithContentDescription("Movable App")
+        regions.assertCountEquals(2)
+        regions[0].assert(hasClickAction())
+        regions[1].assert(hasClickAction())
+        composeRule.runOnIdle {
+            val nodes = regions.fetchSemanticsNodes()
+            assertTrue(
+                "editing body must retain long-click for retarget",
+                nodes[0].config.contains(SemanticsActions.OnLongClick),
+            )
+            assertEquals(null, launched)
+        }
     }
 
     @Test
-    fun longPressSymbol_doesNotEnterMoveMode() {
+    fun longPressSymbol_doesNotEnterEditing() {
         val tiles = listOf(tile("a", personal, "Movable App", column = 0, row = 0))
         setCanvas(loaded(tiles))
         composeRule.waitForIdle()
 
         // Index 1 is AppLaunchButton: it exposes a click action but no long-click,
-        // so invoking long-press there must not enter edit mode.
+        // so no wiggle-editing entry is possible from the symbol.
         val symbolNode = composeRule.onAllNodesWithContentDescription("Movable App")[1]
             .fetchSemanticsNode()
         assertFalse(
@@ -421,10 +442,12 @@ class HomeCanvasTest {
             .assertDoesNotExist()
         composeRule.onNodeWithTag(MOVE_CANDIDATE_OVERLAY_TAG, useUnmergedTree = true)
             .assertDoesNotExist()
+        composeRule.onNodeWithTag(RESIZE_HANDLE_TAG, useUnmergedTree = true)
+            .assertDoesNotExist()
     }
 
     @Test
-    fun longPressLaunchable_showsResizeHandle() {
+    fun longPressLaunchable_entersEditingWithoutResizeHandle() {
         val tiles = listOf(tile("a", personal, "Resizable App", column = 0, row = 0))
         setCanvas(loaded(tiles))
         composeRule.waitForIdle()
@@ -437,22 +460,18 @@ class HomeCanvasTest {
 
         composeRule.onNodeWithText("Resizable App").assertDoesNotExist()
 
-        // Resize handle should appear at the bottom-right corner of the active tile
+        // W1 wiggle-editing enters Editing without a move session: no resize
+        // handle and no move overlay; Editing label semantics mark the selection.
+        composeRule.onNode(hasStateDescription("Editing Resizable App, row 0 column 0"))
+            .assertIsDisplayed()
         composeRule.onNodeWithTag(RESIZE_HANDLE_TAG, useUnmergedTree = true)
-            .assertExists()
-        // Handle should meet 48dp minimum touch target
-        val handleSize = composeRule
-            .onNodeWithTag(RESIZE_HANDLE_TAG, useUnmergedTree = true)
-            .fetchSemanticsNode().size
-        val minTouchPx = with(composeRule.density) { 48.dp.roundToPx() }
-        composeRule.runOnIdle {
-            assertTrue("resize handle width ${handleSize.width} must meet 48dp ($minTouchPx px)", handleSize.width >= minTouchPx)
-            assertTrue("resize handle height ${handleSize.height} must meet 48dp ($minTouchPx px)", handleSize.height >= minTouchPx)
-        }
+            .assertDoesNotExist()
+        composeRule.onNodeWithTag(MOVE_CANDIDATE_OVERLAY_TAG, useUnmergedTree = true)
+            .assertDoesNotExist()
     }
 
     @Test
-    fun inEdit_tilesExposeNoClickOrLongClick_andLaunchIsSuppressed() {
+    fun editing_tilesRetainClickForSelect_tapsNeverLaunch() {
         var launched: AppIdentity? = null
         val tiles = listOf(
             tile("a", personal, "Editable App", column = 0, row = 0),
@@ -461,41 +480,188 @@ class HomeCanvasTest {
         setCanvas(loaded(tiles), onLaunchApp = { launched = it })
         composeRule.waitForIdle()
 
-        // Enter edit mode from the first tile's body.
+        // Enter W1 wiggle-editing from the first tile's body.
         composeRule.onAllNodesWithContentDescription("Editable App")[0]
             .performSemanticsAction(SemanticsActions.OnLongClick) { it() }
         composeRule.waitForIdle()
 
-        // In-edit: every tile region is inert (no click/long-click) so the
-        // parent drag owns the gesture; taps must not launch.
+        // W1 Editing: every tile region retains click for select (never launch);
+        // body retains long-click for retarget, symbol never exposes long-click.
         val edited = composeRule.onAllNodesWithContentDescription("Editable App")
         edited.assertCountEquals(2)
-        composeRule.runOnIdle {
-            edited.fetchSemanticsNodes().forEach { node ->
-                assertFalse(
-                    "in-edit tile must expose no click action",
-                    node.config.contains(SemanticsActions.OnClick),
-                )
-                assertFalse(
-                    "in-edit tile must expose no long-click action",
-                    node.config.contains(SemanticsActions.OnLongClick),
-                )
-            }
-        }
+        edited[0].assert(hasClickAction())
+        edited[1].assert(hasClickAction())
         val other = composeRule.onAllNodesWithContentDescription("Other App")
         other.assertCountEquals(2)
+        other[0].assert(hasClickAction())
+        other[1].assert(hasClickAction())
         composeRule.runOnIdle {
-            other.fetchSemanticsNodes().forEach { node ->
+            val editedNodes = edited.fetchSemanticsNodes()
+            assertTrue(
+                "editing body must retain long-click for retarget",
+                editedNodes[0].config.contains(SemanticsActions.OnLongClick),
+            )
+            assertFalse(
+                "symbol must never expose long-click",
+                editedNodes[1].config.contains(SemanticsActions.OnLongClick),
+            )
+            val otherNodes = other.fetchSemanticsNodes()
+            assertTrue(
+                "non-selected body must retain long-click for retarget",
+                otherNodes[0].config.contains(SemanticsActions.OnLongClick),
+            )
+        }
+
+        // Tap on the other tile selects (transfers Editing) and never launches.
+        other[0].performClick()
+        composeRule.waitForIdle()
+        composeRule.onNode(hasStateDescription("Editing Other App, row 0 column 1"))
+            .assertIsDisplayed()
+        composeRule.onNode(hasStateDescription("Editing Editable App, row 0 column 0"))
+            .assertDoesNotExist()
+        composeRule.runOnIdle { assertEquals(null, launched) }
+
+        // Tapping the selected tile again stays selected and never launches.
+        other[1].performClick()
+        composeRule.waitForIdle()
+        composeRule.onNode(hasStateDescription("Editing Other App, row 0 column 1"))
+            .assertIsDisplayed()
+        composeRule.runOnIdle { assertEquals(null, launched) }
+
+        // No move-session artifacts while wiggle-editing.
+        composeRule.onNodeWithTag(MOVE_CANDIDATE_OVERLAY_TAG, useUnmergedTree = true)
+            .assertDoesNotExist()
+        composeRule.onNodeWithTag(RESIZE_HANDLE_TAG, useUnmergedTree = true)
+            .assertDoesNotExist()
+    }
+
+    // ---- W1 recess/select/exit ----
+
+    @Test
+    fun w1_normalToAToBToNormal_transferNoLaunch() {
+        val launched = mutableListOf<AppIdentity>()
+        val tiles = listOf(
+            tile("a", personal, "App A", column = 0, row = 0),
+            tile("b", work, "App B", column = 1, row = 0),
+        )
+        setCanvas(loaded(tiles), onLaunchApp = { launched.add(it) })
+        composeRule.waitForIdle()
+
+        // Normal: no Editing semantics yet.
+        composeRule.onNode(hasStateDescription("Editing App A, row 0 column 0"))
+            .assertDoesNotExist()
+        composeRule.onNode(hasStateDescription("Editing App B, row 0 column 1"))
+            .assertDoesNotExist()
+
+        // Normal → A: long-press selects A.
+        composeRule.onAllNodesWithContentDescription("App A")[0]
+            .performSemanticsAction(SemanticsActions.OnLongClick) { it() }
+        composeRule.waitForIdle()
+        composeRule.onNode(hasStateDescription("Editing App A, row 0 column 0"))
+            .assertIsDisplayed()
+
+        // A → B: tap transfers selection directly with no Normal round-trip.
+        composeRule.onAllNodesWithContentDescription("App B")[0].performClick()
+        composeRule.waitForIdle()
+        composeRule.onNode(hasStateDescription("Editing App B, row 0 column 1"))
+            .assertIsDisplayed()
+        composeRule.onNode(hasStateDescription("Editing App A, row 0 column 0"))
+            .assertDoesNotExist()
+
+        // B → Normal: Back exits.
+        composeRule.runOnIdle {
+            composeRule.activity.onBackPressedDispatcher.onBackPressed()
+        }
+        composeRule.waitForIdle()
+        composeRule.onNode(hasStateDescription("Editing App A, row 0 column 0"))
+            .assertDoesNotExist()
+        composeRule.onNode(hasStateDescription("Editing App B, row 0 column 1"))
+            .assertDoesNotExist()
+
+        // No tap or transfer ever launched.
+        composeRule.runOnIdle { assertTrue("transfer must never launch: $launched", launched.isEmpty()) }
+    }
+
+    @Test
+    fun w1_unavailableLongPress_noop() {
+        var launched: AppIdentity? = null
+        val missing = identity("0", "com.example.gone", "com.example.gone.Main")
+        val tiles = listOf(
+            tile("gone", missing, null, column = 0, row = 0),
+            tile("a", personal, "Available App", column = 1, row = 0),
+        )
+        setCanvas(loaded(tiles), onLaunchApp = { launched = it })
+        composeRule.waitForIdle()
+
+        // Unavailable tile exposes no long-click on either region.
+        val unavailable = composeRule.onAllNodesWithContentDescription("Unavailable app")
+        unavailable.assertCountEquals(2)
+        composeRule.runOnIdle {
+            unavailable.fetchSemanticsNodes().forEach { node ->
                 assertFalse(
-                    "non-active tile must also be inert while editing",
-                    node.config.contains(SemanticsActions.OnClick),
-                )
-                assertFalse(
-                    "non-active tile must expose no re-entry long-click while editing",
+                    "unavailable tile must expose no long-click action",
                     node.config.contains(SemanticsActions.OnLongClick),
                 )
             }
         }
+        // No Editing semantics appear; available tile stays unselected.
+        composeRule.onNode(hasStateDescription("Editing Available App, row 0 column 1"))
+            .assertDoesNotExist()
+        composeRule.onNodeWithTag(MOVE_CANDIDATE_OVERLAY_TAG, useUnmergedTree = true)
+            .assertDoesNotExist()
+        composeRule.runOnIdle { assertEquals(null, launched) }
+    }
+
+    @Test
+    fun w1_emptyTap_exitsToNormal() {
+        var launched: AppIdentity? = null
+        val tiles = listOf(
+            tile("a", personal, "Tappable App", column = 0, row = 0),
+            tile("b", work, "Other App", column = 1, row = 0),
+        )
+        setCanvas(loaded(tiles), onLaunchApp = { launched = it })
+        composeRule.waitForIdle()
+
+        composeRule.onAllNodesWithContentDescription("Tappable App")[0]
+            .performSemanticsAction(SemanticsActions.OnLongClick) { it() }
+        composeRule.waitForIdle()
+        composeRule.onNode(hasStateDescription("Editing Tappable App, row 0 column 0"))
+            .assertIsDisplayed()
+
+        // Tap empty grid area (bottom of the scrolling grid, below row 0 tiles).
+        composeRule.onNodeWithTag(HOME_CANVAS_GRID_TAG, useUnmergedTree = true)
+            .performTouchInput { click(Offset(centerX.toFloat(), (height - 20).toFloat())) }
+        composeRule.waitForIdle()
+
+        composeRule.onNode(hasStateDescription("Editing Tappable App, row 0 column 0"))
+            .assertDoesNotExist()
+        composeRule.onNode(hasStateDescription("Editing Other App, row 0 column 1"))
+            .assertDoesNotExist()
+        composeRule.runOnIdle { assertEquals(null, launched) }
+    }
+
+    @Test
+    fun w1_back_exitsToNormal() {
+        var launched: AppIdentity? = null
+        val tiles = listOf(tile("a", personal, "Back App", column = 0, row = 0))
+        setCanvas(loaded(tiles), onLaunchApp = { launched = it })
+        composeRule.waitForIdle()
+
+        composeRule.onAllNodesWithContentDescription("Back App")[0]
+            .performSemanticsAction(SemanticsActions.OnLongClick) { it() }
+        composeRule.waitForIdle()
+        composeRule.onNode(hasStateDescription("Editing Back App, row 0 column 0"))
+            .assertIsDisplayed()
+
+        composeRule.runOnIdle {
+            composeRule.activity.onBackPressedDispatcher.onBackPressed()
+        }
+        composeRule.waitForIdle()
+
+        composeRule.onNode(hasStateDescription("Editing Back App, row 0 column 0"))
+            .assertDoesNotExist()
+        composeRule.onNodeWithTag(MOVE_CANDIDATE_OVERLAY_TAG, useUnmergedTree = true)
+            .assertDoesNotExist()
         composeRule.runOnIdle { assertEquals(null, launched) }
     }
 
