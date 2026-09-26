@@ -20,5 +20,16 @@
             <action android:name="android.intent.action.MAIN" />
             <category android:name="android.intent.category.LAUNCHER" />
         </intent>
+        <!-- Feed overlay providers (values mirror platform:feed C1 constants
+            FEED_OVERLAY_ACTION, LAWNFEED_PACKAGE, LAWNFEED_LEGACY_PACKAGE, NEO_FEED_PACKAGE).
+            No extra permission: hosting binds the provider's exported overlay service with
+            BIND_AUTO_CREATE and draws nothing itself, so no overlay or query permission is
+            required. -->
+        <intent>
+            <action android:name="com.android.launcher3.WINDOW_OVERLAY" />
+        </intent>
+        <package android:name="app.lawnchair.lawnfeed" />
+        <package android:name="ch.deletescape.lawnchair.lawnfeed" />
+        <package android:name="com.saulhdev.neofeed" />
     </queries>
 </manifest>
