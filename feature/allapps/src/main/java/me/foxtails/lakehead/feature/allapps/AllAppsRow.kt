@@ -1,11 +1,14 @@
 package me.foxtails.lakehead.feature.allapps
 
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
@@ -44,14 +47,18 @@ import me.foxtails.lakehead.core.model.AppIdentity
  * - The launch area (icon + label) is a single merged button node named by [AllAppsEntry.label];
  *   activating it dispatches the exact [AppIdentity] via [onLaunchApp].
  * - The trailing cluster is always two sibling slots directly under the outer [Row]
- *   (never nested): an Add slot followed by a Remove placeholder slot.
- * - When [AllAppsEntry.alreadyOnHome] is false the Add slot is an enabled ≥48dp button
+ *   (never nested): an Add slot followed by a Remove placeholder slot. Each slot is a
+ *   square ≥48dp [Box]; the visible glyph is an empty circle ([CircleShape] border in
+ *   `onSurface`, never hardcoded black/white) with a centered [BasicText] `"+"`
+ *   (Add) or `"−"` (Remove, U+2212).
+ * - When [AllAppsEntry.alreadyOnHome] is false the Add slot is an enabled 48dp button
  *   described as `"Add {label} to Home"`; activating it dispatches the exact [AppIdentity]
  *   via [onAddToHome].
  * - When [AllAppsEntry.alreadyOnHome] is true the Add slot is replaced by an honest,
- *   non-clickable ≥48dp `"Added"` marker described as `"{label} already on Home"` with
- *   state `"Added"`, so the row never promises an add it will not perform.
- * - The Remove slot is visual-only in this slice: a disabled ≥48dp box described as
+ *   non-clickable 48dp `"Added"` marker described as `"{label} already on Home"` with
+ *   state `"Added"`, so the row never promises an add it will not perform. The slot
+ *   keeps the same 48dp tappable shape (minima) as the Add button.
+ * - The Remove slot is visual-only in this slice: a disabled 48dp box described as
  *   `"Remove {label} from Home"` with no click action, no [Role], and 0.38f alpha.
  *   There is intentionally no `onRemove` callback, no persistence, and no platform call.
  */
@@ -65,8 +72,9 @@ fun AllAppsRow(
 ) {
     val dimensions = LocalLauncherDimensions.current
     val rowMinHeight = dimensions.symbolSize + dimensions.tilePadding * 2
+    val onSurface = MaterialTheme.colorScheme.onSurface
     val onSurfaceStyle =
-        LocalTextStyle.current.merge(color = MaterialTheme.colorScheme.onSurface)
+        LocalTextStyle.current.merge(color = onSurface)
     Row(
         modifier = modifier
             .testTag(ALL_APPS_ROW_TAG)
@@ -107,12 +115,11 @@ fun AllAppsRow(
         if (entry.alreadyOnHome) {
             Box(
                 modifier = Modifier
-                    .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+                    .size(48.dp)
                     .semantics {
                         contentDescription = "${entry.label} already on Home"
                         stateDescription = ADDED_STATE_DESCRIPTION
-                    }
-                    .padding(horizontal = 12.dp, vertical = 12.dp),
+                    },
                 contentAlignment = Alignment.Center,
             ) {
                 BasicText(
@@ -123,38 +130,50 @@ fun AllAppsRow(
         } else {
             Box(
                 modifier = Modifier
-                    .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+                    .size(48.dp)
                     .semantics(mergeDescendants = true) {
                         contentDescription = "Add ${entry.label} to Home"
                     }
                     .clickable(
                         role = Role.Button,
                         onClick = { onAddToHome(entry.identity) },
-                    )
-                    .padding(horizontal = 12.dp, vertical = 12.dp),
+                    ),
                 contentAlignment = Alignment.Center,
             ) {
-                BasicText(
-                    text = ADD_ACTION_TEXT,
-                    style = onSurfaceStyle,
-                )
+                Box(
+                    modifier = Modifier
+                        .size(32.dp)
+                        .border(1.dp, onSurface, CircleShape),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    BasicText(
+                        text = ADD_ACTION_TEXT,
+                        style = onSurfaceStyle,
+                    )
+                }
             }
         }
         Box(
             modifier = Modifier
                 .testTag(ALL_APPS_REMOVE_TAG)
-                .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+                .size(48.dp)
                 .alpha(0.38f)
                 .semantics(mergeDescendants = true) {
                     contentDescription = "Remove ${entry.label} from Home"
-                }
-                .padding(horizontal = 12.dp, vertical = 12.dp),
+                },
             contentAlignment = Alignment.Center,
         ) {
-            BasicText(
-                text = REMOVE_ACTION_TEXT,
-                style = onSurfaceStyle,
-            )
+            Box(
+                modifier = Modifier
+                    .size(32.dp)
+                    .border(1.dp, onSurface, CircleShape),
+                contentAlignment = Alignment.Center,
+            ) {
+                BasicText(
+                    text = REMOVE_ACTION_TEXT,
+                    style = onSurfaceStyle,
+                )
+            }
         }
     }
 }
@@ -168,11 +187,11 @@ const val ALL_APPS_ICON_TAG: String = "allapps-row-icon"
 /** Test tag on the visual-only Remove placeholder slot (testing hook only). */
 const val ALL_APPS_REMOVE_TAG: String = "allapps-remove"
 
-/** Visible label of the add control. */
-const val ADD_ACTION_TEXT: String = "Add"
+/** Visible glyph inside the Add circle (tester aid; the slot description carries the meaning). */
+const val ADD_ACTION_TEXT: String = "+"
 
-/** Visible label of the visual-only remove placeholder. */
-const val REMOVE_ACTION_TEXT: String = "Remove"
+/** Visible glyph inside the visual-only Remove circle (U+2212 minus). */
+const val REMOVE_ACTION_TEXT: String = "−"
 
 /** Visible marker shown instead of the add control when the app is already on Home. */
 const val ADDED_MARKER_TEXT: String = "Added"
