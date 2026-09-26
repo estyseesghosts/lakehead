@@ -578,17 +578,11 @@ internal fun HomeCanvasGrid(
                         }
                     }
                     val slopChange = slop ?: return@awaitEachGesture
-                    // Slop-position check: a press that starts on the body but crosses
-                    // slop inside the handle corner still routes to RESIZE, so
-                    // body-vs-handle competition is decided at drag start, not only
-                    // at the hold position.
-                    val slopInHandle = isInHandle(
-                        slopChange.position.x,
-                        slopChange.position.y,
-                        originBounds,
-                        handleSizePx,
-                    )
-                    val isOnHandle = startInHandle || slopInHandle
+                    // B2: RESIZE routes only on startInHandle (hold position in
+                    // the handle corner). A body-origin press never upgrades to
+                    // RESIZE via the slop position; MOVE stays authoritative
+                    // with snapshot-once routing and no mid-gesture promotion.
+                    val isOnHandle = startInHandle
                     // A2 single arbitration for the active drag: route the
                     // start-decided routing through resolveHomeGesture so the
                     // drag holds the pager for its lifetime. Handle-origin →
@@ -877,7 +871,13 @@ internal fun HomeCanvasGrid(
                         ) {
                             RemoveButton(
                                 label = removeLabel,
-                                onRemove = { onRemoveTile(active.itemId) },
+                                onRemove = {
+                                    onRemoveTile(active.itemId)
+                                    // B2: unpin selection → Editing(null) + cancel
+                                    // Active → Idle; stays in wiggle-edit.
+                                    interaction = interaction.unpinIfSelected(active.itemId)
+                                    editSession = editSession.cancel()
+                                },
                             )
                         }
                     }

@@ -297,4 +297,41 @@ class HomeGestureArbitrationTest {
         assertFalse(HomeGestureWinner.SCROLL.holdsPager())
         assertFalse(HomeGestureWinner.BACKGROUND.holdsPager())
     }
+
+    // ---- B2 move/selection separation: ACTIVE_MOVE beats selection inputs ----
+
+    @Test
+    fun activeMove_beatsSelectTapAndScroll() {
+        // Body-drag in progress beats wiggle select-drag, tap and scroll:
+        // move and selection never share the gesture.
+        assertEquals(
+            HomeGestureWinner.ACTIVE_MOVE,
+            resolveHomeGesture(
+                isActiveMove = true, isSelectDrag = true, isTap = true,
+                isScroll = true,
+            ),
+        )
+    }
+
+    @Test
+    fun activeMove_beatsSelectDragAlone() {
+        assertEquals(
+            HomeGestureWinner.ACTIVE_MOVE,
+            resolveHomeGesture(isActiveMove = true, isSelectDrag = true),
+        )
+    }
+
+    @Test
+    fun unpin_beatsHandleAndMove() {
+        // Remove affordance wins over the handle corner and an in-flight move:
+        // unpin never becomes resize or move.
+        assertEquals(
+            HomeGestureWinner.UNPIN,
+            resolveHomeGesture(isUnpin = true, isOnHandle = true, isActiveMove = true),
+        )
+        assertEquals(
+            HomeGestureWinner.UNPIN,
+            resolveHomeGesture(isUnpin = true, isActiveResize = true, isActiveMove = true),
+        )
+    }
 }

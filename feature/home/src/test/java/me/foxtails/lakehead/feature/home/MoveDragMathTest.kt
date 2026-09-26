@@ -101,4 +101,49 @@ class MoveDragMathTest {
         val pos = MoveDragMath.cellForPixel(0f, 130f, cellSize, gap, gap, 2L, originYPxPx = 26f)
         assertEquals(4, pos.row)
     }
+
+    @Test
+    fun nonZeroOriginX_offsetsColumnMapping() {
+        // Centered grid: column 0's left edge at originX = 10.
+        // Pointer at the origin maps to column 0; one stride right maps to 1.
+        val atOrigin = MoveDragMath.cellForPixel(10f, 0f, cellSize, gap, gap, 0L, originXPx = 10f)
+        assertEquals(0, atOrigin.column)
+        val oneStride = MoveDragMath.cellForPixel(
+            10f + stride, 0f, cellSize, gap, gap, 0L, originXPx = 10f,
+        )
+        assertEquals(1, oneStride.column)
+    }
+
+    @Test
+    fun originXBelowOrigin_coercedToZero() {
+        // Pointer left of the centered origin is negative in grid coords → coerced.
+        val pos = MoveDragMath.cellForPixel(4f, 0f, cellSize, gap, gap, 0L, originXPx = 10f)
+        assertEquals(0, pos.column)
+    }
+
+    @Test
+    fun gapStraddle_staysInLeadingCellUntilStride() {
+        // Stride 52: mid-gap (x=50) still floors to column 0; exact stride flips to 1.
+        val midGap = MoveDragMath.cellForPixel(50f, 0f, cellSize, gap, gap, 0L)
+        assertEquals(0, midGap.column)
+        val atStride = MoveDragMath.cellForPixel(52f, 0f, cellSize, gap, gap, 0L)
+        assertEquals(1, atStride.column)
+        // Same rule holds with a centered origin: gap pixel before the next
+        // stride stays in the leading column.
+        val centeredGap = MoveDragMath.cellForPixel(
+            10f + 50f, 0f, cellSize, gap, gap, 0L, originXPx = 10f,
+        )
+        assertEquals(0, centeredGap.column)
+    }
+
+    @Test
+    fun largeRowWithRest_offsetsBeforeDivision() {
+        // Large window origin plus rest: row = 1000 + ((5200 - 260) / 52).
+        // (5200 - 260) = 4940 → 4940 / 52 = 95 → row 1095.
+        // Without subtracting the rest it would read as 1000 + 100 = 1100.
+        val pos = MoveDragMath.cellForPixel(
+            0f, 5200f, cellSize, gap, gap, 1000L, originYPxPx = 260f,
+        )
+        assertEquals(1095, pos.row)
+    }
 }

@@ -311,4 +311,31 @@ class HomeInteractionControllerTest {
         assertTrue(second is HomeInteractionController.Editing)
         assertNull((second as HomeInteractionController.Editing).selectedId)
     }
+
+    // ---- B2 tap-transfer + unpin independence ----
+
+    @Test
+    fun tapTransfer_directAtoBtoA_withoutNormalRoundTrip() {
+        // Selection transfers directly tile-to-tile; no Normal intermediate.
+        val editingA = HomeInteractionController.Editing(selectedId = tileA)
+        val toB = editingA.selectOnTap(tileB)
+        assertEquals(tileB, (toB as HomeInteractionController.Editing).selectedId)
+        val backToA = toB.selectOnTap(tileA)
+        assertEquals(tileA, (backToA as HomeInteractionController.Editing).selectedId)
+    }
+
+    @Test
+    fun unpin_independentOfTapTransfer_otherTileUnaffected() {
+        // Unpinning A never disturbs B's selection; taps still transfer after unpin.
+        val editingB = HomeInteractionController.Editing(selectedId = tileB)
+        val afterUnpinA = editingB.unpinIfSelected(tileA)
+        assertSame(editingB, afterUnpinA)
+        assertEquals(tileB, (afterUnpinA as HomeInteractionController.Editing).selectedId)
+
+        // Unpin B → Editing(null); a later tap re-selects A independently.
+        val unpinned = editingB.unpinIfSelected(tileB)
+        assertNull((unpinned as HomeInteractionController.Editing).selectedId)
+        val reselected = unpinned.selectOnTap(tileA)
+        assertEquals(tileA, (reselected as HomeInteractionController.Editing).selectedId)
+    }
 }
