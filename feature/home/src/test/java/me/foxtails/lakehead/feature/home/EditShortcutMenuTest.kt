@@ -124,6 +124,31 @@ class EditShortcutMenuTest {
         assertFalse(isEditShortcutMenuVisible(null, ItemId("gone"), tiles, entries))
     }
 
+    // ---- B1 selection scoping (owner gate) ----
+
+    @Test
+    fun scopedOwnerMatchingSelection_matches() {
+        assertTrue(isSurfaceEntriesForSelection(ItemId("a"), ItemId("a")))
+    }
+
+    @Test
+    fun staleOwnerAfterSwitch_hidesUntilReload() {
+        // A→B tap-switch: A's rows must not render on B while B loads.
+        assertFalse(isSurfaceEntriesForSelection(ItemId("a"), ItemId("b")))
+    }
+
+    @Test
+    fun unscopedRows_keepLegacyBehavior() {
+        // Null owner (previews/tests) never gates on the selection.
+        assertTrue(isSurfaceEntriesForSelection(null, ItemId("a")))
+        assertTrue(isSurfaceEntriesForSelection(null, null))
+    }
+
+    @Test
+    fun scopedOwnerWithNullSelection_hides() {
+        assertFalse(isSurfaceEntriesForSelection(ItemId("a"), null))
+    }
+
     // ---- size policy ----
 
     @Test

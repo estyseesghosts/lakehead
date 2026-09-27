@@ -153,6 +153,22 @@ internal fun editShortcutMenuEntries(
 }
 
 /**
+ * Owner predicate for selection-scoped menu rows (B1).
+ *
+ * Production scopes [entries] to the tile they were loaded for: the menu
+ * shows rows only when [ownerId] names the [selectedId] tile, so an A→B
+ * tap-switch never flashes A's rows on B while B's query is in flight (the
+ * caller clears to an honest empty until B's rows arrive). A null [ownerId]
+ * is the unscoped legacy path (previews/tests that pass global rows); it
+ * preserves the [editShortcutMenuEntries] behavior unchanged. Pure,
+ * framework-free and unit-testable.
+ */
+internal fun isSurfaceEntriesForSelection(
+    ownerId: ItemId?,
+    selectedId: ItemId?,
+): Boolean = ownerId == null || ownerId == selectedId
+
+/**
  * Visibility predicate for the edit-mode shortcut menu.
  *
  * The menu shows only while no move/resize session is active ([active] == null)

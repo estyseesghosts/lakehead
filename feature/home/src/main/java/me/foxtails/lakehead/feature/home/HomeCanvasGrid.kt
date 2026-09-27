@@ -170,7 +170,16 @@ internal fun HomeCanvasGrid(
     // selected tile (empty until shortcut discovery lands). Row taps report
     // onSurfaceExecute/onSurfaceTogglePin with the selected ItemId and entry
     // id; execution and pin persistence stay with the caller.
+    // B1 selection scoping: [surfaceEntriesTileId] names the tile [surfaceEntries]
+    // was loaded for (null = unscoped legacy rows for previews/tests). The menu
+    // shows only when the owner matches the selection, so an A→B tap-switch
+    // hides honestly until B's rows arrive instead of flashing A's rows on B.
+    // [onSelectedTileChange] reports selection transitions (long-press enter,
+    // tap-other transfer, empty-tap/Back/navigate clear) so the caller can
+    // query-on-select and scope rows; invoked with null when no tile is selected.
     surfaceEntries: List<ShortcutSurfaceEntry> = emptyList(),
+    surfaceEntriesTileId: ItemId? = null,
+    onSelectedTileChange: (ItemId?) -> Unit = {},
     onSurfaceExecute: (ItemId, String) -> Unit = { _, _ -> },
     onSurfaceTogglePin: (ItemId, String) -> Unit = { _, _ -> },
     // W3 reduced-motion: when true the resize preview snaps to the validated
@@ -285,6 +294,14 @@ internal fun HomeCanvasGrid(
             // on populated→empty transitions and grid disposal.
             LaunchedEffect(pagerHold) {
                 latestPagerHoldCallback.value(pagerHold)
+            }
+            // B1 selection signal: reports the W1-selected tile id (or null when
+            // no tile is selected) so the caller can query-on-select and scope
+            // menu rows to the selection. Hoisted latest callback; emission is
+            // idempotent per selection value. Never drives selection itself.
+            val latestSelectionCallback = rememberUpdatedState(onSelectedTileChange)
+            LaunchedEffect(interactionEditing?.selectedId) {
+                latestSelectionCallback.value(interactionEditing?.selectedId)
             }
             BackHandler(
                 enabled = active != null || interactionEditing != null,
@@ -1129,7 +1146,12 @@ internal fun HomeCanvasGrid(
                 // onSurfaceTogglePin with the selected ItemId and entry id;
                 // the menu never moves, resizes or pages tiles.
                 val menuSelectedId = interactionEditing?.selectedId
-                if (isEditShortcutMenuVisible(active, menuSelectedId, loaded.tiles, surfaceEntries)) {
+                // B1 owner gate: rows scoped to another tile (stale A rows after
+                // an A→B switch) hide honestly until the caller's rows for B
+                // arrive; unscoped (null owner) rows keep the B4 behavior.
+                if (isEditShortcutMenuVisible(active, menuSelectedId, loaded.tiles, surfaceEntries) &&
+                    isSurfaceEntriesForSelection(surfaceEntriesTileId, menuSelectedId)
+                ) {
                     val menuTile = loaded.tiles.find { it.itemId == menuSelectedId }
                     if (menuTile != null) {
                         EditShortcutMenu(

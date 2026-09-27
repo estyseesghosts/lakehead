@@ -141,8 +141,13 @@ internal fun LauncherShell(
     // shortcut entries for the currently selected home tile (empty until
     // shortcut discovery lands, so production shows no menu). Row taps report
     // the selected ItemId and entry id; execution and pin persistence stay
-    // with the caller.
+    // with the caller. B1 selection scoping: [surfaceEntriesTileId] names the
+    // tile the rows were loaded for (null = unscoped) and
+    // [onSelectedTileChange] reports grid selection transitions for
+    // query-on-select; the shell never queries.
     surfaceEntries: List<ShortcutSurfaceEntry> = emptyList(),
+    surfaceEntriesTileId: ItemId? = null,
+    onSelectedTileChange: (ItemId?) -> Unit = {},
     onSurfaceExecute: (ItemId, String) -> Unit = { _, _ -> },
     onSurfaceTogglePin: (ItemId, String) -> Unit = { _, _ -> },
     onHeaderTap: (String) -> Unit = {},
@@ -381,6 +386,8 @@ internal fun LauncherShell(
                     onResizeTile = onResizeTile,
                     onRemoveTile = onRemoveTile,
                     surfaceEntries = surfaceEntries,
+                    surfaceEntriesTileId = surfaceEntriesTileId,
+                    onSelectedTileChange = onSelectedTileChange,
                     onSurfaceExecute = onSurfaceExecute,
                     onSurfaceTogglePin = onSurfaceTogglePin,
                     onTransientHoldChange = { homeHold = it },

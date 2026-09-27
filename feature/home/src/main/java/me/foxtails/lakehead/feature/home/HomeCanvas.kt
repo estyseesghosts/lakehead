@@ -44,7 +44,10 @@ import me.foxtails.lakehead.core.model.LogicalSpan
  *   rank-ordered shortcut rows for the current selection (empty until
  *   shortcut discovery lands), and row taps report [onSurfaceExecute]/
  *   [onSurfaceTogglePin] with the selected [ItemId] and entry id. Execution
- *   and pin persistence stay with the caller.
+ *   and pin persistence stay with the caller. B1 selection scoping:
+ *   [surfaceEntriesTileId] names the tile the rows were loaded for (null =
+ *   unscoped) and [onSelectedTileChange] reports selection transitions so the
+ *   caller can query-on-select; the grid itself never queries.
  * - A1 hold signal: [onTransientHoldChange] reports transient hold state owned by
  *   [HomeCanvasGrid] (active edit or wiggle editing) so the shell
  *   can gate pager swipe. Programmatic pill navigation is unaffected.
@@ -79,6 +82,8 @@ fun HomeCanvas(
     onResizeTile: (ItemId, LogicalSpan) -> Unit = { _, _ -> },
     onRemoveTile: (ItemId) -> Unit = {},
     surfaceEntries: List<ShortcutSurfaceEntry> = emptyList(),
+    surfaceEntriesTileId: ItemId? = null,
+    onSelectedTileChange: (ItemId?) -> Unit = {},
     onSurfaceExecute: (ItemId, String) -> Unit = { _, _ -> },
     onSurfaceTogglePin: (ItemId, String) -> Unit = { _, _ -> },
     onTransientHoldChange: (Boolean) -> Unit = {},
@@ -147,6 +152,8 @@ fun HomeCanvas(
                     onResizeTile = onResizeTile,
                     onRemoveTile = onRemoveTile,
                     surfaceEntries = surfaceEntries,
+                    surfaceEntriesTileId = surfaceEntriesTileId,
+                    onSelectedTileChange = onSelectedTileChange,
                     onSurfaceExecute = onSurfaceExecute,
                     onSurfaceTogglePin = onSurfaceTogglePin,
                     onTransientHoldChange = onTransientHoldChange,
