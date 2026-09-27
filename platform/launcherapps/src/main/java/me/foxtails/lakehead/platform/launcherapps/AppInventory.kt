@@ -11,10 +11,10 @@ import java.util.Locale
 
 /**
  * Owns the immutable, profile-aware snapshot published by [AppCatalogue]. Snapshots are ordered
- * by display label (case-insensitive, locale-aware via [Collator]) as the primary key so the
+ * by raw sortKey (case-insensitive, locale-aware via [Collator]) as the primary key so the
  * catalogue reads in natural A→Z order. Package name, class name and profile ID serve as
- * deterministic tie-breakers; profile is last so the flat list is label-first across all
- * profiles, with profile grouping only when labels, package and class coincide.
+ * deterministic tie-breakers; profile is last so the flat list is sortKey-first across all
+ * profiles, with profile grouping only when sortKey, package and class coincide.
  *
  * Entries are de-duplicated by [me.foxtails.lakehead.core.model.AppIdentity], so one component
  * can never appear twice with competing labels; when duplicates disagree on a label, the
@@ -51,7 +51,7 @@ internal class AppInventory : AppCatalogue {
         val collator = Collator.getInstance(Locale.ROOT).apply { strength = Collator.PRIMARY }
         return Collections.unmodifiableList(
             entries.sortedWith(
-                compareBy<LauncherAppEntry, String>(collator) { it.label }
+                compareBy<LauncherAppEntry, String>(collator) { it.sortKey }
                     .thenBy { it.identity.component.packageName }
                     .thenBy { it.identity.component.className }
                     .thenBy { it.identity.profileId.value },

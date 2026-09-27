@@ -6,6 +6,8 @@ import me.foxtails.lakehead.core.model.AppIdentity
 data class AllAppsEntry(
     val identity: AppIdentity,
     val label: String,
+    val sortKey: String = label,
+    val displayLabel: String = label,
     val alreadyOnHome: Boolean,
 )
 

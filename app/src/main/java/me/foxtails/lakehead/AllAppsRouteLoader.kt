@@ -173,6 +173,8 @@ internal class AllAppsRouteLoader(
             AllAppsEntry(
                 identity = entry.identity,
                 label = entry.label,
+                sortKey = entry.sortKey,
+                displayLabel = entry.displayLabel,
                 alreadyOnHome = entry.identity in membership,
             )
         }

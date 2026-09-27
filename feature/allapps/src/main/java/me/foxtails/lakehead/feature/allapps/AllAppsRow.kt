@@ -44,7 +44,7 @@ import me.foxtails.lakehead.core.model.AppIdentity
  * `tilePadding * 1.5f`. Text renders in `onSurface` via a [LocalTextStyle] merge so it
  * stays theme-adaptive (never a hardcoded black/white).
  *
- * - The launch area (icon + label) is a single merged button node named by [AllAppsEntry.label];
+ * - The launch area (icon + label) is a single merged button node named by [AllAppsEntry.displayLabel];
  *   activating it dispatches the exact [AppIdentity] via [onLaunchApp].
  * - The trailing cluster is always two sibling slots directly under the outer [Row]
  *   (never nested): an Add slot followed by a Remove placeholder slot. Each slot is a
@@ -52,14 +52,14 @@ import me.foxtails.lakehead.core.model.AppIdentity
  *   `onSurface`, never hardcoded black/white) with a centered [BasicText] `"+"`
  *   (Add) or `"−"` (Remove, U+2212).
  * - When [AllAppsEntry.alreadyOnHome] is false the Add slot is an enabled 48dp button
- *   described as `"Add {label} to Home"`; activating it dispatches the exact [AppIdentity]
+ *   described as `"Add {displayLabel} to Home"`; activating it dispatches the exact [AppIdentity]
  *   via [onAddToHome].
  * - When [AllAppsEntry.alreadyOnHome] is true the Add slot is replaced by an honest,
- *   non-clickable 48dp `"Added"` marker described as `"{label} already on Home"` with
+ *   non-clickable 48dp `"Added"` marker described as `"{displayLabel} already on Home"` with
  *   state `"Added"`, so the row never promises an add it will not perform. The slot
  *   keeps the same 48dp tappable shape (minima) as the Add button.
  * - The Remove slot is visual-only in this slice: a disabled 48dp box described as
- *   `"Remove {label} from Home"` with no click action, no [Role], and 0.38f alpha.
+ *   `"Remove {displayLabel} from Home"` with no click action, no [Role], and 0.38f alpha.
  *   There is intentionally no `onRemove` callback, no persistence, and no platform call.
  */
 @Composable
@@ -91,7 +91,7 @@ fun AllAppsRow(
                 .weight(1f)
                 .defaultMinSize(minHeight = 48.dp)
                 .semantics(mergeDescendants = true) {
-                    contentDescription = entry.label
+                    contentDescription = entry.displayLabel
                 }
                 .clickable(
                     role = Role.Button,
@@ -107,7 +107,7 @@ fun AllAppsRow(
                 )
             }
             BasicText(
-                text = entry.label,
+                text = entry.displayLabel,
                 style = onSurfaceStyle,
                 modifier = Modifier.padding(start = dimensions.tilePadding * 1.5f),
             )
@@ -117,7 +117,7 @@ fun AllAppsRow(
                 modifier = Modifier
                     .size(48.dp)
                     .semantics {
-                        contentDescription = "${entry.label} already on Home"
+                        contentDescription = "${entry.displayLabel} already on Home"
                         stateDescription = ADDED_STATE_DESCRIPTION
                     },
                 contentAlignment = Alignment.Center,
@@ -132,7 +132,7 @@ fun AllAppsRow(
                 modifier = Modifier
                     .size(48.dp)
                     .semantics(mergeDescendants = true) {
-                        contentDescription = "Add ${entry.label} to Home"
+                        contentDescription = "Add ${entry.displayLabel} to Home"
                     }
                     .clickable(
                         role = Role.Button,
@@ -159,7 +159,7 @@ fun AllAppsRow(
                 .size(48.dp)
                 .alpha(0.38f)
                 .semantics(mergeDescendants = true) {
-                    contentDescription = "Remove ${entry.label} from Home"
+                    contentDescription = "Remove ${entry.displayLabel} from Home"
                 },
             contentAlignment = Alignment.Center,
         ) {

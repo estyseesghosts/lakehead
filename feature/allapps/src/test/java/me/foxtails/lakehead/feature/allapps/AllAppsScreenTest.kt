@@ -112,6 +112,25 @@ class AllAppsScreenTest {
     }
 
     @Test
+    fun profileAwareEntry_rendersDisplayLabel() {
+        setScreen(
+            AllAppsViewState.Loaded(
+                listOf(
+                    AllAppsEntry(
+                        identity = work,
+                        label = "Work Mail",
+                        sortKey = "Mail",
+                        displayLabel = "Work Mail",
+                        alreadyOnHome = false,
+                    ),
+                ),
+            ),
+        )
+
+        composeRule.onNodeWithText("Work Mail").assertIsDisplayed()
+    }
+
+    @Test
     fun empty_showsHonestEmptyState_andNoRows() {
         setScreen(AllAppsViewState.Loaded(emptyList()))
 

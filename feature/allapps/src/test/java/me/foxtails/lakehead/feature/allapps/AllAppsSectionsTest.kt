@@ -184,6 +184,30 @@ class AllAppsSectionsTest {
     }
 
     @Test
+    fun toAppSections_profileAwareEntry_groupsBySortKey_andSortsBySortKey() {
+        val workMail = AllAppsEntry(
+            identity = AppIdentity(ProfileId("work"), ComponentIdentity("com.mail", "Mail")),
+            label = "Work Mail",
+            sortKey = "Mail",
+            displayLabel = "Work Mail",
+            alreadyOnHome = false,
+        )
+        val maps = AllAppsEntry(
+            identity = identity("com.maps"),
+            label = "Maps",
+            sortKey = "Maps",
+            displayLabel = "Maps",
+            alreadyOnHome = false,
+        )
+
+        val section = listOf(maps, workMail).toAppSections(collator).single()
+
+        assertEquals("M", section.key)
+        assertEquals(listOf("Mail", "Maps"), section.apps.map { it.sortKey })
+        assertEquals("Work Mail", section.apps.first { it.sortKey == "Mail" }.displayLabel)
+    }
+
+    @Test
     fun toAppSections_nonLatinSections_sortedByCollator() {
         val entries = listOf(
             entry("Яблоко", pkg = "com.cyrillic.ya"),
@@ -202,10 +226,10 @@ class AllAppsSectionsTest {
         assertTrue("no Latin keys", keys.none { it.length == 1 && it[0] in 'A'..'Z' })
     }
 
-    // ── toAppSections: input order preserved within section ──────────────
+    // ── toAppSections: deterministic sort within section ─────────────────
 
     @Test
-    fun toAppSections_preservesInputOrder_withinSameSection() {
+    fun toAppSections_sortsBySortKey_withinSameSection() {
         val entries = listOf(
             entry("Zebra", pkg = "com.zebra"),
             entry("Apple", pkg = "com.apple"),
@@ -236,7 +260,7 @@ class AllAppsSectionsTest {
         assertEquals("E", sections[0].key)
         assertEquals(
             "Éclair must fold into E section with Latin apps",
-            listOf("Éclair", "Elephant", "Eagle"),
+            listOf("Eagle", "Éclair", "Elephant"),
             sections[0].apps.map { it.label },
         )
     }
@@ -255,7 +279,7 @@ class AllAppsSectionsTest {
         assertEquals(1, sections.size)
         assertEquals("#", sections[0].key)
         assertEquals(
-            listOf("9GAG", "1Password", "!!Bang"),
+            listOf("!!Bang", "1Password", "9GAG"),
             sections[0].apps.map { it.label },
         )
     }

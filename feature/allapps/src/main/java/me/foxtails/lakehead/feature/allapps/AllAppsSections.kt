@@ -30,17 +30,17 @@ fun sectionCollator(): Collator =
     }
 
 /**
- * Derives a single-character section key from an app label.
+ * Derives a single-character section key from an app sort key.
  *
  * Rules (in priority order):
- * 1. Blank label → `"#"`
+ * 1. Blank sort key → `"#"`
  * 2. First char is `#` → `"#"`
  * 3. First char folds to A–Z via [collator] (Latin, case/diacritic insensitive) → that uppercase letter
  * 4. First char is a Unicode letter outside A–Z → its uppercase form
  * 5. Anything else (digit, symbol, punctuation) → `"#"`
  */
-fun groupKey(label: String, collator: Collator): String {
-    val first = label.trimStart().firstOrNull() ?: return "#"
+fun groupKey(sortKey: String, collator: Collator): String {
+    val first = sortKey.trimStart().firstOrNull() ?: return "#"
     if (first == '#') return "#"
 
     // Check Latin A–Z by folding diacritics and case.
@@ -87,7 +87,7 @@ fun List<AllAppsEntry>.toAppSections(collator: Collator): List<AppSection> {    
     // Stable grouping: LinkedHashMap preserves first-insertion order.
     val grouped = LinkedHashMap<String, MutableList<AllAppsEntry>>()
     for (entry in this) {
-        val key = groupKey(entry.label, collator)
+        val key = groupKey(entry.sortKey, collator)
         grouped.getOrPut(key) { mutableListOf() }.add(entry)
     }
 
@@ -98,7 +98,17 @@ fun List<AllAppsEntry>.toAppSections(collator: Collator): List<AppSection> {    
         .sortedWith(collator)
 
     return (latinKeys + otherKeys).map { key ->
-        AppSection(key = key, apps = grouped.getValue(key))
+        val apps = grouped.getValue(key)
+        val orderedApps = apps.sortedWith(
+            compareBy<AllAppsEntry, String>(collator) { it.sortKey }
+                .thenBy { it.identity.component.packageName }
+                .thenBy { it.identity.component.className }
+                .thenBy { it.identity.profileId.value },
+        )
+        AppSection(
+            key = key,
+            apps = orderedApps,
+        )
     }
 }
 

@@ -14,8 +14,8 @@ import java.util.Locale
  * boundary. Labels are read from [LauncherActivityInfo.label] on the caller's background refresh
  * path and converted to plain [String] values immediately; a blank label falls back to the
  * component's package name. No [LauncherActivityInfo], [CharSequence], drawable or user handle
- * leaves this boundary. Entries are sorted by display label (case-insensitive, locale-aware via
- * [Collator]) as the primary key, with package name and class name as deterministic tie-breakers.
+ * leaves this boundary. Entries are sorted by raw sortKey (PRIMARY collator); displayLabel is
+ * render-only. Package name and class name are deterministic tie-breakers.
  * An unresolved profile returns an empty list; enumeration security failures propagate to the
  * caller.
  */
@@ -34,10 +34,18 @@ internal class LauncherActivityIdentityEnumerator(
                     profileId = profileId,
                     component = ComponentIdentity(component.packageName, component.className),
                 )
-                LauncherAppEntry(identity, labelFor(activity, identity))
+                val sortKey = labelFor(activity, identity)
+                val display = profileTokens.profileDisplayFor(identity, sortKey, user)
+                LauncherAppEntry(
+                    identity = identity,
+                    label = display.displayLabel,
+                    sortKey = display.sortKey,
+                    displayLabel = display.displayLabel,
+                    profileDisplay = display.profileDisplay,
+                )
             }
             .sortedWith(
-                compareBy<LauncherAppEntry, String>(collator) { it.label }
+                compareBy<LauncherAppEntry, String>(collator) { it.sortKey }
                     .thenBy { it.identity.component.packageName }
                     .thenBy { it.identity.component.className },
             )

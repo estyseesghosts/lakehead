@@ -77,6 +77,32 @@ class AllAppsRouteLoaderTest {
     }
 
     @Test
+    fun profileAwareCatalogueEntry_preservesSortKeyAndDisplayLabel() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val repository = FakeReadRepository(LoadResult.NotFound)
+        val catalogue = FakeCatalogue(
+            listOf(
+                LauncherAppEntry(
+                    identity = appB,
+                    label = "Work Mail",
+                    sortKey = "Mail",
+                    displayLabel = "Work Mail",
+                ),
+            ),
+        )
+        val loader = allAppsLoader(repository, dispatcher, catalogue)
+
+        loader.start(this)
+        advanceUntilIdle()
+
+        val entry = (loader.state.value as AllAppsViewState.Loaded).entries.single()
+        assertEquals(appB, entry.identity)
+        assertEquals("Mail", entry.sortKey)
+        assertEquals("Work Mail", entry.displayLabel)
+        loader.stop()
+    }
+
+    @Test
     fun notFoundHomeYieldsAllFalseMembership() = runTest {
         val dispatcher = StandardTestDispatcher(testScheduler)
         val repository = FakeReadRepository(LoadResult.NotFound)
