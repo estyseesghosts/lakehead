@@ -53,4 +53,22 @@ interface FeedOverlayGateway {
 
     /** Unbinds the overlay service if one is bound, otherwise a no-op. Never throws. */
     fun detach()
+
+    /**
+     * Forwards a host visibility change toward the bound overlay.
+     *
+     * Caches [visible] first so the value survives unbinds and is re-delivered on the next
+     * connect (catch-up); delivery to the bound control channel is best-effort. Never throws,
+     * including when unbound.
+     */
+    fun notifyOverlayVisible(visible: Boolean)
+
+    /**
+     * Forwards a host scroll progress change (0..1) toward the bound overlay.
+     *
+     * Same cache-then-deliver contract as [notifyOverlayVisible]; out-of-range values are
+     * clamped and `NaN` maps to `0` (see [coerceOverlayProgress]). Never throws, including
+     * when unbound.
+     */
+    fun notifyOverlayProgress(progress: Float)
 }
