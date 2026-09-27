@@ -11,6 +11,9 @@ android {
     testOptions {
         unitTests.isReturnDefaultValues = true
     }
+    buildFeatures {
+        aidl = true
+    }
 }
 
 dependencies {
