@@ -103,9 +103,14 @@ data class HomeCanvasViewportStyle(
  *   candidate via [MoveDragMath] with validity from `core:grid`, a
  *   non-interactive outline marks the candidate, back cancels, and drag end commits via
  *   [onMoveTile] when the candidate differs from the origin. A single bottom-right,
- *   center-pinned resize handle switches to RESIZE mode when the pointer-down/start
- *   position is in its [RESIZE_TOUCH_DP] inward corner rect; it never promotes a
- *   MOVE route based on the later slop position. The handle
+ *   center-pinned resize handle resizes only when armed: tapping the arrow toggles
+ *   [HomeInteractionController.Editing.resizeArmed] with no write, and only an armed
+ *   arrow-origin drag switches to RESIZE mode when the pointer-down/start
+ *   position is in its [RESIZE_TOUCH_DP] inward corner rect; an unarmed arrow-drag
+ *   routes to neither move nor resize, and a body drag moves with the snapshotted
+ *   span while clearing the arm. Routing is decided once at drag start from the
+ *   down snapshot (selection + arrow-hit + armed) and never switches mid-gesture;
+ *   the handle itself installs no drag detector (it would lose the slop race).
  *   drags update the preview span via [ResizeDragMath] and [RenderableSpans.quantize]
  *   with last-valid hold (blocked proposals keep the preview, overlay flips to
  *   error), and drag end commits the held last-valid span via [onResizeTile]
@@ -513,7 +518,8 @@ internal fun HomeCanvasGrid(
                 }
             }
             // Unified move/resize drag handler on the parent Box. The resize handle is
-            // visual-only; this handler hit-tests the pointer position against the handle
+            // tap-active (its own tap toggles the resize arm) but installs no drag
+            // detector; this handler hit-tests the pointer position against the handle
             // corner once at gesture start (after slop) and routes to RESIZE or MOVE.
             // A single detector avoids the slop competition that made a separate
             // handle detector unreachable. Drag pointerInput is keyed by
@@ -593,12 +599,21 @@ internal fun HomeCanvasGrid(
                         interactionAtDown.selectedId == (downTile?.itemId ?: selectedTile?.itemId) &&
                         (downTile != null || selectedResize)
                     val dragTile = downTile ?: selectedTile?.takeIf { selectedResize }
+                    // A2-S1 armed snapshot: resize is armed only for the down-selected
+                    // tile (arm owned by the selection). Captured once at down alongside
+                    // selected+arrow-hit; the slop wait below never refreshes it, and
+                    // the past-slop route is decided once from this snapshot with no
+                    // mid-gesture switch.
+                    val armedAtDown = snapshotResizeArmed(interactionAtDown, dragTile?.itemId)
                     var currentSession: HomeEditSession = sessionState.value
                     var sessionAtDown = currentSession as? HomeEditSession.Active
                     if (sessionAtDown == null && !selectedDrag) return@awaitEachGesture
                     if (selectedDrag) pagerHold = true
                     // Wait until the already-pressed pointer moves past touch slop.
                     // Release before slop means no drag (a tap; tapCancel handles it).
+                    // A2-S1: an arrow-tap on the selected tile is consumed by the
+                    // handle's own tap action, which toggles the resize arm with no
+                    // write and no enterSelectedDrag — this path stays a no-op for it.
                     // P2: the slop gate is the shared [GestureArbitration.lockAxis]
                     // predicate, not an inline distance check.
                     val touchSlopPx = viewConfiguration.touchSlop.toFloat()
@@ -666,11 +681,40 @@ internal fun HomeCanvasGrid(
                         originBounds,
                         handleSizePx,
                     )
+                    // A2-S1 route-once from the down snapshot (arrow-hit vs the fixed
+                    // origin footprint, armed flag captured at down): an armed
+                    // arrow-origin routes RESIZE via the gated beginResize below, a
+                    // body-origin routes MOVE with the snapshotted span (entry fixed
+                    // originSpan at gesture start, never the live preview) and clears
+                    // the arm, and an unarmed arrow-origin routes to neither with
+                    // zero writes. No mid-gesture switch: the branches below never
+                    // re-test the pointer position.
                     // B2: RESIZE routes only on startInHandle (hold position in
                     // the handle corner). A body-origin press never upgrades to
                     // RESIZE via the slop position; MOVE stays authoritative
                     // with snapshot-once routing and no mid-gesture promotion.
-                    val isOnHandle = startInHandle
+                    val route = routeDownDrag(
+                        arrowHit = startInHandle,
+                        armed = armedAtDown,
+                        hasTile = true,
+                    )
+                    if (route == DownDragRoute.NONE) {
+                        // Unarmed arrow-drag: neither move nor resize. Zero-write
+                        // cancel of the just-entered session (a pre-existing Active
+                        // is always at origin state here, so cancel loses no
+                        // progress); the selection stays wiggle-editing and the
+                        // tile-touch hold ends with the gesture.
+                        currentSession = currentSession.cancel()
+                        editSession = currentSession
+                        pagerHold = false
+                        return@awaitEachGesture
+                    }
+                    if (route == DownDragRoute.MOVE) {
+                        // Body-drag while armed stays move and clears the arm, so a
+                        // later arrow-drag needs a fresh arrow-tap.
+                        interaction = interaction.disarmResize()
+                    }
+                    val isOnHandle = route == DownDragRoute.RESIZE
                     // A2 single arbitration for the active drag: route the
                     // start-decided routing through resolveHomeGesture so the
                     // drag holds the pager for its lifetime. Handle-origin →
@@ -684,7 +728,10 @@ internal fun HomeCanvasGrid(
                     )
                     pagerHold = dragWinner.holdsPager()
                     if (isOnHandle) {
-                        // RESIZE mode: corner-anchored span updates.
+                        // RESIZE mode: corner-anchored span updates. beginResize is
+                        // gated by the route above — this branch is reachable only for
+                        // an armed arrow-origin, so an unarmed arrow-drag can never
+                        // resize and a plain drag never changes span.
                         currentSession = activeAtDown.beginResize()
                         editSession = currentSession
                         activeAtDown = currentSession as? HomeEditSession.Active
@@ -944,26 +991,40 @@ internal fun HomeCanvasGrid(
                             controlSizePx = touchPx,
                             corner = ControlCorner.BOTTOM_RIGHT,
                         )
-                        // Visual-only handle: the parent Box's unified drag handler
-                        // hit-tests this corner and routes to RESIZE mode. No gesture
-                        // detector here (a second detector loses the slop race).
+                        // Resize handle: tap-only arm/disarm for the selected tile.
+                        // The tap consumes the arrow-tap so the tile below never
+                        // transfer-clears it (below slop toggles armed with no write
+                        // and no enterSelectedDrag); past slop the tap cancels and
+                        // the parent Box's unified drag handler owns routing. No drag
+                        // detector is installed here — a second one would lose the
+                        // slop race and leave the handle unreachable.
+                        val handleLabel = if (activeTile.label.isNullOrBlank()) {
+                            UNAVAILABLE_LABEL
+                        } else {
+                            activeTile.label
+                        }
                         Box(
                             modifier = Modifier
                                 .offset { handleOffset }
                                 .size(RESIZE_TOUCH_DP.dp),
                         ) {
-                            ResizeHandle()
+                            ResizeHandle(
+                                label = handleLabel,
+                                armed = interactionEditing?.selectedId == controlItemId &&
+                                    interactionEditing.resizeArmed,
+                                onToggleArmed = {
+                                    if ((interaction as? HomeInteractionController.Editing)?.selectedId == controlItemId) {
+                                        interaction = interaction.toggleResizeArmed()
+                                    }
+                                },
+                            )
                         }
                         // Remove affordance: sibling overlay over the active tile in
                         // both MOVE and RESIZE modes. Tracks the live candidate span
                         // (same footprint as the handle) so it stays attached during
                         // a resize drag. Tap reports onRemoveTile only; the grid
                         // performs no persistence delete and issues no move/resize.
-                        val removeLabel = if (activeTile.label.isNullOrBlank()) {
-                            UNAVAILABLE_LABEL
-                        } else {
-                            activeTile.label
-                        }
+                        val removeLabel = handleLabel
                         val buttonPx = with(density) { CORNER_CONTROL_TOUCH_SIZE.dp.roundToPx() }
                         val removeAbsolute = cornerControlOffset(
                             tileBounds = tileBounds,
@@ -1030,11 +1091,65 @@ internal fun HomeCanvasGrid(
  *
  * The resize handle's hit rect is exactly this size, extending INWARD over the
  * active tile's bottom-right corner (`[right - touch, right] x [bottom - touch,
- * bottom]`), never outward — edge tiles never clip. The visual marker is the shared
+ * bottom]`), never outward — edge tiles never clip. On tiles narrower than
+ * twice this size the drag-routing square shrinks to half the tile extent so a
+ * body strip stays reachable (see [resizeHandleSidePx]); the handle overlay's
+ * own 48dp tap target is unaffected. The visual marker is the shared
  * 32dp circle (see `ResizeHandle`); the surrounding touch square is the shared 48dp
  * target.
  */
 internal const val RESIZE_TOUCH_DP: Int = CORNER_CONTROL_TOUCH_SIZE
+
+/**
+ * A2-S1 down-snapshot drag route: decided once past slop, never switched mid-gesture.
+ *
+ * - [RESIZE]: arrow-origin drag while the selection is armed. The caller gates
+ *   `beginResize` on this route, so an unarmed arrow can never resize.
+ * - [MOVE]: body-origin drag (armed or not). The move candidate keeps the span
+ *   snapshotted at gesture start; the caller clears the arm.
+ * - [NONE]: unarmed arrow-origin (or no tile at all): neither move nor resize,
+ *   zero writes, no session progress.
+ */
+internal enum class DownDragRoute { RESIZE, MOVE, NONE }
+
+/**
+ * Routes a past-slop drag once from the down snapshot.
+ *
+ * The arrow region wins over the body: an arrow hit routes [DownDragRoute.RESIZE]
+ * only when [armed], otherwise [DownDragRoute.NONE] (an unarmed arrow-drag never
+ * resizes and never falls back to move). A non-arrow tile hit routes
+ * [DownDragRoute.MOVE] regardless of [armed] (the caller disarms). No tile at
+ * all routes [DownDragRoute.NONE]. Pure math-free predicate, framework-free and
+ * unit-testable; legality stays owned by `core:grid`.
+ */
+internal fun routeDownDrag(
+    arrowHit: Boolean,
+    armed: Boolean,
+    hasTile: Boolean,
+): DownDragRoute = when {
+    arrowHit && armed -> DownDragRoute.RESIZE
+    arrowHit -> DownDragRoute.NONE
+    hasTile -> DownDragRoute.MOVE
+    else -> DownDragRoute.NONE
+}
+
+/**
+ * Snapshots whether resize is armed for the down-hit tile.
+ *
+ * The arm is owned by the selection: true only when [interaction] is
+ * [HomeInteractionController.Editing] with [HomeInteractionController.Editing.resizeArmed]
+ * and its [HomeInteractionController.Editing.selectedId] matches [tileId]. Any
+ * transfer, retarget, unpin or exit clears the arm, so a stale arm can never
+ * authorize a resize for another tile. Pure, framework-free and unit-testable.
+ */
+internal fun snapshotResizeArmed(
+    interaction: HomeInteractionController,
+    tileId: ItemId?,
+): Boolean {
+    if (interaction !is HomeInteractionController.Editing) return false
+    if (tileId == null) return false
+    return interaction.resizeArmed && interaction.selectedId == tileId
+}
 
 /**
  * A1 hold predicate: transient home state that must hold pager swipe.
@@ -1387,14 +1502,41 @@ internal fun resizePreviewSpan(
 }
 
 /**
+ * Effective resize-handle drag-routing side for a tile footprint, in px.
+ *
+ * The routing handle is the inward bottom-right square of side [handlePx],
+ * except on tiles narrower than twice the touch target: a full-size square
+ * would consume the whole tile and leave no reachable body (an unarmed
+ * small-tile drag could never MOVE, an armed one could never miss RESIZE, and
+ * even the remove control center would fall inside the handle rect). The side
+ * therefore shrinks to half the tile extent so a body strip always remains
+ * reachable. The 48dp tap target on the handle overlay itself is unaffected:
+ * tap arm/disarm is owned by the handle's own clickable, not by this
+ * drag-routing rect. Pure math, framework-free.
+ */
+internal fun resizeHandleSidePx(
+    tileWidthPx: Int,
+    tileHeightPx: Int,
+    handlePx: Int,
+): Int {
+    require(handlePx > 0) { "handlePx must be positive" }
+    require(tileWidthPx > 0) { "tileWidthPx must be positive" }
+    require(tileHeightPx > 0) { "tileHeightPx must be positive" }
+    return minOf(handlePx, tileWidthPx / 2, tileHeightPx / 2)
+        .coerceIn(1, minOf(tileWidthPx, tileHeightPx))
+}
+
+/**
  * Hit-tests a content-local pointer position against the resize handle corner.
  *
- * The handle occupies the bottom-right [handlePx] square of [originBounds]:
- * `x in [right - handlePx, right]` and `y in [bottom - handlePx, bottom]`
- * (inclusive). The centered visual/touch target extends outward from the corner,
+ * The handle occupies the bottom-right square of [originBounds] with side
+ * [resizeHandleSidePx] (the full [handlePx] on tiles at least twice as wide
+ * and tall, shrunk to half the tile extent on smaller tiles so a body strip
+ * stays reachable): `x in [right - side, right]` and
+ * `y in [bottom - side, bottom]` (inclusive). The centered visual/touch target extends outward from the corner,
  * but the parent pointer route cannot receive points outside the tile at an edge.
  * Therefore the parent deliberately uses this exact inward policy: the reachable
- * portion is the full [right - handlePx, right] × [bottom - handlePx, bottom] square,
+ * portion is the full `[right - side, right] × [bottom - side, bottom]` square,
  * with no visual dead zone inside the tile. The bounds are the FIXED origin footprint snapshotted at gesture
  * start, never the live candidate bounds that move during the drag. Pure math,
  * framework-free, so drag routing stays unit-testable and `core:grid` legality
@@ -1407,8 +1549,9 @@ internal fun isInHandle(
     handlePx: Int,
 ): Boolean {
     require(handlePx > 0) { "handlePx must be positive" }
-    val handleLeft = originBounds.right - handlePx
-    val handleTop = originBounds.bottom - handlePx
+    val sidePx = resizeHandleSidePx(originBounds.width, originBounds.height, handlePx)
+    val handleLeft = originBounds.right - sidePx
+    val handleTop = originBounds.bottom - sidePx
     return x >= handleLeft.toFloat() &&
         x <= originBounds.right.toFloat() &&
         y >= handleTop.toFloat() &&
@@ -1419,7 +1562,8 @@ internal fun isInHandle(
  * Signed-frame overload of [isInHandle] for G3 renderer frames.
  *
  * Same bottom-right corner rule over a [SignedPixelFrame] (whose top may be
- * negative above the row origin). Pure math, framework-free.
+ * negative above the row origin), with the same [resizeHandleSidePx] small-tile
+ * shrink so a body strip stays reachable. Pure math, framework-free.
  */
 internal fun isInHandle(
     x: Float,
@@ -1428,8 +1572,9 @@ internal fun isInHandle(
     handlePx: Int,
 ): Boolean {
     require(handlePx > 0) { "handlePx must be positive" }
-    val handleLeft = originBounds.right - handlePx
-    val handleTop = originBounds.bottom - handlePx
+    val sidePx = resizeHandleSidePx(originBounds.widthPx, originBounds.heightPx, handlePx)
+    val handleLeft = originBounds.right - sidePx
+    val handleTop = originBounds.bottom - sidePx
     return x >= handleLeft.toFloat() &&
         x <= originBounds.right.toFloat() &&
         y >= handleTop.toFloat() &&

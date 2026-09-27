@@ -136,6 +136,14 @@ class HomeEditSessionTest {
         assertTrue(result is HomeEditSession.Idle)
     }
 
+    @Test
+    fun beginResize_unarmedAtDown_returnsUnchangedSession() {
+        val t = tile("app-a", column = 0, row = 0)
+        val session = HomeEditSession.Idle.enterIfLaunchable(t, listOf(t), columns = 6, rows = 10)
+
+        assertSame(session, session.beginResize(armedAtDown = false))
+    }
+
     // ---- updateMoveCandidate ----
 
     @Test
@@ -167,8 +175,9 @@ class HomeEditSessionTest {
         assertEquals(CandidateValidity.COLLIDING, active.candidateValidity)
         // W2: blocked holds lastValidPosition at origin.
         assertEquals(LogicalPosition(0, 0), active.lastValidPosition)
-        // W2: candidatePosition tracks the pointer even when blocked.
-        assertEquals(LogicalPosition(2, 2), active.candidatePosition)
+        // Blocked proposals retain the last-valid position as well as the
+        // rendered ghost position.
+        assertEquals(LogicalPosition(0, 0), active.candidatePosition)
     }
 
     @Test
@@ -556,7 +565,7 @@ class HomeEditSessionTest {
         val blocked = atValid.updateMoveCandidate(LogicalPosition(3, 0), placements, columns = 6, rows = 10) as HomeEditSession.Active
         assertEquals(LogicalPosition(1, 0), blocked.lastValidPosition)
         assertEquals(CandidateValidity.COLLIDING, blocked.candidateValidity)
-        assertEquals(LogicalPosition(3, 0), blocked.candidatePosition)
+         assertEquals(LogicalPosition(1, 0), blocked.candidatePosition)
 
         // Move back to valid: lastValidPosition updates.
         val unblocked = blocked.updateMoveCandidate(LogicalPosition(2, 0), placements, columns = 6, rows = 10) as HomeEditSession.Active

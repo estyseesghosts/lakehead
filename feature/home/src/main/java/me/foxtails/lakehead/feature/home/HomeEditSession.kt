@@ -105,11 +105,12 @@ internal fun HomeEditSession.enterSelectedDrag(
 }
 
 /**
- * Switch to resize mode. No-op if not Active or already in resize mode.
+ * Switch to resize mode when the resize affordance was armed at pointer-down.
+ * No-op if not Active, already in resize mode, or the affordance was not armed.
  */
-fun HomeEditSession.beginResize(): HomeEditSession {
+fun HomeEditSession.beginResize(armedAtDown: Boolean): HomeEditSession {
     val active = this as? HomeEditSession.Active ?: return this
-    if (active.mode == EditMode.RESIZE) return this
+    if (!armedAtDown || active.mode == EditMode.RESIZE) return this
     return active.copy(
         mode = EditMode.RESIZE,
         // Reset candidate to origin position/span for fresh resize drag
@@ -122,6 +123,12 @@ fun HomeEditSession.beginResize(): HomeEditSession {
         candidateValidity = CandidateValidity.VALID,
     )
 }
+
+/**
+ * Compatibility entry point for callers that have already performed the
+ * pointer-down arm check. New callers should pass [armedAtDown] explicitly.
+ */
+fun HomeEditSession.beginResize(): HomeEditSession = beginResize(armedAtDown = true)
 
 /**
  * Update the candidate position during a move drag. No-op if not Active or in RESIZE mode.
@@ -148,7 +155,7 @@ fun HomeEditSession.updateMoveCandidate(
         active.copy(candidatePosition = candidate, lastValidPosition = candidate, candidateValidity = validity)
     } else {
         // Blocked: hold the last valid position, report the error.
-        active.copy(candidatePosition = candidate, candidateValidity = validity)
+        active.copy(candidatePosition = active.lastValidPosition, candidateValidity = validity)
     }
 }
 

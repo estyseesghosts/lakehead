@@ -82,11 +82,14 @@ class IsInHandleTest {
     }
 
     @Test
-    fun smallTile_handleCoversTileButNeverOutside() {
-        // A 48x48 tile with a 48px touch target: the whole tile is handle,
-        // yet positions outside the tile stay outside (edge-tile no-clip).
+    fun smallTile_handleShrinksToPreserveBody() {
+        // A2-S1 P2: a 48x48 tile with a 48px touch target no longer routes the
+        // whole tile as handle — the routing square shrinks to the 24px
+        // bottom-right corner ([24,48] x [24,48]) so an unarmed body drag can
+        // still MOVE. Positions outside the tile stay outside (edge no-clip).
         val small = PixelRect(left = 0, top = 0, right = 48, bottom = 48)
-        assertTrue(isInHandle(0f, 0f, small, 48))
+        assertFalse(isInHandle(0f, 0f, small, 48))
+        assertFalse(isInHandle(23f, 23f, small, 48))
         assertTrue(isInHandle(24f, 24f, small, 48))
         assertTrue(isInHandle(48f, 48f, small, 48))
         assertFalse(isInHandle(-1f, 24f, small, 48))

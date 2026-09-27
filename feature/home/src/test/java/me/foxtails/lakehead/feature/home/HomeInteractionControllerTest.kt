@@ -338,4 +338,132 @@ class HomeInteractionControllerTest {
         val reselected = unpinned.selectOnTap(tileA)
         assertEquals(tileA, (reselected as HomeInteractionController.Editing).selectedId)
     }
+
+    // ---- A2-S1 resize arm: owned by the selection, transient only ----
+
+    @Test
+    fun arm_startsDisarmed_onLongPressEntry() {
+        val entered = HomeInteractionController.Normal.enterOnLongPress(tileA, isAvailable = true)
+        assertTrue(entered is HomeInteractionController.Editing)
+        assertEquals(false, (entered as HomeInteractionController.Editing).resizeArmed)
+    }
+
+    @Test
+    fun armResize_armsSelectedTile() {
+        val armed = HomeInteractionController.Editing(selectedId = tileA).armResize()
+        assertTrue(armed is HomeInteractionController.Editing)
+        assertEquals(true, (armed as HomeInteractionController.Editing).resizeArmed)
+        assertEquals(tileA, armed.selectedId)
+    }
+
+    @Test
+    fun armResize_idempotentWhenAlreadyArmed() {
+        val armed = HomeInteractionController.Editing(selectedId = tileA, resizeArmed = true)
+        assertSame(armed, armed.armResize())
+    }
+
+    @Test
+    fun armResize_noSelection_isNoOp() {
+        val editing = HomeInteractionController.Editing(selectedId = null)
+        assertSame(editing, editing.armResize())
+    }
+
+    @Test
+    fun armResize_fromNormal_isNoOp() {
+        assertSame(HomeInteractionController.Normal, HomeInteractionController.Normal.armResize())
+    }
+
+    @Test
+    fun disarmResize_clearsArm_keepsSelection() {
+        val armed = HomeInteractionController.Editing(selectedId = tileA, resizeArmed = true)
+        val disarmed = armed.disarmResize()
+        assertTrue(disarmed is HomeInteractionController.Editing)
+        assertEquals(false, (disarmed as HomeInteractionController.Editing).resizeArmed)
+        assertEquals(tileA, disarmed.selectedId)
+        // Original is immutable.
+        assertEquals(true, armed.resizeArmed)
+    }
+
+    @Test
+    fun disarmResize_idempotentWhenDisarmed() {
+        val editing = HomeInteractionController.Editing(selectedId = tileA)
+        assertSame(editing, editing.disarmResize())
+    }
+
+    @Test
+    fun disarmResize_fromNormal_isNoOp() {
+        assertSame(HomeInteractionController.Normal, HomeInteractionController.Normal.disarmResize())
+    }
+
+    @Test
+    fun toggleResizeArmed_armsThenDisarms() {
+        val editing = HomeInteractionController.Editing(selectedId = tileA)
+        val armed = editing.toggleResizeArmed()
+        assertEquals(true, (armed as HomeInteractionController.Editing).resizeArmed)
+        val disarmed = armed.toggleResizeArmed()
+        assertEquals(false, (disarmed as HomeInteractionController.Editing).resizeArmed)
+        assertEquals(tileA, disarmed.selectedId)
+    }
+
+    @Test
+    fun toggleResizeArmed_noSelection_isNoOp() {
+        val editing = HomeInteractionController.Editing(selectedId = null)
+        assertSame(editing, editing.toggleResizeArmed())
+    }
+
+    @Test
+    fun toggleResizeArmed_fromNormal_isNoOp() {
+        assertSame(
+            HomeInteractionController.Normal,
+            HomeInteractionController.Normal.toggleResizeArmed(),
+        )
+    }
+
+    @Test
+    fun selectOnTap_transfersSelection_clearsArm() {
+        // Arrow-tap arms; a body-tap on another tile transfers and clears.
+        val armed = HomeInteractionController.Editing(selectedId = tileA, resizeArmed = true)
+        val transferred = armed.selectOnTap(tileB)
+        assertTrue(transferred is HomeInteractionController.Editing)
+        assertEquals(tileB, (transferred as HomeInteractionController.Editing).selectedId)
+        assertEquals(false, transferred.resizeArmed)
+    }
+
+    @Test
+    fun enterOnLongPress_retarget_clearsArm() {
+        val armed = HomeInteractionController.Editing(selectedId = tileA, resizeArmed = true)
+        val retargeted = armed.enterOnLongPress(tileB, isAvailable = true)
+        assertTrue(retargeted is HomeInteractionController.Editing)
+        assertEquals(tileB, (retargeted as HomeInteractionController.Editing).selectedId)
+        assertEquals(false, retargeted.resizeArmed)
+    }
+
+    @Test
+    fun unpinIfSelected_matchingId_clearsArm() {
+        val armed = HomeInteractionController.Editing(selectedId = tileA, resizeArmed = true)
+        val unpinned = armed.unpinIfSelected(tileA)
+        assertTrue(unpinned is HomeInteractionController.Editing)
+        assertNull((unpinned as HomeInteractionController.Editing).selectedId)
+        assertEquals(false, unpinned.resizeArmed)
+    }
+
+    @Test
+    fun exits_clearArm_alongWithSelection() {
+        val armed = HomeInteractionController.Editing(selectedId = tileA, resizeArmed = true)
+        assertSame(HomeInteractionController.Normal, armed.exitOnBack())
+        assertSame(HomeInteractionController.Normal, armed.exitOnEmptyTap())
+        assertSame(HomeInteractionController.Normal, armed.exitOnNavigate())
+    }
+
+    @Test
+    fun editing_equality_includesArmedFlag() {
+        assertEquals(
+            HomeInteractionController.Editing(selectedId = tileA, resizeArmed = true),
+            HomeInteractionController.Editing(selectedId = tileA, resizeArmed = true),
+        )
+        assertTrue(
+            HomeInteractionController.Editing(selectedId = tileA, resizeArmed = true) !=
+                HomeInteractionController.Editing(selectedId = tileA),
+        )
+    }
 }

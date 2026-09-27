@@ -10,11 +10,18 @@ import me.foxtails.lakehead.core.model.ItemId
  *
  * ## States
  * - [Normal]: default browsing state. Taps are inert (no launch).
- * - [Editing]: edit mode. [selectedId] tracks the currently focused tile, or null when none.
+ * - [Editing]: edit mode. [Editing.selectedId] tracks the currently focused tile,
+ *   or null when none. [Editing.resizeArmed] tracks whether the selected tile's
+ *   resize arrow has been tapped: an armed selection routes an arrow-origin drag
+ *   to resize, while an unarmed selection never resizes (arrow-origin drags are
+ *   inert, body drags move with the snapshotted span). The armed flag is owned
+ *   by the selected item: every selection change clears it.
  *
  * ## Transitions
- * - Long-press on an available tile → [Editing] with that tile selected.
- * - Tap a tile while editing → [Editing] with the tapped tile selected.
+ * - Long-press on an available tile → [Editing] with that tile selected, disarmed.
+ * - Tap a tile while editing → [Editing] with the tapped tile selected, disarmed.
+ * - Tap the selected tile's resize arrow → toggles [Editing.resizeArmed], no write.
+ * - Body-drag while armed → move with the snapshotted span, disarms.
  * - Tap empty space / back / navigate away → [Normal].
  *
  * All exits are idempotent: calling any exit from [Normal] returns [Normal].
@@ -28,15 +35,22 @@ sealed interface HomeInteractionController {
      * Edit mode entered via long-press.
      *
      * @param selectedId the tile the user is currently focused on, or null when no tile is selected.
+     * @param resizeArmed true once the selected tile's resize arrow has been tapped.
+     *   Owned by [selectedId]: every transfer, long-press retarget, unpin and exit
+     *   clears it, and body-drag start clears it. Transient only, never persisted.
      */
-    data class Editing(val selectedId: ItemId?) : HomeInteractionController
+    data class Editing(
+        val selectedId: ItemId?,
+        val resizeArmed: Boolean = false,
+    ) : HomeInteractionController
 }
 
 /**
  * Enter edit mode on long-press if [isAvailable] is true.
  *
- * Returns [HomeInteractionController.Editing] with [tileId] selected, or this (unchanged)
- * if the tile is unavailable. Works from both [Normal] and [Editing].
+ * Returns [HomeInteractionController.Editing] with [tileId] selected and resize
+ * disarmed, or this (unchanged) if the tile is unavailable. Works from both
+ * [Normal] and [Editing]; retargeting always clears a previous arm.
  */
 fun HomeInteractionController.enterOnLongPress(
     tileId: ItemId,
@@ -49,13 +63,55 @@ fun HomeInteractionController.enterOnLongPress(
 /**
  * Select a tile via tap in editing mode.
  *
+ * Transfers selection directly and clears any resize arm: the newly selected
+ * tile starts disarmed, so an arrow-drag needs a fresh arrow-tap first.
  * No-op in [Normal]: taps never launch from this controller.
  */
 fun HomeInteractionController.selectOnTap(
     tileId: ItemId,
 ): HomeInteractionController {
     if (this !is HomeInteractionController.Editing) return this
-    return copy(selectedId = tileId)
+    return copy(selectedId = tileId, resizeArmed = false)
+}
+
+/**
+ * Arm resize for the currently selected tile.
+ *
+ * [HomeInteractionController.Editing] with a non-null
+ * [HomeInteractionController.Editing.selectedId] → copy with `resizeArmed = true`.
+ * Idempotent when already armed; no-op in [Normal] or when no tile is selected.
+ * Transient only: no persistence, no grid mutation, no write.
+ */
+fun HomeInteractionController.armResize(): HomeInteractionController {
+    if (this !is HomeInteractionController.Editing) return this
+    if (selectedId == null || resizeArmed) return this
+    return copy(resizeArmed = true)
+}
+
+/**
+ * Disarm resize, keeping the current selection.
+ *
+ * Armed [HomeInteractionController.Editing] → copy with `resizeArmed = false`.
+ * Idempotent when already disarmed; no-op in [Normal]. Used when a body-drag
+ * starts (move keeps the snapshotted span) and when resize ends.
+ */
+fun HomeInteractionController.disarmResize(): HomeInteractionController {
+    if (this !is HomeInteractionController.Editing) return this
+    if (!resizeArmed) return this
+    return copy(resizeArmed = false)
+}
+
+/**
+ * Toggle the resize arm for the currently selected tile.
+ *
+ * Backs the resize-arrow tap: below-slop arrow taps flip [resizeArmed] with
+ * zero writes and no session entry. No-op in [Normal] or when no tile is
+ * selected (an arrow-tap with no selection cannot arm).
+ */
+fun HomeInteractionController.toggleResizeArmed(): HomeInteractionController {
+    if (this !is HomeInteractionController.Editing) return this
+    if (selectedId == null) return this
+    return copy(resizeArmed = !resizeArmed)
 }
 
 /**
@@ -95,8 +151,9 @@ fun HomeInteractionController.exitOnNavigate(): HomeInteractionController {
  * Deselect [tileId] if it is the currently selected tile in [HomeInteractionController.Editing].
  *
  * [HomeInteractionController.Editing] with [HomeInteractionController.Editing.selectedId]
- * matching [tileId] → [HomeInteractionController.Editing] with `selectedId = null`.
- * All other states ([Normal], [Editing] with a different or null selectedId) are
+ * matching [tileId] → [HomeInteractionController.Editing] with `selectedId = null`
+ * and the resize arm cleared (the arm is owned by the selection). All other
+ * states ([Normal], [Editing] with a different or null selectedId) are
  * returned unchanged (idempotent).
  */
 fun HomeInteractionController.unpinIfSelected(
@@ -104,5 +161,5 @@ fun HomeInteractionController.unpinIfSelected(
 ): HomeInteractionController {
     if (this !is HomeInteractionController.Editing) return this
     if (selectedId != tileId) return this
-    return copy(selectedId = null)
+    return copy(selectedId = null, resizeArmed = false)
 }
