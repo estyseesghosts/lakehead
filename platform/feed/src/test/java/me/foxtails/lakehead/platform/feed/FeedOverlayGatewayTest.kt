@@ -1,6 +1,7 @@
 package me.foxtails.lakehead.platform.feed
 
 import android.content.ServiceConnection
+import android.view.WindowManager
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.test.TestScope
@@ -912,5 +913,257 @@ class FeedOverlayGatewayTest {
         )
         method.isAccessible = true
         method.invoke(harness.gateway, epoch)
+    }
+
+    // Window handshake (P1): the host surface registers its window through the
+    // gateway so the bound provider renders pixels. Params copies cache like the
+    // control verbs (catch-up across binds), the activity is never retained, and
+    // channels without the window handshake are no-ops.
+
+    @Test
+    fun attachBeforeConnectCatchesUpBeforeControlVerbs() = runTest {
+        val harness = Harness(this, installed = setOf(LAWNFEED_PACKAGE))
+        harness.gateway.start(this)
+        advanceUntilIdle()
+        harness.gateway.notifyOverlayVisible(true)
+        harness.gateway.notifyWindowAttachedParams(windowParams(width = 1080, height = 2400))
+
+        val channel = FakeWindowConnection()
+        harness.gateway.onOverlayConnected(channel)
+
+        // Window registration precedes the control catch-up: the provider needs
+        // the window before open/scroll replay can show pixels.
+        assertEquals(listOf("attached", "visible", "progress"), channel.events)
+        assertEquals(listOf(true), channel.visibles)
+        assertEquals(1, channel.attaches.size)
+        // Flags ride the JVM-safe primitive path (params field copies are framework
+        // code and stay device-verified: stubbed unit-test copies carry no fields).
+        assertEquals(0, channel.attaches.single().flags)
+        assertEquals(
+            FeedAvailability.Available(FeedProviderId.Lawnfeed),
+            harness.gateway.state.value,
+        )
+    }
+
+    @Test
+    fun liveAttachDeliversImmediately() = runTest {
+        val harness = Harness(this, installed = setOf(LAWNFEED_PACKAGE))
+        harness.gateway.start(this)
+        advanceUntilIdle()
+        val channel = FakeWindowConnection()
+        harness.gateway.onOverlayConnected(channel)
+        assertTrue(channel.attaches.isEmpty())
+
+        val params = windowParams(width = 720, height = 1600)
+        harness.gateway.notifyWindowAttachedParams(params)
+
+        assertEquals(1, channel.attaches.size)
+        assertEquals(0, channel.attaches.single().flags)
+        // The gateway caches its own copy, never the caller's instance.
+        assertTrue(channel.attaches.single().source !== params)
+    }
+
+    @Test
+    fun repeatedAttachReRegistersLatest() = runTest {
+        val harness = Harness(this, installed = setOf(LAWNFEED_PACKAGE))
+        harness.gateway.start(this)
+        advanceUntilIdle()
+        val channel = FakeWindowConnection()
+        harness.gateway.onOverlayConnected(channel)
+
+        harness.gateway.notifyWindowAttachedParams(windowParams(width = 100, height = 100))
+        harness.gateway.notifyWindowAttachedParams(windowParams(width = 200, height = 200), 5)
+
+        assertEquals(2, channel.attaches.size)
+        assertEquals(listOf(0, 5), channel.attaches.map { it.flags })
+    }
+
+    @Test
+    fun detachClearsCacheSoNextConnectStaysDetached() = runTest {
+        val harness = Harness(this, installed = setOf(LAWNFEED_PACKAGE))
+        harness.gateway.start(this)
+        advanceUntilIdle()
+        harness.gateway.notifyWindowAttachedParams(windowParams(width = 1080, height = 2400))
+        val first = FakeWindowConnection()
+        harness.gateway.onOverlayConnected(first)
+        assertEquals(1, first.attaches.size)
+
+        harness.gateway.notifyWindowDetached(false)
+        assertEquals(listOf(false), first.detaches)
+
+        // Rebind after an explicit detach must not resurrect the registration.
+        harness.installed = setOf(NEO_FEED_PACKAGE)
+        harness.firePackageChange()
+        advanceUntilIdle()
+        val second = FakeWindowConnection()
+        harness.gateway.onOverlayConnected(second)
+
+        assertTrue(second.attaches.isEmpty())
+        assertTrue(second.detaches.isEmpty())
+        assertEquals(
+            FeedAvailability.Available(FeedProviderId.NeoFeed),
+            harness.gateway.state.value,
+        )
+    }
+
+    @Test
+    fun rebindRetainsWindowCache() = runTest {
+        val harness = Harness(this, installed = setOf(LAWNFEED_PACKAGE))
+        harness.gateway.start(this)
+        advanceUntilIdle()
+        harness.gateway.notifyWindowAttachedParams(windowParams(width = 1080, height = 2400))
+        val first = FakeWindowConnection()
+        harness.gateway.onOverlayConnected(first)
+        assertEquals(1, first.attaches.size)
+
+        // Package switch tears down the old channel but keeps the host's window
+        // registration: the replacement re-attaches on connect.
+        harness.installed = setOf(NEO_FEED_PACKAGE)
+        harness.firePackageChange()
+        advanceUntilIdle()
+        assertEquals(1, first.closeCalls)
+
+        val second = FakeWindowConnection()
+        harness.gateway.onOverlayConnected(second)
+
+        assertEquals(1, second.attaches.size)
+        assertEquals(0, second.attaches.single().flags)
+        assertEquals(
+            FeedAvailability.Available(FeedProviderId.NeoFeed),
+            harness.gateway.state.value,
+        )
+    }
+
+    @Test
+    fun detachWithoutRegistrationIsSilent() = runTest {
+        val harness = Harness(this, installed = setOf(LAWNFEED_PACKAGE))
+        harness.gateway.start(this)
+        advanceUntilIdle()
+
+        // No cache, no channel: silent no-op, never throws.
+        harness.gateway.notifyWindowDetached(false)
+
+        // Window channel connected but nothing registered: no IPC.
+        val channel = FakeWindowConnection()
+        harness.gateway.onOverlayConnected(channel)
+        harness.gateway.notifyWindowDetached(true)
+
+        assertTrue(channel.attaches.isEmpty())
+        assertTrue(channel.detaches.isEmpty())
+        assertEquals(
+            FeedAvailability.Available(FeedProviderId.Lawnfeed),
+            harness.gateway.state.value,
+        )
+    }
+
+    @Test
+    fun nonWindowChannelIsNoop() = runTest {
+        val harness = Harness(this, installed = setOf(LAWNFEED_PACKAGE))
+        harness.gateway.start(this)
+        advanceUntilIdle()
+
+        // Channels without the window handshake (older fakes, control-only) make
+        // attach/detach silent no-ops instead of crashes.
+        val channel = FakeOverlayConnection()
+        harness.gateway.onOverlayConnected(channel)
+        harness.gateway.notifyWindowAttachedParams(windowParams(width = 1080, height = 2400))
+        harness.gateway.notifyWindowDetached(false)
+
+        assertEquals(
+            FeedAvailability.Available(FeedProviderId.Lawnfeed),
+            harness.gateway.state.value,
+        )
+    }
+
+    @Test
+    fun attachFailureOnConnectTearsDown() = runTest {
+        val harness = Harness(this, installed = setOf(LAWNFEED_PACKAGE))
+        harness.gateway.start(this)
+        advanceUntilIdle()
+        harness.gateway.notifyWindowAttachedParams(windowParams(width = 1080, height = 2400))
+
+        // Transport loss during the window catch-up transact tears down like any
+        // other catch-up loss: honest Unavailable, one unbind, dead channel closed.
+        val lossy = LossyWindowConnection(harness.gateway)
+        harness.gateway.onOverlayConnected(lossy)
+
+        assertTrue(harness.gateway.state.value is FeedAvailability.Unavailable)
+        assertEquals(1, harness.connector.unbindCalls)
+        assertEquals(1, lossy.closeCalls)
+    }
+
+    private fun windowParams(width: Int, height: Int): WindowManager.LayoutParams =
+        WindowManager.LayoutParams().apply {
+            this.width = width
+            this.height = height
+        }
+
+    /** Window registration record for [FakeWindowConnection]. */
+    private data class WindowAttach(
+        val flags: Int,
+        val source: WindowManager.LayoutParams?,
+    )
+
+    /**
+     * Window-capable stand-in for [AidlFeedBridge]: records control verbs and window
+     * ops in one [events] log so catch-up ordering (attach before visible/progress)
+     * is pinned without touching `IBinder`.
+     */
+    private class FakeWindowConnection : FeedOverlayConnection, FeedOverlayWindowConnection {
+        val events: MutableList<String> = mutableListOf()
+        val visibles: MutableList<Boolean> = mutableListOf()
+        val progresses: MutableList<Float> = mutableListOf()
+        val attaches: MutableList<WindowAttach> = mutableListOf()
+        val detaches: MutableList<Boolean> = mutableListOf()
+        var closeCalls: Int = 0
+
+        override fun setVisible(visible: Boolean) {
+            visibles += visible
+            events += "visible"
+        }
+
+        override fun setProgress(progress: Float) {
+            progresses += progress
+            events += "progress"
+        }
+
+        override fun windowAttached(params: WindowManager.LayoutParams, flags: Int) {
+            attaches += WindowAttach(flags, params)
+            events += "attached"
+        }
+
+        override fun windowDetached(isChangingConfigurations: Boolean) {
+            detaches += isChangingConfigurations
+            events += "detached"
+        }
+
+        override fun close() {
+            closeCalls += 1
+        }
+    }
+
+    /**
+     * Reports transport loss synchronously from the window catch-up transact,
+     * modeling an [AidlFeedBridge] whose first `windowAttached` fails while
+     * [FeedOverlayGatewayImpl] still holds its lock.
+     */
+    private class LossyWindowConnection(
+        private val gateway: FeedOverlayGatewayImpl,
+    ) : FeedOverlayConnection, FeedOverlayWindowConnection {
+        var closeCalls: Int = 0
+
+        override fun setVisible(visible: Boolean) = Unit
+
+        override fun setProgress(progress: Float) = Unit
+
+        override fun windowAttached(params: WindowManager.LayoutParams, flags: Int) {
+            gateway.onConnectionLost()
+        }
+
+        override fun windowDetached(isChangingConfigurations: Boolean) = Unit
+
+        override fun close() {
+            closeCalls += 1
+        }
     }
 }

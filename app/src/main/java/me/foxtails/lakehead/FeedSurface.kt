@@ -21,11 +21,18 @@ const val FEED_SURFACE_TAG = "feed-surface"
  * via [FeedOverlaySurface]; otherwise it renders an honest "Feed unavailable" message. The
  * background stays transparent in both cases so the host wallpaper (owned by the system) shows
  * through. This seam owns no grid, gesture arbitration or lifecycle logic.
+ *
+ * Window handshake: [onWindowAttached]/[onWindowDetached] pass through to the hosted
+ * [FeedOverlaySurface] (production registers/unregisters the host window with the bound
+ * overlay through the gateway). Both default to no-ops so previews and tests that do not
+ * wire a gateway keep the prior behavior.
  */
 @Composable
 internal fun FeedSurface(
     availability: FeedAvailability,
     modifier: Modifier = Modifier,
+    onWindowAttached: () -> Unit = {},
+    onWindowDetached: () -> Unit = {},
 ) {
     Box(
         modifier = modifier
@@ -36,6 +43,8 @@ internal fun FeedSurface(
         when (availability) {
             is FeedAvailability.Available -> FeedOverlaySurface(
                 provider = availability.provider,
+                onWindowAttached = onWindowAttached,
+                onWindowDetached = onWindowDetached,
             )
             is FeedAvailability.Unavailable -> BasicText(
                 text = "Feed unavailable",

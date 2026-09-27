@@ -41,6 +41,8 @@ import me.foxtails.lakehead.platform.launcherapps.LauncherAppsIconActivityLookup
 import me.foxtails.lakehead.platform.launcherapps.LauncherAppsIconSnapshotRefresher
 import me.foxtails.lakehead.platform.launcherapps.LauncherAppsActivityLauncher
 import me.foxtails.lakehead.platform.launcherapps.LauncherAppsAppCatalogue
+import me.foxtails.lakehead.platform.shortcuts.LauncherAppsShortcutGateway
+import me.foxtails.lakehead.platform.shortcuts.ShortcutGateway
 
 internal val PRODUCTION_HOME_ID = HomeId("home-main")
 
@@ -51,6 +53,19 @@ class MainActivity : ComponentActivity() {
 
     private val appLauncher: AppLauncher by lazy(LazyThreadSafetyMode.NONE) {
         LauncherAppsActivityLauncher(applicationContext)
+    }
+
+    // Shortcut gateway: application context only, never the activity. The gateway
+    // owns per-app shortcut queries, the bounded snapshot cache and shortcut /
+    // package invalidation; the surface loader joins its rank-ordered rows with
+    // persisted tile bindings for the existing edit-menu seam (B1 wires the
+    // surface entries and execution; this slice only starts the gateway).
+    internal val shortcutGateway: ShortcutGateway by lazy(LazyThreadSafetyMode.NONE) {
+        LauncherAppsShortcutGateway(applicationContext)
+    }
+
+    internal val shortcutSurfaceLoader: ShortcutSurfaceLoader by lazy(LazyThreadSafetyMode.NONE) {
+        ShortcutSurfaceLoader(shortcutGateway, placementRepository)
     }
 
     private val placementDatabase: PlacementDatabase by lazy(LazyThreadSafetyMode.NONE) {
@@ -231,6 +246,20 @@ class MainActivity : ComponentActivity() {
                 // S1: menu picks attach directly (non-suspend tryLock path); the
                 // shell dismisses the menu around this call.
                 onSelectFeedProvider = { feedGateway.attach(it) },
+                // F3 feed driving (kept separate from the shortcut gateway
+                // wiring): pager progress/visibility flow into the gateway's
+                // never-throw best-effort notify verbs, which parallax and
+                // open/close the bound overlay.
+                onFeedProgress = { feedGateway.notifyOverlayProgress(it) },
+                onFeedVisible = { feedGateway.notifyOverlayVisible(it) },
+                // F3 window handshake: the hosted provider view registers this
+                // activity's window with the bound overlay (provider renders
+                // pixels only after windowAttached) and unregisters on release.
+                // The gateway copies the window params and never retains the
+                // activity; no new permission (manifest queries already cover
+                // the provider packages, binding uses BIND_AUTO_CREATE).
+                onFeedWindowAttached = { feedGateway.notifyWindowAttached(this@MainActivity) },
+                onFeedWindowDetached = { feedGateway.notifyWindowDetached(false) },
                 onMoveTile = { itemId, position ->
                     lifecycleScope.launch {
                         routeLoader.commitMove(itemId, position)
@@ -258,6 +287,7 @@ class MainActivity : ComponentActivity() {
     override fun onStart() {
         super.onStart()
         appCatalogue.start()
+        shortcutGateway.start(lifecycleScope)
         homeRouteLoader.start(lifecycleScope)
         allAppsRouteLoader.start(lifecycleScope)
         feedGateway.start(lifecycleScope)
@@ -267,6 +297,7 @@ class MainActivity : ComponentActivity() {
         feedGateway.stop()
         allAppsRouteLoader.stop()
         homeRouteLoader.stop()
+        shortcutGateway.stop()
         appCatalogue.stop()
         super.onStop()
     }

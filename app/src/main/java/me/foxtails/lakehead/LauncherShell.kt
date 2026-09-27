@@ -110,6 +110,16 @@ const val LAUNCHER_PAGE_COUNT = 3
  * [onSelectFeedProvider] (binding stays with the caller). While open the pager
  * sets `userScrollEnabled = false`, so swipe navigation is held; programmatic
  * pill navigation still works.
+ *
+ * F3 feed driving: the shell derives the left-most page progress and settled
+ * visibility from the pager state and reports them through [onFeedProgress] /
+ * [onFeedVisible] (production forwards to the gateway's never-throw notify
+ * verbs, which parallax and open/close the bound overlay). The per-gesture
+ * [feedStartAllowed] latch bypasses only the A3 region rule for gestures that
+ * start settled on the feed page; every other guard stays. The provider view's
+ * window handshake flows through [onFeedWindowAttached] / [onFeedWindowDetached]
+ * (production registers/unregisters the host window with the bound overlay, which
+ * is what lets the provider render pixels).
  */
 @Composable
 internal fun LauncherShell(
@@ -139,6 +149,22 @@ internal fun LauncherShell(
     // S1 settings menu: reports the feed provider picked in the transient
     // settings menu. The shell dismisses the menu; binding stays with the caller.
     onSelectFeedProvider: (FeedProviderId) -> Unit = {},
+    // F3 feed driving: [onFeedProgress] receives the left-most page scroll
+    // progress (1 when the feed page is fully shown, 0 on home and beyond) on
+    // every pager offset change; [onFeedVisible] receives true only while
+    // settled on the feed page. Both default to no-ops so previews and tests
+    // that do not wire a gateway keep the A3 behavior. The production caller
+    // forwards to the gateway's never-throw notify verbs.
+    onFeedProgress: (Float) -> Unit = {},
+    onFeedVisible: (Boolean) -> Unit = {},
+    // F3 window handshake: [onFeedWindowAttached] fires once per hosted provider
+    // identity (the production caller registers the host window with the bound
+    // overlay through the gateway, which is what lets the provider render
+    // pixels); [onFeedWindowDetached] fires when the hosted view releases. Both
+    // default to no-ops so previews and tests that do not wire a gateway keep
+    // the prior behavior.
+    onFeedWindowAttached: () -> Unit = {},
+    onFeedWindowDetached: () -> Unit = {},
     modifier: Modifier = Modifier,
     initialPage: Int = LAUNCHER_PAGE_TILE,
     viewportStyle: HomeCanvasViewportStyle = HomeCanvasViewportStyle(),
@@ -231,6 +257,33 @@ internal fun LauncherShell(
     // userScrollEnabled below; the pill's programmatic animateScrollToPage is
     // unaffected by userScrollEnabled.
     var isSettingsOpen by remember { mutableStateOf(false) }
+    // F3 feed-start latch: true when the current gesture's first down found the
+    // pager settled on the feed page. Plain remember transient gesture state,
+    // never persisted. ORed with the A3 region latch below: the feed page hosts
+    // provider-owned full-bleed content with no tiles to protect from accidental
+    // paging, so swipes starting there always navigate (the pill is unaffected
+    // regardless). Latched per gesture like pagerRegionAllowed so the gate never
+    // flips mid-swipe when currentPage settles across the feed/home boundary.
+    var feedStartAllowed by remember { mutableStateOf(false) }
+
+    // F3 feed driving: left-most page progress (1 on feed, 0 on home and beyond)
+    // and settled visibility flow to the gateway through onFeedProgress/Visible.
+    // Reads of currentPage/currentPageOffsetFraction/isScrollInProgress here only
+    // schedule recomposition; the callbacks fire from LaunchedEffect, never during
+    // composition. Visibility additionally gates on !isScrollInProgress so a
+    // feed→home drag mid-swipe (currentPage still the feed snap, offset != 0)
+    // never emits visible=true flaps; progress stays continuous for parallax.
+    val feedProgress = feedOverlayProgress(
+        pagerState.currentPage,
+        pagerState.currentPageOffsetFraction,
+    )
+    val feedVisible = isFeedOverlayVisible(
+        pagerState.currentPage,
+        pagerState.isScrollInProgress,
+        pagerState.currentPageOffsetFraction,
+    )
+    LaunchedEffect(feedProgress) { onFeedProgress(feedProgress) }
+    LaunchedEffect(feedVisible) { onFeedVisible(feedVisible) }
 
     Box(
         modifier = modifier
@@ -254,6 +307,19 @@ internal fun LauncherShell(
                                 heightPx = height,
                             )
                     }
+                    // F3: latch whether this gesture started settled on the feed
+                    // page (per-gesture, like the region latch above, so a swipe
+                    // that settles across the feed/home boundary never flips the
+                    // gate mid-gesture). Reading currentPage here takes the live
+                    // value at down time; the handler is not restarted by page
+                    // changes on purpose. The settled overload (scroll-aware)
+                    // keeps a down during an in-flight settle animation from
+                    // latching the feed exception.
+                    feedStartAllowed = isFeedOverlayVisible(
+                        pagerState.currentPage,
+                        pagerState.isScrollInProgress,
+                        pagerState.currentPageOffsetFraction,
+                    )
                     while (true) {
                         val next = awaitPointerEvent(PointerEventPass.Initial)
                         if (next.changes.none { it.pressed }) break
@@ -265,12 +331,14 @@ internal fun LauncherShell(
             state = pagerState,
             modifier = Modifier.fillMaxSize(),
             beyondViewportPageCount = 1,
-            userScrollEnabled = isPagerSwipeEnabled(pickerBlocksPager, pagerWinner, homeHold, pagerHold, pagerRegionAllowed, isSettingsOpen),
+            userScrollEnabled = isPagerSwipeEnabled(pickerBlocksPager, pagerWinner, homeHold, pagerHold, pagerRegionAllowed, isSettingsOpen, feedStartAllowed),
         ) { page ->
             when (page) {
                 LAUNCHER_PAGE_FEED -> FeedSurface(
                     availability = feedAvailability,
                     modifier = Modifier.fillMaxSize(),
+                    onWindowAttached = onFeedWindowAttached,
+                    onWindowDetached = onFeedWindowDetached,
                 )
 
                 LAUNCHER_PAGE_ALL_APPS -> AllAppsScreen(
@@ -362,9 +430,16 @@ internal fun LauncherShell(
  * while [isSettingsOpen] is true (the settings menu is up). Defaults to false
  * so callers that do not hoist the menu keep the A3 behavior exactly.
  *
- * Pure boolean AND, framework-free and unit-testable. Programmatic pill
- * navigation via `animateScrollToPage` bypasses `userScrollEnabled` and is
- * unaffected by this gate.
+ * F3 adds the feed-start exception: swipe is enabled when [feedStartAllowed] is
+ * true (the gesture's first down found the pager settled on the feed page) even
+ * if the A3 region latch is false. Defaults to false so callers that do not
+ * track the feed page keep the S1 behavior exactly. The exception bypasses only
+ * the region latch — picker, arbitration, holds and the settings menu still
+ * disable swipe — because the feed page hosts provider-owned content with no
+ * tiles to protect, and trapping the user there with only the pill as escape is
+ * worse than a top-start page. Programmatic pill navigation via
+ * `animateScrollToPage` bypasses `userScrollEnabled` and is unaffected by this
+ * gate.
  */
 internal fun isPagerSwipeEnabled(
     pickerBlocksPager: Boolean,
@@ -373,4 +448,40 @@ internal fun isPagerSwipeEnabled(
     pagerHold: Boolean = false,
     pagerRegionAllowed: Boolean = true,
     isSettingsOpen: Boolean = false,
-): Boolean = !pickerBlocksPager && pagerWinner != ArbWinner.PICKER && !homeHold && !pagerHold && pagerRegionAllowed && !isSettingsOpen
+    feedStartAllowed: Boolean = false,
+): Boolean = !pickerBlocksPager && pagerWinner != ArbWinner.PICKER && !homeHold && !pagerHold && (pagerRegionAllowed || feedStartAllowed) && !isSettingsOpen
+
+/**
+ * F3 feed overlay scroll progress from the pager position.
+ *
+ * Returns 1 when the feed page ([LAUNCHER_PAGE_FEED]) is fully shown and 0 on
+ * home and beyond, linear in between: `1 - (currentPage - feedPage + offset)`.
+ * [pageOffsetFraction] is the pager's current-page offset as a fraction of the
+ * page size (0 when settled). Out-of-range positions (overscroll past the feed,
+ * pages past home) clamp to `0..1`, and `NaN` maps to `0` so a corrupt offset
+ * parks the overlay instead of poisoning the gateway cache (which applies the
+ * same coercion downstream). Pure, framework-free and unit-testable.
+ */
+internal fun feedOverlayProgress(currentPage: Int, pageOffsetFraction: Float): Float {
+    val raw = 1f - (currentPage - LAUNCHER_PAGE_FEED + pageOffsetFraction)
+    return if (raw.isNaN()) 0f else raw.coerceIn(0f, 1f)
+}
+
+/**
+ * F3 feed overlay visibility from the settled pager page.
+ *
+ * True only while settled on the feed page: [currentPage] is the feed page, no
+ * scroll is in progress ([isScrollInProgress] false — during a drag or settle
+ * animation `currentPage` only names the nearest snap, so it flaps mid-swipe),
+ * and [pageOffsetFraction] is exactly `0` (no peek offset). The gateway's
+ * open/close verbs therefore fire on arrival/departure rather than on every
+ * mid-swipe snap change. Pure, framework-free and unit-testable. The default
+ * arguments preserve the settled-page check for callers that do not track scroll
+ * state (down-time latch, previews).
+ */
+internal fun isFeedOverlayVisible(
+    currentPage: Int,
+    isScrollInProgress: Boolean = false,
+    pageOffsetFraction: Float = 0f,
+): Boolean =
+    currentPage == LAUNCHER_PAGE_FEED && !isScrollInProgress && pageOffsetFraction == 0f

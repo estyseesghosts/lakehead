@@ -1,6 +1,7 @@
 package me.foxtails.lakehead.platform.feed
 
 import android.os.IBinder
+import android.view.WindowManager
 import com.google.android.libraries.launcherclient.ILauncherOverlay
 import com.google.android.libraries.launcherclient.ILauncherOverlayCallback
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -26,9 +27,13 @@ import java.util.concurrent.TimeUnit
  *
  * F1 scope, by delegation: own the proxy (via `ILauncherOverlay.Stub.asInterface`), hold
  * the single `ILauncherOverlayCallback.Stub`, link the death recipient and forward the two
- * control verbs. Window attachment (`windowAttached`, which needs an activity
- * `WindowManager.LayoutParams`) and gateway promotion stay with F2/F3; the [callback]
- * accessor below is the handoff seam for that handshake.
+ * control verbs. Window attachment (`windowAttached`, which carries an activity-derived
+ * `WindowManager.LayoutParams` plus the single [callback] identity) is also owned here
+ * behind [FeedOverlayWindowConnection]: without it the provider renders no pixels even
+ * while bound, so the gateway forwards the host's window handshake through this bridge
+ * and the [callback] accessor below is the identity that handshake registers. The
+ * gateway builds the params from the host `Activity` at the platform boundary; this
+ * bridge only forwards the copy it is given.
  *
  * Threading contract, mirroring the gateway:
  * - Binder entry points ([callback], the death recipient) never throw and never suspend:
@@ -63,7 +68,7 @@ import java.util.concurrent.TimeUnit
 internal class AidlFeedBridge(
     private val service: IBinder,
     private val onConnectionLost: () -> Unit,
-) : FeedOverlayConnection {
+) : FeedOverlayConnection, FeedOverlayWindowConnection {
 
     private val mutex = Mutex()
 
@@ -106,6 +111,37 @@ internal class AidlFeedBridge(
     /** Progress most recently transacted; idempotency is measured against this. */
     @Volatile
     private var deliveredProgress: Float? = null
+
+    /**
+     * Newest window params requested; the drain registers them even if an older attach
+     * is in flight. Stored as a defensive copy so the caller cannot mutate the
+     * pending registration; null means no attach is pending.
+     */
+    @Volatile
+    private var lastWindowParams: WindowManager.LayoutParams? = null
+
+    /** Flags for the pending [lastWindowParams] registration. */
+    @Volatile
+    private var lastWindowFlags: Int = WINDOW_ATTACH_FLAGS
+
+    /**
+     * Whether the provider currently holds our window registration.
+     *
+     * Set only by the drain after a successful `windowAttached` transact, cleared only
+     * after a successful `windowDetached` transact or by [close] (teardown drops the
+     * registration without IPC: the subsequent unbind ends the provider side).
+     */
+    @Volatile
+    private var windowAttachedLive: Boolean = false
+
+    /**
+     * Pending `windowDetached` request with its `isChangingConfigurations` argument.
+     * Null means no detach is pending. A detach for a window that was never registered
+     * ([windowAttachedLive] false) is dropped without IPC; otherwise detach wins over
+     * a co-pending attach (the attach is dropped, the provider never held the window).
+     */
+    @Volatile
+    private var pendingWindowDetachChanging: Boolean? = null
 
     private val proxy: ILauncherOverlay? = try {
         ILauncherOverlay.Stub.asInterface(service)
@@ -177,6 +213,47 @@ internal class AidlFeedBridge(
         }
     }
 
+    /**
+     * Registers the host window with the bound overlay service.
+     *
+     * Caches a defensive copy of [params] with [flags] first, so a `tryLock` failure
+     * is safe via handoff exactly like the control verbs: whoever holds the lock
+     * flushes window ops before control verbs in [drainLocked], and the post-unlock
+     * re-check ([hasPending] covers window state) loops until quiescent. Repeating
+     * the call replaces the pending registration; a co-pending detach (see
+     * [windowDetached]) drops the attach without IPC when the provider never held
+     * the window. Silent when [close]d.
+     */
+    override fun windowAttached(params: WindowManager.LayoutParams, flags: Int) {
+        try {
+            lastWindowParams = copyWindowParams(params)
+            lastWindowFlags = flags
+            if (closed) return
+            deliverPending()
+        } catch (_: Throwable) {
+            // Never throws to callers; transport loss is already routed to onConnectionLost.
+        }
+    }
+
+    /**
+     * Unregisters the host window from the bound overlay service.
+     *
+     * Caches [isChangingConfigurations] first with the same handoff contract as
+     * [windowAttached]. A detach for a window that was never registered is dropped
+     * without IPC; otherwise detach wins over a co-pending attach. Clears the live
+     * flag on teardown ([close]) without IPC: the gateway's unbind ends the
+     * provider side. Silent when [close]d.
+     */
+    override fun windowDetached(isChangingConfigurations: Boolean) {
+        try {
+            pendingWindowDetachChanging = isChangingConfigurations
+            if (closed) return
+            deliverPending()
+        } catch (_: Throwable) {
+            // Never throws to callers; transport loss is already routed to onConnectionLost.
+        }
+    }
+
     override fun close() {
         try {
             val first = synchronized(tearDownGuard) {
@@ -193,6 +270,13 @@ internal class AidlFeedBridge(
                 } catch (_: Exception) {
                     // Best-effort: the binder may already be gone; close stays silent.
                 }
+                // Teardown drops the window registration without IPC: the gateway
+                // unbinds next, which ends the provider side. Clearing here keeps a
+                // post-close attach from ever transacting (deliverPending is gated
+                // on [closed], and the drain below also bails when closed).
+                lastWindowParams = null
+                pendingWindowDetachChanging = null
+                windowAttachedLive = false
             }
             // Ordering: loss committed before this teardown took effect must be
             // delivered before close returns. The listener runs outside the guard,
@@ -237,7 +321,8 @@ internal class AidlFeedBridge(
     }
 
     private fun hasPending(): Boolean =
-        lastVisible != deliveredVisible || lastProgress != deliveredProgress
+        lastVisible != deliveredVisible || lastProgress != deliveredProgress ||
+            lastWindowParams != null || pendingWindowDetachChanging != null
 
     /**
      * Sends the newest cached value of each verb while holding the mutex.
@@ -249,9 +334,15 @@ internal class AidlFeedBridge(
      * a newer one. A failed transact (dead binder) reports loss once. Silent when
      * [close]d or when the proxy was never usable (the latter also reports loss, since an
      * unusable proxy is a dead connection, not a deliberate teardown).
+     *
+     * Window ops flush first on every pass (see [drainWindowLocked]): the provider
+     * needs the registration before openOverlay/onScroll can show or move pixels.
      */
     private fun drainLocked() {
         while (true) {
+            // Window ops flush first: the provider needs the registration before
+            // openOverlay/onScroll can show or move any pixels.
+            if (!drainWindowLocked()) return
             val visible = lastVisible
             val needVisible = visible != null && visible != deliveredVisible
             val progress = lastProgress
@@ -285,6 +376,79 @@ internal class AidlFeedBridge(
             }
         }
     }
+
+    /**
+     * Flushes pending window ops while holding the mutex; true when the caller should
+     * continue to the control verbs, false when the drain must stop (closed or dead
+     * transport).
+     *
+     * Ordering: a co-pending detach wins over an undelivered attach (the provider
+     * never held the window, so both collapse to at most one `windowDetached` when
+     * live, or nothing when never registered). Otherwise the pending attach registers
+     * first. A failed transact reports loss once and stops the drain. Silent when
+     * [close]d. The caller must hold the mutex via `tryLock`.
+     */
+    private fun drainWindowLocked(): Boolean {
+        while (true) {
+            if (closed) return false
+            val overlay = proxy
+            if (overlay == null) {
+                // An unusable proxy is a dead connection — but only when there is
+                // actual window work pending. A null proxy with nothing to register
+                // must not convert an otherwise healthy channel into a loss.
+                if (lastWindowParams == null && pendingWindowDetachChanging == null) return true
+                notifyLossOnce()
+                return false
+            }
+            val detachChanging = pendingWindowDetachChanging
+            if (detachChanging != null) {
+                if (windowAttachedLive) {
+                    try {
+                        overlay.windowDetached(detachChanging)
+                    } catch (_: Exception) {
+                        notifyLossOnce()
+                        return false
+                    }
+                    windowAttachedLive = false
+                }
+                // Either way the detach is consumed, and a co-pending attach for a
+                // window the provider never held is dropped with it.
+                pendingWindowDetachChanging = null
+                lastWindowParams = null
+                continue
+            }
+            val params = lastWindowParams
+            if (params != null) {
+                try {
+                    overlay.windowAttached(params, callback, lastWindowFlags)
+                } catch (_: Exception) {
+                    notifyLossOnce()
+                    return false
+                }
+                windowAttachedLive = true
+                lastWindowParams = null
+                continue
+            }
+            return true
+        }
+    }
+
+    /**
+     * Defensive copy of window params for the pending registration cache.
+     *
+     * Built with the public no-arg constructor plus [WindowManager.LayoutParams.copyFrom]
+     * (there is no public copy constructor in the compile stubs). Falls back to the
+     * caller's reference when the copy itself throws (best-effort: the transact still
+     * runs, and teardown clears the reference). Never throws.
+     */
+    private fun copyWindowParams(params: WindowManager.LayoutParams): WindowManager.LayoutParams =
+        try {
+            WindowManager.LayoutParams().apply { copyFrom(params) }
+        } catch (_: Exception) {
+            params
+        } catch (_: Throwable) {
+            params
+        }
 
     /**
      * Reports transport loss at most once, never after [close], and never throws —
@@ -330,6 +494,14 @@ internal class AidlFeedBridge(
          * are device-verified.
          */
         private const val OVERLAY_FLAGS: Int = 0
+
+        /**
+         * Flags for `windowAttached`.
+         *
+         * `0` requests the default overlay window behavior, mirroring the
+         * Launcher3 host handshake; tuned only with device evidence.
+         */
+        internal const val WINDOW_ATTACH_FLAGS: Int = 0
 
         /**
          * Bounded wait in [close] for an in-flight loss delivery committed before the

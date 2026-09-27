@@ -9,6 +9,7 @@ import org.junit.Test
  * A1 gate tests for [isPagerSwipeEnabled]: swipe is enabled only when the
  * picker is not blocking, arbitration did not award the gesture to the picker,
  * and home is not holding. Pill programmatic navigation bypasses this gate.
+ * F3 adds the feed-start exception, which bypasses only the A3 region latch.
  */
 class LauncherPagerGateTest {
 
@@ -139,6 +140,95 @@ class LauncherPagerGateTest {
                 homeHold = false,
                 pagerHold = false,
                 pagerRegionAllowed = true,
+            ),
+        )
+    }
+
+    // F3 feed-start exception: bypasses only the region latch.
+
+    @Test
+    fun feedStart_bypassesRegionLatch() {
+        assertTrue(
+            isPagerSwipeEnabled(
+                pickerBlocksPager = false,
+                pagerWinner = ArbWinner.UNDECIDED,
+                homeHold = false,
+                pagerHold = false,
+                pagerRegionAllowed = false,
+                isSettingsOpen = false,
+                feedStartAllowed = true,
+            ),
+        )
+    }
+
+    @Test
+    fun defaultGate_omitsFeedException() {
+        // Callers that do not track the feed page keep the S1 behavior exactly:
+        // a top-67% start still never pages.
+        assertFalse(
+            isPagerSwipeEnabled(
+                pickerBlocksPager = false,
+                pagerWinner = ArbWinner.UNDECIDED,
+                homeHold = false,
+                pagerHold = false,
+                pagerRegionAllowed = false,
+                isSettingsOpen = false,
+            ),
+        )
+    }
+
+    @Test
+    fun feedStart_doesNotBypassPicker() {
+        assertFalse(
+            isPagerSwipeEnabled(
+                pickerBlocksPager = true,
+                pagerWinner = ArbWinner.PICKER,
+                homeHold = false,
+                pagerHold = false,
+                pagerRegionAllowed = false,
+                isSettingsOpen = false,
+                feedStartAllowed = true,
+            ),
+        )
+    }
+
+    @Test
+    fun feedStart_doesNotBypassHolds() {
+        assertFalse(
+            isPagerSwipeEnabled(
+                pickerBlocksPager = false,
+                pagerWinner = ArbWinner.UNDECIDED,
+                homeHold = true,
+                pagerHold = false,
+                pagerRegionAllowed = false,
+                isSettingsOpen = false,
+                feedStartAllowed = true,
+            ),
+        )
+        assertFalse(
+            isPagerSwipeEnabled(
+                pickerBlocksPager = false,
+                pagerWinner = ArbWinner.UNDECIDED,
+                homeHold = false,
+                pagerHold = true,
+                pagerRegionAllowed = false,
+                isSettingsOpen = false,
+                feedStartAllowed = true,
+            ),
+        )
+    }
+
+    @Test
+    fun feedStart_doesNotBypassSettingsMenu() {
+        assertFalse(
+            isPagerSwipeEnabled(
+                pickerBlocksPager = false,
+                pagerWinner = ArbWinner.UNDECIDED,
+                homeHold = false,
+                pagerHold = false,
+                pagerRegionAllowed = false,
+                isSettingsOpen = true,
+                feedStartAllowed = true,
             ),
         )
     }

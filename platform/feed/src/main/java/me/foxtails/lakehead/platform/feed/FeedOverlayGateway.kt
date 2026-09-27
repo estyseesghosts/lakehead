@@ -1,19 +1,25 @@
 package me.foxtails.lakehead.platform.feed
 
+import android.app.Activity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.StateFlow
 
 /**
  * Lifecycle owner for one Launcher3-style feed overlay connection.
  *
- * The gateway owns availability state and the single bound overlay service. It holds no
- * framework types beyond [StateFlow] and [CoroutineScope], so composables and domain code can
- * consume [state] without touching `Context`, `ServiceConnection` or `IBinder`. All Android
- * work lives in the implementation behind this seam.
+ * The gateway owns availability state and the single bound overlay service. Composables
+ * and domain code consume [state] without touching `Context`, `ServiceConnection` or
+ * `IBinder`; the window handshake ([notifyWindowAttached]/[notifyWindowDetached]) is the
+ * deliberate exception — it takes the host `Activity` so the platform boundary (this
+ * gateway's implementation) can derive the provider's `WindowManager.LayoutParams`
+ * from the live window. Callers pass the activity only and never build params or hold
+ * the service connection themselves.
  *
  * Every method is idempotent: calling [start] twice keeps a single resolution stream, calling
  * [stop] without [start] is a no-op, attaching the already-attached provider keeps the single
- * connection, and [detach] without a connection is a no-op.
+ * connection, and [detach] without a connection is a no-op. Window attach/detach are
+ * idempotent the same way: a repeated attach re-registers the latest window, a detach
+ * without a registration is a no-op, and every method never throws.
  */
 interface FeedOverlayGateway {
 
@@ -71,4 +77,31 @@ interface FeedOverlayGateway {
      * when unbound.
      */
     fun notifyOverlayProgress(progress: Float)
+
+    /**
+     * Registers the host window with the bound overlay service.
+     *
+     * This is the handshake that lets the provider render pixels: the implementation
+     * derives the provider's `WindowManager.LayoutParams` from [activity]'s live
+     * window and forwards them with the connection's single overlay callback (see
+     * [FeedOverlayWindowConnection]). Without it the provider stays bound but draws
+     * nothing, so the host surface calls this when its provider view attaches.
+     *
+     * The params copy is cached first, so a call made while unbound is re-delivered
+     * on the next connect (catch-up) and survives rebinds like the
+     * [notifyOverlayVisible]/[notifyOverlayProgress] caches; only the window
+     * registration is cleared, never the activity (which is never retained).
+     * Repeating the call re-registers the latest window. Never throws, including
+     * when unbound.
+     */
+    fun notifyWindowAttached(activity: Activity)
+
+    /**
+     * Unregisters the host window from the bound overlay service.
+     *
+     * The host surface calls this when its provider view detaches. Clears the cached
+     * window registration so a later re-attach starts clean; a detach without a
+     * registration is a no-op. Never throws, including when unbound.
+     */
+    fun notifyWindowDetached(isChangingConfigurations: Boolean)
 }

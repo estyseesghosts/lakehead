@@ -539,6 +539,190 @@ class AidlFeedBridgeTest {
         assertEquals(1, service.unlinkCalls.get())
     }
 
+    // Window handshake.
+    //
+    // The provider renders no pixels until the host registers its window: windowAttached
+    // carries the host params plus the bridge's single callback identity, windowDetached
+    // unregisters. Same threading/teardown contract as the control verbs.
+
+    @Test
+    fun windowAttachRegistersParamsCallbackAndFlags() {
+        val harness = Harness()
+        val params = WindowManager.LayoutParams()
+
+        harness.bridge.windowAttached(params, 0)
+
+        assertEquals(1, harness.overlay.attaches.size)
+        val record = harness.overlay.attaches.single()
+        assertTrue("attach must carry host params", record.params != null)
+        assertEquals(0, record.flags)
+        assertTrue("attach must register the bridge callback", record.hasCallback)
+        assertEquals(0, harness.losses.get())
+    }
+
+    @Test
+    fun windowDetachUnregistersWithChangingFlag() {
+        val harness = Harness()
+        harness.bridge.windowAttached(WindowManager.LayoutParams(), 0)
+        assertEquals(listOf("attached"), harness.overlay.events.toList())
+
+        harness.bridge.windowDetached(true)
+
+        assertEquals(listOf(true), harness.overlay.detaches.toList())
+        assertEquals(listOf("attached", "detached"), harness.overlay.events.toList())
+        assertEquals(0, harness.losses.get())
+    }
+
+    @Test
+    fun detachWithoutAttachIsSilent() {
+        val harness = Harness()
+
+        harness.bridge.windowDetached(false)
+
+        assertTrue(harness.overlay.attaches.isEmpty())
+        assertTrue(harness.overlay.detaches.isEmpty())
+        assertEquals(0, harness.losses.get())
+    }
+
+    @Test
+    fun repeatedAttachReRegistersLatestFlags() {
+        val harness = Harness()
+
+        harness.bridge.windowAttached(WindowManager.LayoutParams(), 0)
+        harness.bridge.windowAttached(WindowManager.LayoutParams(), 7)
+
+        assertEquals(listOf(0, 7), harness.overlay.attaches.map { it.flags })
+        assertEquals(0, harness.losses.get())
+    }
+
+    @Test
+    fun attachCachesCopyNotCallerReference() {
+        val harness = Harness()
+        val params = WindowManager.LayoutParams()
+
+        harness.bridge.windowAttached(params, 0)
+
+        // The bridge caches a defensive copy (no-arg plus copyFrom on device), never
+        // the caller's reference, so later caller mutation cannot corrupt the pending
+        // registration. Field-level copy fidelity is framework code (copyFrom) and
+        // stays device-verified: stubbed unit-test copies carry no fields.
+        val delivered = harness.overlay.attaches.single().params
+        assertTrue(delivered != null)
+        assertTrue("bridge must not transact the caller's instance", delivered !== params)
+    }
+
+    @Test
+    fun windowFlushesBeforeControlVerbs() {
+        val harness = Harness()
+
+        harness.bridge.windowAttached(WindowManager.LayoutParams(), 0)
+        harness.bridge.setVisible(true)
+
+        assertEquals(listOf("attached", "open"), harness.overlay.events.toList())
+    }
+
+    @Test
+    fun attachFailureReportsLossOnce() {
+        val harness = Harness()
+        harness.overlay.failWith = RemoteException("dead")
+
+        harness.bridge.windowAttached(WindowManager.LayoutParams(), 0)
+        harness.bridge.windowAttached(WindowManager.LayoutParams(), 0)
+        harness.bridge.setProgress(0.5f)
+
+        assertEquals(1, harness.losses.get())
+        assertTrue(harness.overlay.attaches.isEmpty())
+    }
+
+    @Test
+    fun detachFailureReportsLossOnce() {
+        val harness = Harness()
+        harness.bridge.windowAttached(WindowManager.LayoutParams(), 0)
+        assertEquals(1, harness.overlay.attaches.size)
+        harness.overlay.failWith = RemoteException("dead")
+
+        harness.bridge.windowDetached(false)
+        harness.bridge.setVisible(true)
+
+        assertEquals(1, harness.losses.get())
+        assertTrue(harness.overlay.detaches.isEmpty())
+    }
+
+    @Test
+    fun closeThenWindowOpsAreSilent() {
+        val harness = Harness()
+        harness.bridge.close()
+
+        harness.bridge.windowAttached(WindowManager.LayoutParams(), 0)
+        harness.bridge.windowDetached(false)
+
+        assertTrue(harness.overlay.attaches.isEmpty())
+        assertTrue(harness.overlay.detaches.isEmpty())
+        assertEquals(0, harness.losses.get())
+    }
+
+    @Test
+    fun windowDetachAfterCloseIsSilent() {
+        val harness = Harness()
+        harness.bridge.windowAttached(WindowManager.LayoutParams(), 0)
+        harness.bridge.close()
+
+        harness.bridge.windowDetached(false)
+
+        assertEquals(1, harness.overlay.attaches.size)
+        assertTrue(harness.overlay.detaches.isEmpty())
+        assertEquals(0, harness.losses.get())
+        assertEquals(1, harness.service.unlinkCalls.get())
+    }
+
+    @Test
+    fun contendedAttachDeliversViaHandoff() {
+        val harness = Harness()
+        harness.overlay.blockScrolls = true
+        val worker = thread { harness.bridge.setProgress(0.1f) }
+        assertTrue(
+            "transact did not start",
+            harness.overlay.enteredScroll.await(10, TimeUnit.SECONDS),
+        )
+
+        // The lock is held inside the 0.1 transact: this caches the attach and
+        // degrades via handoff; the holder flushes window ops before control verbs.
+        harness.bridge.windowAttached(WindowManager.LayoutParams(), 0)
+        harness.overlay.releaseScroll.countDown()
+        worker.join(10_000)
+
+        assertFalse("worker hung", worker.isAlive)
+        assertEquals(1, harness.overlay.attaches.size)
+        assertEquals(listOf("scroll", "attached"), harness.overlay.events.toList())
+        assertEquals(0, harness.losses.get())
+    }
+
+    @Test
+    fun contendedDetachDeliversViaHandoff() {
+        val harness = Harness()
+        harness.bridge.windowAttached(WindowManager.LayoutParams(), 0)
+        harness.overlay.blockScrolls = true
+        val worker = thread { harness.bridge.setProgress(0.1f) }
+        assertTrue(
+            "transact did not start",
+            harness.overlay.enteredScroll.await(10, TimeUnit.SECONDS),
+        )
+
+        // The lock is held inside the 0.1 transact: this caches the detach and
+        // degrades via handoff. The in-flight scroll transact started before the
+        // detach was cached, so its event precedes; the holder still delivers the
+        // contended detach in the same drain pass (window ops flush before the
+        // control re-check), with no loss and no extra call.
+        harness.bridge.windowDetached(true)
+        harness.overlay.releaseScroll.countDown()
+        worker.join(10_000)
+
+        assertFalse("worker hung", worker.isAlive)
+        assertEquals(listOf("attached", "scroll", "detached"), harness.overlay.events.toList())
+        assertEquals(listOf(true), harness.overlay.detaches.toList())
+        assertEquals(0, harness.losses.get())
+    }
+
     // Provider callbacks.
     //
     // The bridge's event flows are buffer-1 with no replay: values emitted while a
@@ -612,6 +796,19 @@ class AidlFeedBridgeTest {
         val opens = Collections.synchronizedList(mutableListOf<Int>())
         val closes = Collections.synchronizedList(mutableListOf<Int>())
         val scrolls = Collections.synchronizedList(mutableListOf<Float>())
+        /** Shared call log for cross-verb ordering checks (window vs control). */
+        val events = Collections.synchronizedList(mutableListOf<String>())
+        /** Window registrations in call order. */
+        val attaches = Collections.synchronizedList(mutableListOf<AttachRecord>())
+        /** `isChangingConfigurations` values of windowDetached calls in order. */
+        val detaches = Collections.synchronizedList(mutableListOf<Boolean>())
+
+        /** Window registration record: flags, callback presence and params identity. */
+        data class AttachRecord(
+            val flags: Int,
+            val hasCallback: Boolean,
+            val params: WindowManager.LayoutParams?,
+        )
 
         @Volatile
         var failWith: Exception? = null
@@ -620,6 +817,11 @@ class AidlFeedBridgeTest {
         var blockScrolls = false
         val enteredScroll = CountDownLatch(1)
         val releaseScroll = CountDownLatch(1)
+        /** Same blocking gate for windowAttached transacts (contention tests). */
+        @Volatile
+        var blockAttach = false
+        val enteredAttach = CountDownLatch(1)
+        val releaseAttach = CountDownLatch(1)
         /** Counts started onScroll transacts; lets tests prove how many drain passes ran. */
         val scrollEntries = AtomicInteger(0)
         /**
@@ -651,6 +853,7 @@ class AidlFeedBridgeTest {
                 if (!released) throw RemoteException("test latch timed out")
             }
             scrolls.add(progress)
+            events.add("scroll")
         }
 
         override fun endScroll() = Unit
@@ -659,13 +862,27 @@ class AidlFeedBridgeTest {
             lp: WindowManager.LayoutParams?,
             cb: ILauncherOverlayCallback?,
             flags: Int,
-        ) = Unit
+        ) {
+            failWith?.let { throw it }
+            if (blockAttach) {
+                enteredAttach.countDown()
+                val released = releaseAttach.await(10, TimeUnit.SECONDS)
+                if (!released) throw RemoteException("test latch timed out")
+            }
+            attaches.add(AttachRecord(flags, cb != null, lp))
+            events.add("attached")
+        }
 
-        override fun windowDetached(isChangingConfigurations: Boolean) = Unit
+        override fun windowDetached(isChangingConfigurations: Boolean) {
+            failWith?.let { throw it }
+            detaches.add(isChangingConfigurations)
+            events.add("detached")
+        }
 
         override fun closeOverlay(flags: Int) {
             failWith?.let { throw it }
             closes.add(flags)
+            events.add("close")
         }
 
         override fun onPause() = Unit
@@ -675,6 +892,7 @@ class AidlFeedBridgeTest {
         override fun openOverlay(flags: Int) {
             failWith?.let { throw it }
             opens.add(flags)
+            events.add("open")
         }
 
         override fun requestVoiceDetection(start: Boolean) = Unit

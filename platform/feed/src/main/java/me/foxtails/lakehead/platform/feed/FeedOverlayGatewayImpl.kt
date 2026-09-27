@@ -8,6 +8,8 @@ import android.content.IntentFilter
 import android.content.ServiceConnection
 import android.os.Build
 import android.os.IBinder
+import android.app.Activity
+import android.view.WindowManager
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -70,6 +72,12 @@ internal interface FeedPackageMonitor {
  *   forward it to the bound control channel ([FeedOverlayConnection]); a late connect
  *   re-delivers the cached values (catch-up), so requests made while unbound are not lost.
  *   The cache is retained across binds — only the connection is cleared.
+ * - `notifyWindowAttached` caches a copy of the activity-derived `WindowManager`
+ *   params (never the activity) and forwards them with the connection's single
+ *   callback ([FeedOverlayWindowConnection]); a late connect re-delivers the cached
+ *   registration before the control catch-up, so an attach made while unbound still
+ *   lets the provider render. The cache is retained across binds and cleared only by
+ *   [notifyWindowDetached].
  * - `onServiceDisconnected`/`onBindingDied`/binder death clear the single connection
  *   (closing the bridge, unbinding exactly once) and emit `Unavailable` without ever
  *   throwing; binder callbacks use `tryEmit` because they cannot suspend.
@@ -136,6 +144,24 @@ class FeedOverlayGatewayImpl internal constructor(
     @Volatile
     var overlayVisible: Boolean = false
         private set
+
+    /**
+     * Latest window params requested by the host surface, copied from the host
+     * `Activity`'s live window (never the activity itself, so no host is retained).
+     *
+     * Cached so a late bind can catch up: [deliverWindowToOverlay] re-delivers this
+     * registration on every connect before the control catch-up, because the provider
+     * renders no pixels until its window is attached. Retained across binds and
+     * unbinds like [overlayVisible]/[overlayProgress] — only [notifyWindowDetached]
+     * clears it, so a rebind re-attaches the same window. Null means no window is
+     * currently registered by the host surface.
+     */
+    @Volatile
+    private var windowParams: WindowManager.LayoutParams? = null
+
+    /** Flags for the cached [windowParams] registration. */
+    @Volatile
+    private var windowFlags: Int = AidlFeedBridge.WINDOW_ATTACH_FLAGS
 
     /**
      * The live control channel for the single bound overlay service, null while unbound.
@@ -301,6 +327,80 @@ class FeedOverlayGatewayImpl internal constructor(
     }
 
     /**
+     * Registers the host window with the bound overlay service.
+     *
+     * Derives the provider's params from [activity]'s live window (copied — the
+     * activity is never retained) and delegates to [notifyWindowAttachedParams], so
+     * the cache-then-deliver contract holds even when unbound. A params build
+     * failure keeps the previous registration and stays silent. Never throws,
+     * including when unbound.
+     */
+    override fun notifyWindowAttached(activity: Activity) {
+        val params = try {
+            windowParamsFor(activity)
+        } catch (_: Exception) {
+            null
+        } catch (_: Throwable) {
+            null
+        } ?: return
+        notifyWindowAttachedParams(params, AidlFeedBridge.WINDOW_ATTACH_FLAGS)
+    }
+
+    /**
+     * Params-copy seam for [notifyWindowAttached].
+     *
+     * Internal (not private) so JVM tests can drive the window handshake with a fake
+     * window channel without constructing an `Activity`; the production path above
+     * only adds the activity-derived copy at the platform boundary. Caches a
+     * defensive copy of [params] with [flags] first, then forwards to the live
+     * channel if any. Never throws, including when unbound.
+     */
+    internal fun notifyWindowAttachedParams(
+        params: WindowManager.LayoutParams,
+        flags: Int = AidlFeedBridge.WINDOW_ATTACH_FLAGS,
+    ) {
+        try {
+            windowParams = try {
+                // No public copy constructor in the compile stubs: no-arg plus copyFrom.
+                WindowManager.LayoutParams().apply { copyFrom(params) }
+            } catch (_: Exception) {
+                params
+            } catch (_: Throwable) {
+                params
+            }
+            windowFlags = flags
+        } catch (_: Throwable) {
+            return
+        }
+        deliverWindowToOverlay()
+    }
+
+    /**
+     * Unregisters the host window from the bound overlay service.
+     *
+     * Clears the cached registration first so a later re-attach starts clean, then
+     * forwards `windowDetached` to the live channel if it holds the window. Never
+     * throws, including when unbound.
+     */
+    override fun notifyWindowDetached(isChangingConfigurations: Boolean) {
+        // Nothing registered (never attached, or already detached): silent no-op
+        // without waking the channel. A live registration can only exist while
+        // the cache is set — the cache is cleared here on every detach and
+        // retained across unbinds otherwise — so skipping is exact, not heuristic.
+        if (windowParams == null) return
+        windowParams = null
+        windowFlags = AidlFeedBridge.WINDOW_ATTACH_FLAGS
+        val bridge = overlayBridge as? FeedOverlayWindowConnection ?: return
+        try {
+            bridge.windowDetached(isChangingConfigurations)
+        } catch (_: Exception) {
+            // Transport loss is reported through onConnectionLost, never as an exception.
+        } catch (_: Throwable) {
+            // Window teardown never throws.
+        }
+    }
+
+    /**
      * Installs [connection] as the live control channel and catches it up.
      *
      * Production calls this from `onServiceConnected` with an [AidlFeedBridge] built around
@@ -363,6 +463,10 @@ class FeedOverlayGatewayImpl internal constructor(
                     // Replacing a channel never throws.
                 }
                 overlayBridge = connection
+                // Window registration precedes the control catch-up: the provider
+                // renders no pixels until its window is attached, so a cached
+                // attach must land before openOverlay/onScroll replay.
+                deliverWindowToOverlay()
                 deliverToOverlay()
                 if (takePendingLoss(epoch)) {
                     unbindLocked()
@@ -553,13 +657,88 @@ class FeedOverlayGatewayImpl internal constructor(
     }
 
     /**
+     * Forwards the cached window registration to the live window channel, if any.
+     *
+     * This is the single window-forwarding point: [notifyWindowAttachedParams] lands
+     * here, and [onOverlayConnected] lands here before the control catch-up. Silent
+     * while unbound or when the channel does not implement the window handshake
+     * (older fakes); never throws. The channel re-registers the latest params, so
+     * forwarding the cache on every call is idempotent.
+     */
+    private fun deliverWindowToOverlay() {
+        val params = windowParams ?: return
+        val bridge = overlayBridge as? FeedOverlayWindowConnection ?: return
+        try {
+            bridge.windowAttached(params, windowFlags)
+        } catch (_: Exception) {
+            // Transport loss is reported through onConnectionLost, never as an exception.
+        } catch (_: Throwable) {
+            // Window delivery never throws.
+        }
+    }
+
+    /**
+     * Derives the provider's overlay params from the host [activity]'s live window.
+     *
+     * Copies the window attributes when available (type, format, flags) so the
+     * provider registers against the same window configuration the host surface is
+     * attached to, and stamps the decor-view token when available so the provider
+     * can place its content. Falls back to a full-bleed default when the window is
+     * not ready yet; returns null only when even the fallback cannot be built.
+     * Never retains [activity]. Callers treat null as "keep the previous
+     * registration"; this function itself never throws.
+     */
+    private fun windowParamsFor(activity: Activity): WindowManager.LayoutParams? {
+        return try {
+            val attributes = try {
+                activity.window?.attributes
+            } catch (_: Exception) {
+                null
+            } catch (_: Throwable) {
+                null
+            }
+            val token = try {
+                activity.window?.decorView?.windowToken
+            } catch (_: Exception) {
+                null
+            } catch (_: Throwable) {
+                null
+            }
+            WindowManager.LayoutParams().apply {
+                if (attributes != null) {
+                    try {
+                        copyFrom(attributes)
+                    } catch (_: Exception) {
+                        width = WindowManager.LayoutParams.MATCH_PARENT
+                        height = WindowManager.LayoutParams.MATCH_PARENT
+                    } catch (_: Throwable) {
+                        width = WindowManager.LayoutParams.MATCH_PARENT
+                        height = WindowManager.LayoutParams.MATCH_PARENT
+                    }
+                } else {
+                    width = WindowManager.LayoutParams.MATCH_PARENT
+                    height = WindowManager.LayoutParams.MATCH_PARENT
+                }
+                if (token != null) {
+                    this.token = token
+                }
+            }
+        } catch (_: Exception) {
+            null
+        } catch (_: Throwable) {
+            null
+        }
+    }
+
+    /**
      * Tears down the single connection: closes and drops the live channel, then unbinds.
      *
      * The caller must hold [mutex] via `tryLock`. Closing the bridge first lets a dead
      * binder's in-flight loss delivery finish (bounded, re-entrant-safe) before the unbind;
      * a deliberate teardown closes a healthy channel silently, since [AidlFeedBridge] never
-     * reports loss after close. The host request cache ([overlayVisible]/[overlayProgress])
-     * is retained for the next connect. Unbind races (e.g. service already gone) are not
+     * reports loss after close. The host request caches ([overlayVisible]/[overlayProgress]
+     * and the window registration) are retained for the next connect — only an explicit
+     * [notifyWindowDetached] clears the window cache. Unbind races (e.g. service already gone) are not
      * host errors.
      */
     private fun unbindLocked() {
