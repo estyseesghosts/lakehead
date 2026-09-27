@@ -1,9 +1,12 @@
 package me.foxtails.lakehead
 
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
@@ -97,6 +100,77 @@ class ShortcutSurfaceLoaderTest {
         assertEquals(listOf(ref), gateway.launched)
     }
 
+    @Test
+    fun concurrentTogglesForOneTileRetainBothPins() = runTest {
+        val gateway = FakeGateway(
+            mapOf(identity to listOf(shortcut("a", "A", 0), shortcut("b", "B", 1))),
+        )
+        val repository = FakeBindingRepository(emptyMap(), delayFirstLoad = true)
+        val loader = ShortcutSurfaceLoader(gateway, repository, Dispatchers.Default)
+
+        val results = listOf("a", "b").map { id ->
+            async { loader.togglePin(tileId, identity, LogicalSpan(3, 1), id) }
+        }.awaitAll()
+
+        assertEquals(listOf(true, true), results)
+        assertEquals(
+            setOf("a", "b"),
+            repository.binding(tileId).pinnedShortcuts.map { it.shortcutId }.toSet(),
+        )
+    }
+
+    @Test
+    fun pinAndUnpinPreserveOrder() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val gateway = FakeGateway(
+            mapOf(identity to listOf(
+                shortcut("a", "A", 0), shortcut("b", "B", 1), shortcut("c", "C", 2),
+            )),
+        )
+        val repository = FakeBindingRepository(emptyMap())
+        val loader = ShortcutSurfaceLoader(gateway, repository, dispatcher)
+
+        assertTrue(loader.togglePin(tileId, identity, LogicalSpan(4, 1), "b"))
+        assertTrue(loader.togglePin(tileId, identity, LogicalSpan(4, 1), "a"))
+        assertEquals(
+            listOf("b", "a"),
+            repository.binding(tileId).pinnedShortcuts.map { it.shortcutId },
+        )
+        assertTrue(loader.togglePin(tileId, identity, LogicalSpan(4, 1), "b"))
+        assertEquals(listOf("a"), repository.binding(tileId).pinnedShortcuts.map { it.shortcutId })
+    }
+
+    @Test
+    fun atCapacityDoesNotWriteBinding() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val a = shortcut("a", "A", 0)
+        val gateway = FakeGateway(mapOf(identity to listOf(a, shortcut("b", "B", 1))))
+        val repository = FakeBindingRepository(mapOf(tileId to TileBinding(tileId, listOf(a.ref))))
+        val loader = ShortcutSurfaceLoader(gateway, repository, dispatcher)
+
+        assertFalse(loader.togglePin(tileId, identity, LogicalSpan(2, 1), "b"))
+        assertEquals(0, repository.saveCount)
+    }
+
+    @Test
+    fun spanChangeReprojectsCapacityWithoutPersistingOverflow() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val gateway = FakeGateway(mapOf(identity to listOf(
+            shortcut("a", "A", 0), shortcut("b", "B", 1), shortcut("c", "C", 2),
+        )))
+        val binding = TileBinding(tileId, listOf(gateway.shortcutsFor(identity).first().ref))
+        val repository = FakeBindingRepository(mapOf(tileId to binding))
+        val loader = ShortcutSurfaceLoader(gateway, repository, dispatcher)
+
+        val narrow = loader.entriesForTile(tileId, identity, LogicalSpan(2, 1))
+        val wide = loader.entriesForTile(tileId, identity, LogicalSpan(4, 1))
+        assertEquals(listOf("a", "b", "c"), narrow.map { it.id })
+        assertEquals(listOf(true, false, false), narrow.map { it.isPinEnabled })
+        assertEquals(listOf(true, true, true), wide.map { it.isPinEnabled })
+        assertEquals(binding, repository.binding(tileId))
+        assertEquals(0, repository.saveCount)
+    }
+
     private class FakeGateway(
         shortcuts: Map<AppIdentity, List<LauncherShortcut>>,
         private val launchResult: Boolean = true,
@@ -114,9 +188,14 @@ class ShortcutSurfaceLoaderTest {
     }
 
     private class FakeBindingRepository(
-        private val bindings: Map<ItemId, TileBinding>,
+        bindings: Map<ItemId, TileBinding>,
+        private val delayFirstLoad: Boolean = false,
     ) : HomePlacementRepository {
+        private val mutableBindings = bindings.toMutableMap()
+        private var loadCount = 0
         var bindingReads = 0
+        var saveCount = 0
+        fun binding(tileId: ItemId): TileBinding = mutableBindings[tileId] ?: TileBinding(tileId)
         override fun load(homeId: HomeId, columns: Int, rows: Int): LoadResult = LoadResult.NotFound
         override fun place(
             homeId: HomeId,
@@ -136,9 +215,15 @@ class ShortcutSurfaceLoaderTest {
         override fun ensureHome(homeId: HomeId): Boolean = error("surface loader must not write")
         override fun loadBinding(tileId: ItemId): TileBinding {
             bindingReads++
-            return bindings[tileId] ?: TileBinding(tileId)
+            if (delayFirstLoad && ++loadCount == 1) Thread.sleep(100)
+            return synchronized(mutableBindings) {
+                mutableBindings[tileId] ?: TileBinding(tileId)
+            }
         }
-        override fun saveBinding(binding: TileBinding) = error("surface loader must not write")
+        override fun saveBinding(binding: TileBinding) {
+            saveCount++
+            synchronized(mutableBindings) { mutableBindings[binding.tileId] = binding }
+        }
         override fun deleteBinding(tileId: ItemId) = error("surface loader must not write")
     }
 }

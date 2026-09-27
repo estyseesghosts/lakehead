@@ -176,6 +176,10 @@ class RoomHomePlacementRepository(
         val target = dao.placement(itemId.value) ?: return@runInTransaction RemoveResult.NotFound
         if (target.homeId != homeId.value) return@runInTransaction RemoveResult.WrongHome
         dao.deletePlacement(itemId.value)
+        // Keep the cascade explicit as well as declared in Room, so the
+        // repository contract remains correct with foreign-key enforcement
+        // disabled in test/in-memory configurations.
+        dao.deleteShortcutBinding(itemId.value)
         RemoveResult.Removed
     }
 

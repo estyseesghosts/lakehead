@@ -2,6 +2,11 @@ package me.foxtails.lakehead.feature.home
 
 import me.foxtails.lakehead.core.grid.GridSpan
 import me.foxtails.lakehead.core.model.LogicalSpan
+import me.foxtails.lakehead.core.model.LauncherShortcut
+import me.foxtails.lakehead.core.model.ItemId
+import me.foxtails.lakehead.core.model.ProfileId
+import me.foxtails.lakehead.core.model.ShortcutRef
+import me.foxtails.lakehead.core.model.TileBinding
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -11,6 +16,40 @@ import org.junit.Test
  * tiles allow `columns - 1`).
  */
 class TileShortcutPolicyTest {
+
+    @Test
+    fun entriesDerivePinStateAndDisableOnlyUnpinnedAtCapacity() {
+        val first = ShortcutRef("com.example", ProfileId("p"), "first")
+        val second = ShortcutRef("com.example", ProfileId("p"), "second")
+        val entries = TileShortcutPolicy.entries(
+            shortcuts = listOf(
+                LauncherShortcut(first, "First", 0),
+                LauncherShortcut(second, "Second", 1),
+            ),
+            binding = TileBinding(ItemId("tile"), listOf(first)),
+            span = LogicalSpan(2, 1),
+        )
+
+        assertEquals(true, entries[0].isPinned)
+        assertEquals(true, entries[0].isPinEnabled)
+        assertEquals(false, entries[1].isPinned)
+        assertEquals(false, entries[1].isPinEnabled)
+    }
+
+    @Test
+    fun entriesAreIndependentPerTileBinding() {
+        val ref = ShortcutRef("com.example", ProfileId("p"), "same")
+        val shortcut = LauncherShortcut(ref, "Same", 0)
+        val pinned = TileShortcutPolicy.entries(
+            listOf(shortcut), TileBinding(ItemId("a"), listOf(ref)), LogicalSpan(2, 1),
+        )
+        val unpinned = TileShortcutPolicy.entries(
+            listOf(shortcut), TileBinding(ItemId("b")), LogicalSpan(2, 1),
+        )
+
+        assertEquals(true, pinned.single().isPinned)
+        assertEquals(false, unpinned.single().isPinned)
+    }
 
     @Test
     fun singleColumn_allowsRowsMinusOne() {

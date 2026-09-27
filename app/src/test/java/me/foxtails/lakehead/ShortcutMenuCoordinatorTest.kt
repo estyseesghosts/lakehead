@@ -35,7 +35,7 @@ import org.junit.Test
 /**
  * B1 unit tests for the selected-tile menu coordinator: scoped projection,
  * query-on-select, honest empty, live invalidation without leaving edit, and
- * profile-exact execution. Pinning is inert here (B2 owns persistence).
+ * profile-exact execution and B2 pin mutation routing.
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 class ShortcutMenuCoordinatorTest {
@@ -255,6 +255,29 @@ class ShortcutMenuCoordinatorTest {
     }
 
     @Test
+    fun togglePinPersistsThroughCoordinatorAndDoesNotLaunch() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val gateway = FakeGateway(mapOf(identityA to listOf(shortcut(identityA, "s", 0))))
+        val repository = FakeBindingRepository(emptyMap())
+        val coordinator = ShortcutMenuCoordinator(
+            gateway,
+            ShortcutSurfaceLoader(gateway, repository, dispatcher),
+            dispatcher,
+        )
+        coordinator.start(this)
+        coordinator.onHomeTilesChanged(listOf(tile(tileA, identityA).copy(span = LogicalSpan(2, 1))))
+        coordinator.onSelectionChanged(tileA)
+        advanceUntilIdle()
+
+        coordinator.togglePin(tileA, "s")
+        advanceUntilIdle()
+
+        assertEquals(listOf("s"), repository.binding(tileA).pinnedShortcuts.map { it.shortcutId })
+        assertTrue(gateway.launched.isEmpty())
+        coordinator.stop()
+    }
+
+    @Test
     fun rapidSwitchDropsStaleReload() = runTest {
         val dispatcher = StandardTestDispatcher(testScheduler)
         // Manual loader queue: entries computation only runs when the test
@@ -354,8 +377,9 @@ class ShortcutMenuCoordinatorTest {
     }
 
     private class FakeBindingRepository(
-        private val bindings: Map<ItemId, TileBinding>,
+        bindings: Map<ItemId, TileBinding>,
     ) : HomePlacementRepository {
+        private val mutableBindings = bindings.toMutableMap()
         override fun load(homeId: HomeId, columns: Int, rows: Int): LoadResult = LoadResult.NotFound
         override fun place(
             homeId: HomeId,
@@ -374,8 +398,11 @@ class ShortcutMenuCoordinatorTest {
         override fun remove(homeId: HomeId, itemId: ItemId): RemoveResult = error("menu coordinator must not write")
         override fun ensureHome(homeId: HomeId): Boolean = error("menu coordinator must not write")
         override fun loadBinding(tileId: ItemId): TileBinding =
-            bindings[tileId] ?: TileBinding(tileId)
-        override fun saveBinding(binding: TileBinding) = error("menu coordinator must not write")
+            mutableBindings[tileId] ?: TileBinding(tileId)
+        fun binding(tileId: ItemId): TileBinding = loadBinding(tileId)
+        override fun saveBinding(binding: TileBinding) {
+            mutableBindings[binding.tileId] = binding
+        }
         override fun deleteBinding(tileId: ItemId) = error("menu coordinator must not write")
     }
 }

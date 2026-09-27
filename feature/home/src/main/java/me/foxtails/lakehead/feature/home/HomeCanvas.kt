@@ -41,10 +41,10 @@ import me.foxtails.lakehead.core.model.LogicalSpan
  * - B1: swipe-to-open shortcuts are removed — no surface rows or execute/pin
  *   callbacks pass through this canvas for swipes. Shortcuts return in B4 as
  *   an edit-mode menu above the selected tile: [surfaceEntries] carries the
- *   rank-ordered shortcut rows for the current selection (empty until
- *   shortcut discovery lands), and row taps report [onSurfaceExecute]/
- *   [onSurfaceTogglePin] with the selected [ItemId] and entry id. Execution
- *   and pin persistence stay with the caller. B1 selection scoping:
+ *   rank-ordered shortcut rows for the current selection, and row taps report
+ *   [onSurfaceExecute]/[onSurfaceTogglePin] with the selected [ItemId] and entry id.
+ *   Menu execution and pin persistence are implemented and stay with the caller;
+ *   rendering the pinned shortcuts on tiles remains deferred to C1. B1 selection scoping:
  *   [surfaceEntriesTileId] names the tile the rows were loaded for (null =
  *   unscoped) and [onSelectedTileChange] reports selection transitions so the
  *   caller can query-on-select; the grid itself never queries.

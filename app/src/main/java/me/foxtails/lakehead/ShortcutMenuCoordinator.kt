@@ -39,11 +39,11 @@ import me.foxtails.lakehead.platform.shortcuts.ShortcutGateway
  * - [execute] resolves `(tile, entry)` to the gateway's [ShortcutRef][me.foxtails.lakehead.core.model.ShortcutRef]
  *   from the live snapshot — carrying the exact profile — and launches it
  *   off the caller's thread. Unknown tiles/entries report false, never throw.
- * - Pinning stays inert: this coordinator never toggles bindings (B2 owns
- *   pin persistence); callers leave `onSurfaceTogglePin` unwired.
+ * - Pinning is selection-scoped and persisted off-main; a failed capacity
+  *   toggle performs no write.
  *
- * No persistence writes occur here; [ShortcutSurfaceLoader] performs reads
- * only. Call [start] before composition reports selections (production:
+ * Binding persistence is delegated to [ShortcutSurfaceLoader] and kept off the
+ * caller thread. Call [start] before composition reports selections (production:
  * `onStart`) and [stop] when leaving (production: `onStop`).
  */
 internal data class SelectedTileMenu(
@@ -160,12 +160,22 @@ internal class ShortcutMenuCoordinator(
                 return@launch
             }
             val entries = withContext(ioDispatcher) {
-                surfaceLoader.entriesForTile(selected, tile.appIdentity)
+                surfaceLoader.entriesForTile(selected, tile.appIdentity, tile.span)
             }
             synchronized(this@ShortcutMenuCoordinator) {
                 if (requestGeneration != generation || selections.value != selected) return@launch
                 mutableMenu.value = if (entries.isEmpty()) null else SelectedTileMenu(selected, entries)
             }
+        }
+    }
+
+    fun togglePin(tileId: ItemId, entryId: String) {
+        val routeScope = synchronized(this) { scope } ?: return
+        routeScope.launch {
+            val tile = tiles.value.firstOrNull { it.itemId == tileId } ?: return@launch
+            if (surfaceLoader.togglePin(tileId, tile.appIdentity, tile.span, entryId) &&
+                selections.value == tileId
+            ) reload(tiles.value, tileId)
         }
     }
 }

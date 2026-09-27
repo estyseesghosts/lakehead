@@ -71,9 +71,9 @@ import me.foxtails.lakehead.core.model.LogicalSpan
  *   unclamped: it is never derived from [shortcutPlaceholders] (placeholder dots
  *   are test/mock-only visuals, not pin state) and never clamped to
  *   [TileShortcutPolicy] capacity (capacity bounds the visible strip, not the
- *   anchor-driving pin state). Until the pin model lands there is no persisted
- *   `pinnedIds` source, so callers leave the default 0; swipe/menu/persistence
- *   wiring is deferred.
+ *   anchor-driving pin state). Menu pinning and persistence are implemented, but
+ *   the production pinned-shortcut source and tile strip rendering remain deferred
+ *   to C1, so callers currently leave the default 0.
  */
 @Composable
 internal fun HomeCanvasTile(
@@ -193,8 +193,8 @@ internal fun HomeCanvasTile(
  * visible strip, not the anchor-driving pin state (a 1×1 tile keeps its pin
  * state even though its strip capacity is 0).
  *
- * Until the pin model (persisted `pinnedIds`) lands there is no production
- * source; callers leave the default 0.
+ * Menu pinning and persistence now provide the model; tile rendering will consume
+ * that production source in C1. Until then callers leave the default 0.
  *
  * @throws IllegalArgumentException when [pinnedCount] is negative.
  */

@@ -138,10 +138,10 @@ internal fun LauncherShell(
     onResizeTile: (ItemId, LogicalSpan) -> Unit = { _, _ -> },
     onRemoveTile: (ItemId) -> Unit = { },
     // B4 edit-menu rows (thin read-only domain interface via :app): rank-ordered
-    // shortcut entries for the currently selected home tile (empty until
-    // shortcut discovery lands, so production shows no menu). Row taps report
-    // the selected ItemId and entry id; execution and pin persistence stay
-    // with the caller. B1 selection scoping: [surfaceEntriesTileId] names the
+    // shortcut entries for the currently selected home tile. Discovery, menu
+    // execution, and pin persistence are implemented; tile rendering remains
+    // deferred to C1. Row taps report the selected ItemId and entry id, and
+    // execution/persistence stay with the caller. B1 selection scoping: [surfaceEntriesTileId] names the
     // tile the rows were loaded for (null = unscoped) and
     // [onSelectedTileChange] reports grid selection transitions for
     // query-on-select; the shell never queries.
