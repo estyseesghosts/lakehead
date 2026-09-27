@@ -138,8 +138,10 @@ data class HomeCanvasViewportStyle(
  *   [LogicalSpan].
  * - Corner controls appear for a selected [HomeInteractionController.Editing] tile as
  *   well as [HomeEditSession.Active]. Each uses a 32dp visual circle in a 48dp touch
- *   target: [RemoveButton] is top-right center pinned and [ResizeHandle] is bottom-right
- *   center pinned via [cornerControlOffset]. The remove affordance floats as a sibling
+ *   target: [ResizeHandle] is bottom-right center pinned via [cornerControlOffset],
+ *   while [RemoveButton] follows [removeControlPlacement] from the live preview
+ *   span — top-right center pinned on 1×1/1×2/2×1 tiles, centered in the tile
+ *   footprint on any larger span. The remove affordance floats as a sibling
  *   overlay in both MOVE and RESIZE modes and is announced as `"Remove {label}"`.
  *   Tapping it reports [onRemoveTile] with the selected/active [ItemId] only; the
  *   grid performs no persistence delete and issues no move/resize.
@@ -1077,14 +1079,22 @@ internal fun HomeCanvasGrid(
                         // Remove affordance: sibling overlay over the active tile in
                         // both MOVE and RESIZE modes. Tracks the live candidate span
                         // (same footprint as the handle) so it stays attached during
-                        // a resize drag. Tap reports onRemoveTile only; the grid
-                        // performs no persistence delete and issues no move/resize.
+                        // a resize drag. A5 placement: 1x1/1x2/2x1 pin top-right,
+                        // any larger preview span centers the control in the tile
+                        // footprint; the flip is driven by the live preview span so
+                        // a resize across the boundary re-anchors mid-drag. Tap
+                        // reports onRemoveTile only; the grid performs no
+                        // persistence delete and issues no move/resize.
                         val removeLabel = handleLabel
                         val buttonPx = with(density) { CORNER_CONTROL_TOUCH_SIZE.dp.roundToPx() }
-                        val removeAbsolute = cornerControlOffset(
+                        val removePlacement = removeControlPlacement(
+                            columns = previewSpan.columns,
+                            rows = previewSpan.rows,
+                        )
+                        val removeAbsolute = removeControlOffset(
                             tileBounds = tileBounds,
                             controlSizePx = buttonPx,
-                            corner = ControlCorner.TOP_RIGHT,
+                            placement = removePlacement,
                         )
                         // Signed frame already carries the row origin + rest offset, so
                         // the remove anchor is final Box content coordinates.

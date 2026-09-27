@@ -152,4 +152,39 @@ class CornerControlContractTest {
         assertEquals(48, resizeHandleSidePx(200, 200, CORNER_CONTROL_TOUCH_SIZE))
         assertEquals(48, resizeHandleSidePx(96, 96, CORNER_CONTROL_TOUCH_SIZE))
     }
+
+    // ---- A5: unpin placement flips corner→center at the span boundary ----
+
+    @Test
+    fun removePlacement_smallSpansKeepTopRight_largeSpansCenter() {
+        // A5: the unpin affordance keeps the top-right corner contract on
+        // 1x1/1x2/2x1 spans and centers on anything larger. The resize routing
+        // rect is untouched by the flip.
+        val small = PixelRect(left = 0, top = 0, right = 100, bottom = 100)
+        val touchPx = CORNER_CONTROL_TOUCH_SIZE
+        assertEquals(
+            cornerControlOffset(small, touchPx, ControlCorner.TOP_RIGHT),
+            removeControlOffset(small, touchPx, removeControlPlacement(1, 1)),
+        )
+        assertEquals(
+            cornerControlOffset(small, touchPx, ControlCorner.TOP_RIGHT),
+            removeControlOffset(small, touchPx, removeControlPlacement(2, 1)),
+        )
+
+        // 2x2 centers: the control middle coincides with the tile middle, and
+        // the centered remove never falls inside the handle routing rect on a
+        // tile taller than the touch target.
+        val large = PixelRect(left = 0, top = 0, right = 200, bottom = 200)
+        val centered = removeControlOffset(large, touchPx, removeControlPlacement(2, 2))
+        assertEquals(100, centered.x + touchPx / 2)
+        assertEquals(100, centered.y + touchPx / 2)
+        assertFalse(
+            isInHandle(
+                centered.x + touchPx / 2f,
+                centered.y + touchPx / 2f,
+                large,
+                touchPx,
+            ),
+        )
+    }
 }
