@@ -1,7 +1,6 @@
 package me.foxtails.lakehead.feature.home
 
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -12,7 +11,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import me.foxtails.lakehead.core.designsystem.ShortcutSurfaceEntry
 import me.foxtails.lakehead.core.model.AppIdentity
@@ -49,6 +48,12 @@ import me.foxtails.lakehead.core.model.LogicalSpan
  * - A1 hold signal: [onTransientHoldChange] reports transient hold state owned by
  *   [HomeCanvasGrid] (active edit or wiggle editing) so the shell
  *   can gate pager swipe. Programmatic pill navigation is unaffected.
++ * - A3 normal viewport: this canvas measures the raw height via BoxWithConstraints
++ *   and hands HomeCanvasGrid the usable height (`max(0, measured - clearance)`) plus
++ *   a matching layout height, so the pill/system-gesture reserve never covers the
++ *   last row and the scroll range is the exact overflow. The clearance arrives as
++ *   the plain pixel count HomeCanvasViewportStyle.bottomClearancePx (resolved by
++ *   `:app`); no Android object enters the grid.
 + * - A2 tile-touch hold: [onPagerHoldChange] reports the per-press tile-origin
 + *   hold owned by [HomeCanvasGrid] (tile down until release) so a tile touch
 + *   never becomes a page swipe. Separate from the A1 hold; the shell ANDs both.
@@ -76,7 +81,6 @@ fun HomeCanvas(
     surfaceEntries: List<ShortcutSurfaceEntry> = emptyList(),
     onSurfaceExecute: (ItemId, String) -> Unit = { _, _ -> },
     onSurfaceTogglePin: (ItemId, String) -> Unit = { _, _ -> },
-    bottomClearance: Dp = 0.dp,
     onTransientHoldChange: (Boolean) -> Unit = {},
     onPagerHoldChange: (Boolean) -> Unit = {},
 ) {
@@ -118,14 +122,27 @@ fun HomeCanvas(
         )
 
         is HomeRenderState.Loaded -> {
-            Column(modifier = modifier.fillMaxSize()) {
+            // A3 normal viewport: measure the raw height here and lay the grid out at
+            // exactly the usable height (raw minus the style's bottom clearance), so the
+            // pill/system-gesture reserve never covers the last row and the scroll range
+            // is the exact overflow. The grid consumes the usable height for all of its
+            // viewport math; the Dp conversion below only sizes the layout.
+            BoxWithConstraints(modifier = modifier.fillMaxSize()) {
+                val density = LocalDensity.current
+                val rawHeightPx = with(density) { maxHeight.roundToPx() }.coerceAtLeast(0)
+                val usableHeightPx = usableCanvasHeightPx(
+                    rawHeightPx = rawHeightPx,
+                    bottomClearancePx = viewportStyle.bottomClearancePx,
+                )
                 HomeCanvasGrid(
                     loaded = state,
                     iconsByIdentity = iconsByIdentity,
                     onLaunchApp = onLaunchApp,
                     overscanRows = overscanRows,
                     viewportStyle = viewportStyle,
-                    modifier = Modifier.weight(1f).fillMaxWidth(),
+                    usableHeightPx = usableHeightPx,
+                    modifier = Modifier.fillMaxWidth()
+                        .height(with(density) { usableHeightPx.toDp() }),
                     onMoveTile = onMoveTile,
                     onResizeTile = onResizeTile,
                     onRemoveTile = onRemoveTile,
@@ -134,9 +151,6 @@ fun HomeCanvas(
                     onSurfaceTogglePin = onSurfaceTogglePin,
                     onTransientHoldChange = onTransientHoldChange,
                     onPagerHoldChange = onPagerHoldChange,
-                )
-                Spacer(
-                    modifier = Modifier.fillMaxWidth().height(bottomClearance),
                 )
             }
         }
@@ -151,6 +165,18 @@ const val HOME_ROLE_LAYER_ID: String = "home-role-request"
  * control. No longer rendered by [HomeCanvas]; kept for test compat.
  */
 const val HOME_ROLE_DESCRIPTION: String = "Set ProtoLaunch as default home"
+
+/**
+ * A3 usable canvas height: raw viewport height minus the caller-resolved bottom
+ * clearance (nav pill / system-gesture reserve), floored at zero.
+ *
+ * Pure, framework-free and unit-testable.
+ */
+internal fun usableCanvasHeightPx(rawHeightPx: Int, bottomClearancePx: Int): Int {
+    require(rawHeightPx >= 0) { "rawHeightPx must be non-negative" }
+    require(bottomClearancePx >= 0) { "bottomClearancePx must be non-negative" }
+    return (rawHeightPx - bottomClearancePx).coerceAtLeast(0)
+}
 
 /**
  * P0 canvas hold-reset predicate for [HomeCanvas].

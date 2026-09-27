@@ -399,16 +399,22 @@ class HomeRenderProjectionTest {
     // ---- measureExtent: floor, margin, oracle ----
 
     @Test
-    fun measureExtent_emptyGridFloorsAtViewportRows() {
+    fun measureExtent_emptyGridHasNoRows() {
+        // Normal policy: no viewport floor and no working margin in the measured
+        // extent — an empty grid has no intrinsic rows. The usable-viewport minimum
+        // is imposed by the viewport owner, not the measurement.
         val extent = HomeRenderProjection.measureExtent(emptyList(), 10L, 2L)
         val expected = GridVerticalLayout.measure<GridPlacement<ItemId>>(emptyList(), 10L, 2L)
         assertEquals(expected, extent)
         assertEquals(0L, extent.occupiedBottomRowExclusive)
-        assertEquals(10L, extent.totalScrollableRows)
+        assertEquals(0L, extent.totalScrollableRows)
     }
 
     @Test
-    fun measureExtent_marginExtendsBeyondViewport() {
+    fun measureExtent_ignoresWorkingMarginInNormal() {
+        // Normal policy: the working margin is validated but never added. Rows 18..20
+        // measure as the signed bounds (min 18, max-exclusive 20, height 2), identical
+        // with a zero margin.
         val id = identity("p0", "com.a", "A")
         val placements = listOf(placement("a", id, row = 18, spanRows = 2))
         val extent = HomeRenderProjection.measureExtent(placements, 10L, 2L)
@@ -419,7 +425,9 @@ class HomeRenderProjectionTest {
         )
         assertEquals(oracle, extent)
         assertEquals(20L, extent.occupiedBottomRowExclusive)
-        assertEquals(22L, extent.totalScrollableRows)
+        assertEquals(18L, extent.occupiedMinRow)
+        assertEquals(2L, extent.totalScrollableRows)
+        assertEquals(extent, HomeRenderProjection.measureExtent(placements, 10L, 0L))
     }
 
     // ---- resolveWindow: overscan, span-crossing, saturation ----
@@ -488,15 +496,15 @@ class HomeRenderProjectionTest {
     }
 
     @Test
-    fun extentOverflow_surfacesArithmeticException() {
+    fun measureExtent_hugeWorkingMarginReturnsIntrinsicWithoutOverflow() {
+        // Normal policy: the working margin is validated but never added, so even
+        // Long.MAX_VALUE cannot overflow — the intrinsic single-row extent returns.
         val id = identity("p0", "com.a", "A")
         val placements = listOf(placement("a", id, row = 0))
-        try {
-            HomeRenderProjection.measureExtent(placements, 10L, Long.MAX_VALUE)
-            fail("expected overflow")
-        } catch (e: ArithmeticException) {
-            // expected from delegated GridVerticalLayout.measure
-        }
+        val extent = HomeRenderProjection.measureExtent(placements, 10L, Long.MAX_VALUE)
+        assertEquals(HomeRenderProjection.measureExtent(placements, 10L, 0L), extent)
+        assertEquals(1L, extent.occupiedBottomRowExclusive)
+        assertEquals(1L, extent.totalScrollableRows)
     }
 
     // ---- project: homeId fail-fast and end-to-end ----

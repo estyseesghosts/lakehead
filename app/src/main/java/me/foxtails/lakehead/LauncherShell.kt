@@ -23,6 +23,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
@@ -73,8 +75,8 @@ const val LAUNCHER_PAGE_COUNT = 3
  * caller's state/icons/callbacks. The current page is [rememberSaveable] so it survives
  * configuration changes. Pager motion uses foundation defaults only (no custom
  * fade/scale). The pill floats above content with [Alignment.BottomCenter]; content
- * reserves [LauncherNavPillBottomClearance] (or the system-gesture bottom, whichever is
- * larger) so the pill never covers the last row.
+ * reserves max([LauncherNavPillBottomClearance], gesture inset + pill height +
+ * rounding headroom) so the pill never covers the last row.
  *
  * P4 picker ownership: the shell hoists transient [AlphabetPickerState] (plain
  * `remember`, never persisted) so header taps have a production open path and the
@@ -157,7 +159,26 @@ internal fun LauncherShell(
     val gestureBottom = with(density) {
         WindowInsets.systemGestures.getBottom(density).toDp()
     }
-    val bottomClearance = maxOf(LauncherNavPillBottomClearance, gestureBottom)
+    // P2 pill overlap: the pill is lifted by gestureBottom via
+    // bottomSafetyInset, so its top sits at gestureBottom + pillHeight above
+    // the container bottom. Pill height minimum is 48dp touch target + 2x12dp
+    // outer padding = 72dp (NavigationControlPill defaults). Each Dp rounds
+    // to px separately in layout (48dp + 12dp + 12dp vs a single 72dp can
+    // differ by ~1px, e.g. density 2.625: 126+32+32=190px vs 189px), so the
+    // px reserve rounds gestureBottom and pillHeight separately, sums in px,
+    // and adds 2px rounding headroom; floored by the legacy 80dp minimum.
+    val pillHeight: Dp = 72.dp
+    val homeBottomClearancePx = maxOf(
+        with(density) { LauncherNavPillBottomClearance.roundToPx() },
+        with(density) { gestureBottom.roundToPx() } +
+            with(density) { pillHeight.roundToPx() } + 2,
+    )
+    // A3 normal viewport: the shell owns the bottom clearance (max of legacy
+    // vs gesture inset + pill height + rounding, resolved in px above). Home
+    // takes it as a plain pixel count inside its viewport style so no Android
+    // object enters the grid; All Apps keeps the Dp form of the same px
+    // reserve for its own padding.
+    val bottomClearance: Dp = with(density) { homeBottomClearancePx.toDp() }
 
     // P4 transient picker, hoisted so the pager can block while it is open. Plain
     // remember: open/close is gesture state, never persisted. Null means no picker
@@ -285,14 +306,15 @@ internal fun LauncherShell(
                     onLaunchApp = onLaunchApp,
                     onRequestDefaultHome = onRequestDefaultHome,
                     modifier = Modifier.fillMaxSize(),
-                    viewportStyle = viewportStyle,
+                    viewportStyle = viewportStyle.copy(
+                        bottomClearancePx = homeBottomClearancePx,
+                    ),
                     onMoveTile = onMoveTile,
                     onResizeTile = onResizeTile,
                     onRemoveTile = onRemoveTile,
                     surfaceEntries = surfaceEntries,
                     onSurfaceExecute = onSurfaceExecute,
                     onSurfaceTogglePin = onSurfaceTogglePin,
-                    bottomClearance = bottomClearance,
                     onTransientHoldChange = { homeHold = it },
                     onPagerHoldChange = { pagerHold = it },
                 )

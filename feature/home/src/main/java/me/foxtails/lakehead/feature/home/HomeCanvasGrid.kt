@@ -51,6 +51,7 @@ import me.foxtails.lakehead.core.grid.GridPosition
 import me.foxtails.lakehead.core.grid.GridRest
 import me.foxtails.lakehead.core.grid.GridRestOrigin
 import me.foxtails.lakehead.core.grid.GridRowWindow
+import me.foxtails.lakehead.core.grid.GridRules
 import me.foxtails.lakehead.core.grid.GridSpan
 import me.foxtails.lakehead.core.grid.GridVerticalExtent
 import me.foxtails.lakehead.core.grid.SignedGridPlacement
@@ -61,31 +62,47 @@ import me.foxtails.lakehead.core.model.LogicalSpan
 import kotlin.math.abs
 
 /**
- * Viewport padding/gap inputs for the home canvas grid, in pixels.
+ * Viewport padding/gap/clearance inputs for the home canvas grid, in pixels.
  *
  * Values are resolved by the caller outside composition and passed through to
  * [SquareCellGeometry.fromViewport] unchanged. All values are non-negative pixel counts;
  * zero means edge-to-edge/touching. The visual column count itself comes from the loaded
  * render state's adapted `columns.count` and is never clamped here.
+ *
+ * [bottomClearancePx] reserves space for the floating nav pill / system-gesture inset at
+ * the viewport bottom. It is owned by `:app` (resolved from Dp/WindowInsets there) and
+ * consumed as a plain pixel count here so no Android object enters the grid: the usable
+ * canvas height is `max(0, measured - bottomClearancePx)`.
  */
 data class HomeCanvasViewportStyle(
     val horizontalPaddingPx: Int = 0,
     val columnGapPx: Int = 0,
     val rowGapPx: Int = 0,
+    val bottomClearancePx: Int = 0,
 ) {
     init {
         require(horizontalPaddingPx >= 0) { "horizontalPaddingPx must be non-negative" }
         require(columnGapPx >= 0) { "columnGapPx must be non-negative" }
         require(rowGapPx >= 0) { "rowGapPx must be non-negative" }
+        require(bottomClearancePx >= 0) { "bottomClearancePx must be non-negative" }
     }
 }
 
 /**
  * Internal scrolling grid arrangement for one loaded home.
  *
- * - Geometry comes from `BoxWithConstraints`/density measured width/height plus
- *   [SquareCellGeometry.fromViewport] with the loaded state's adapted
- *   `columns.count` used exactly (five is only the normal-phone reference, never a clamp).
+ * - Geometry comes from the caller-supplied usable height ([usableHeightPx], the raw
+ *   viewport minus [HomeCanvasViewportStyle.bottomClearancePx]) plus `BoxWithConstraints`/
+ *   density measured width and [SquareCellGeometry.fromViewport] with the loaded state's
+ *   adapted `columns.count` used exactly (five is only the normal-phone reference, never
+ *   a clamp). The grid is laid out at exactly the usable height so the scroll range is
+ *   the exact overflow.
+ * - Normal scrolling: the natural content height is the intrinsic signed occupied height
+ *   (rows × cell + gaps with no trailing gap after the final cell); the container minimum
+ *   is `max(natural, usable)` so short/exact-fit content fills the viewport with no tail.
+ *   `verticalScroll` is enabled only when the exact overflow is positive (plus the
+ *   active-edit and pager axis guards), and the Compose `ScrollState` is clamped to the
+ *   new maximum on shrink and collapsed to zero when content fits.
  * - Transient scroll state is keyed by the loaded `requestedHomeId` so each home keeps its
  *   own position and a home switch resets scrolling.
  * - The visible [GridRowWindow] is derived from the scroll offset, measured viewport height,
@@ -142,6 +159,7 @@ internal fun HomeCanvasGrid(
     onLaunchApp: (AppIdentity) -> Unit,
     overscanRows: Long,
     viewportStyle: HomeCanvasViewportStyle,
+    usableHeightPx: Int,
     modifier: Modifier = Modifier,
     onMoveTile: (ItemId, LogicalPosition) -> Unit = { _, _ -> },
     onResizeTile: (ItemId, LogicalSpan) -> Unit = { _, _ -> },
@@ -168,6 +186,7 @@ internal fun HomeCanvasGrid(
     onPagerHoldChange: (Boolean) -> Unit = {},
 ) {
     require(overscanRows >= 0L) { "overscanRows must be non-negative" }
+    require(usableHeightPx >= 0) { "usableHeightPx must be non-negative" }
     // P0 stale-hold guard: the transient hold pair (active edit, wiggle
     // editing) lives inside BoxWithConstraints/key below, which
     // never composes when tiles are empty. Hoist a false emission + dispose
@@ -198,7 +217,10 @@ internal fun HomeCanvasGrid(
     BoxWithConstraints(modifier = modifier) {
         val density = LocalDensity.current
         val availableWidthPx = with(density) { maxWidth.roundToPx() }.coerceAtLeast(1)
-        val availableHeightPx = with(density) { maxHeight.roundToPx() }.coerceAtLeast(0)
+        // A3 normal viewport: the usable height is supplied by the caller (raw viewport
+        // minus bottom clearance); it is never re-measured here so Dp round-trips cannot
+        // skew the overflow math.
+        val availableHeightPx = usableHeightPx
         val geometry = SquareCellGeometry.fromViewport(
             availableWidthPx = availableWidthPx,
             horizontalPaddingPx = viewportStyle.horizontalPaddingPx,
@@ -240,7 +262,6 @@ internal fun HomeCanvasGrid(
             // (snapshot-once, never flipped mid-gesture); cleared on release.
             var pagerHold by remember { mutableStateOf(false) }
             val columns = loaded.columns.count
-            val rows = loaded.extent.totalScrollableRows.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
             val active = editSession as? HomeEditSession.Active
             val interactionEditing = interaction as? HomeInteractionController.Editing
             // A1 hold signal: active edit or wiggle editing holds
@@ -281,6 +302,16 @@ internal fun HomeCanvasGrid(
             }
             val rowStridePx: Long =
                 geometry.cellSizePx.toLong() + geometry.rowGapPx.toLong()
+            // A3 normal-mode legality bound: the signed occupied bottom or the usable
+            // viewport rows, whichever is larger (never a working margin — the edit
+            // frontier that extends below belongs to B3). Existing tiles always stay
+            // in-bounds and empty visible rows stay draggable-to; tall content cannot
+            // be dragged below its last row until the frontier lands.
+            val rows = normalLegalityRows(
+                extent = loaded.extent,
+                usableHeightPx = availableHeightPx,
+                rowStridePx = rowStridePx,
+            )
             // Signed renderer origin (G3): the logical row the windowed container
             // rebases pixel frames around plus the G2 rest pixel offset computed in
             // rebased coordinates. `rowOrigin` is the signed content `minRow` (may be
@@ -300,14 +331,17 @@ internal fun HomeCanvasGrid(
                 overscanRows = overscanRows,
                 rowOrigin = rowOrigin,
             )
-            val baseContentHeightPx = contentMinHeightPxSigned(
+            // A3 natural content height: intrinsic signed occupied rows × cell plus
+            // inter-row gaps, with no trailing gap after the final cell. Never
+            // inflated to the viewport here; the container minimum below does that.
+            val naturalContentHeightPx = contentMinHeightPxSigned(
                 extent = loaded.extent,
                 cellSizePx = geometry.cellSizePx,
                 rowGapPx = geometry.rowGapPx,
             )
             val rest = signedRestFor(
                 viewportHeightPx = availableHeightPx,
-                contentHeightPx = baseContentHeightPx,
+                contentHeightPx = naturalContentHeightPx,
                 rowStridePx = rowStridePx,
             )
             // G4: transient viewport state holder, reconciled when the rest
@@ -319,6 +353,20 @@ internal fun HomeCanvasGrid(
             var viewport by remember { mutableStateOf(viewportFor(rest)) }
             LaunchedEffect(rest) {
                 viewport = preserveAnchorOnResize(viewport, rest)
+            }
+            // A3: apply the rest transition to the real ScrollState. The shadow
+            // viewport above only tracks the range; this effect owns the actual
+            // position: clamp to the new maximum on shrink (bottom-pin, matching
+            // preserveAnchorOnResize) and collapse to zero when content fits so
+            // short/exact-fit content cannot scroll. It never moves otherwise, so
+            // content growth never jumps the scroll position.
+            val scrollMaxPx = viewport.scrollRangePx.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+            LaunchedEffect(viewport) {
+                if (viewport.scrollRangePx == 0L) {
+                    if (scrollState.value != 0) scrollState.scrollTo(0)
+                } else if (scrollState.value > scrollMaxPx) {
+                    scrollState.scrollTo(scrollMaxPx)
+                }
             }
             // G5: single animated grid origin. One Animatable moves the whole
             // field as one object: tiles keep their internal grid positions
@@ -343,7 +391,10 @@ internal fun HomeCanvasGrid(
                 Int.MIN_VALUE.toLong(),
                 Int.MAX_VALUE.toLong(),
             ).toInt()
-            val minHeightPx = baseContentHeightPx.coerceAtLeast(availableHeightPx)
+            // A3 container minimum: natural content height or the usable viewport,
+            // whichever is larger, so short content fills the viewport (no tail)
+            // and tall content ends exactly at its last cell.
+            val minHeightPx = naturalContentHeightPx.coerceAtLeast(availableHeightPx)
             val children: List<SpanChild<ItemId>> = loaded.tiles.map { tile ->
                 val iconBitmap = iconsByIdentity[tile.appIdentity]
                 // W3 renderedSpan = preview ?: persisted: while RESIZE-dragging the
@@ -903,11 +954,15 @@ internal fun HomeCanvasGrid(
                     }
                 }
             }
+            // A3: vertical scroll only on exact overflow (plus the active-edit and
+            // horizontal-pager guards); short/exact-fit content never scrolls.
+            val canNormalScroll = viewport.scrollRangePx > 0L
             Box(
                 modifier = Modifier
                     .verticalScroll(
                         scrollState,
-                        enabled = active == null && pagerAxisLock != LockedAxis.HORIZONTAL,
+                        enabled = canNormalScroll && active == null &&
+                            pagerAxisLock != LockedAxis.HORIZONTAL,
                     )
                     .then(tapCancelModifier)
                     .then(dragModifier)
@@ -1380,6 +1435,29 @@ internal fun contentMinHeightPxSigned(
     } catch (e: ArithmeticException) {
         Int.MAX_VALUE
     }
+}
+
+/**
+ * Normal-mode move/resize legality row bound for the signed extent.
+ *
+ * The bound is the signed occupied bottom ([GridVerticalExtent.occupiedMaxRowExclusive])
+ * or the usable viewport rows (`usableHeightPx / rowStridePx`, floored), whichever is
+ * larger — never a working margin. Existing tiles always stay in-bounds (their bottoms
+ * are at or below the occupied bottom) and empty visible rows stay draggable-to; tall
+ * content cannot be dragged below its last row in normal mode (the transient edit
+ * frontier that extends below belongs to B3). Floors at 1 and saturates at [Int.MAX_VALUE]
+ * so [GridRules] size validation never fails, even for empty or fully-negative content.
+ */
+internal fun normalLegalityRows(
+    extent: GridVerticalExtent,
+    usableHeightPx: Int,
+    rowStridePx: Long,
+): Int {
+    require(usableHeightPx >= 0) { "usableHeightPx must be non-negative" }
+    require(rowStridePx > 0L) { "rowStridePx must be positive" }
+    val usableRows = if (usableHeightPx == 0) 0L else usableHeightPx.toLong() / rowStridePx
+    return maxOf(extent.occupiedMaxRowExclusive, usableRows, 1L)
+        .coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
 }
 
 private fun saturatingAdd(value: Long, increment: Long): Long =

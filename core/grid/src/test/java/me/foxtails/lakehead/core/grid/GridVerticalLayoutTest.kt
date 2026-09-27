@@ -13,7 +13,13 @@ class GridVerticalLayoutTest {
         )
 
         assertEquals(
-            GridVerticalExtent(1_000_001L, 1_000_004L),
+            GridVerticalExtent(
+                occupiedBottomRowExclusive = 1_000_001L,
+                totalScrollableRows = 999_999L,
+                occupiedMinRow = 2L,
+                occupiedMaxRowExclusive = 1_000_001L,
+                occupiedHeightRows = 999_999L,
+            ),
             GridVerticalLayout.measure(placements, viewportRows = 8L, workingMarginRows = 3L),
         )
     }
@@ -28,13 +34,13 @@ class GridVerticalLayoutTest {
         )
 
         assertEquals(distantRow.toLong() + 1L, result.occupiedBottomRowExclusive)
-        assertEquals(distantRow.toLong() + 1L, result.totalScrollableRows)
+        assertEquals(1L, result.totalScrollableRows)
     }
 
     @Test
-    fun emptyLayoutUsesViewportAndExactWorkingMarginMath() {
+    fun emptyLayoutHasZeroIntrinsicHeightAndDoesNotUseViewportOrMargin() {
         assertEquals(
-            GridVerticalExtent(0L, 12L),
+            GridVerticalExtent(0L, 0L),
             GridVerticalLayout.measure(
                 emptyList<GridPlacement<String>>(),
                 viewportRows = 12L,
@@ -42,7 +48,7 @@ class GridVerticalLayoutTest {
             ),
         )
         assertEquals(
-            GridVerticalExtent(4L, 7L),
+            GridVerticalExtent(4L, 1L, 3L, 4L, 1L),
             GridVerticalLayout.measure(
                 listOf(placement("item", row = 3)),
                 viewportRows = 4L,
@@ -50,7 +56,7 @@ class GridVerticalLayoutTest {
             ),
         )
         assertEquals(
-            GridVerticalExtent(4L, 20L),
+            GridVerticalExtent(4L, 1L, 3L, 4L, 1L),
             GridVerticalLayout.measure(
                 listOf(placement("item", row = 3)),
                 viewportRows = 20L,
@@ -67,7 +73,7 @@ class GridVerticalLayoutTest {
             workingMarginRows = 1L,
         )
 
-        assertEquals(GridVerticalExtent(11L, 12L), result)
+        assertEquals(GridVerticalExtent(11L, 4L, 7L, 11L, 4L), result)
     }
 
     @Test
@@ -81,7 +87,7 @@ class GridVerticalLayoutTest {
         val first = GridVerticalLayout.measure(placements, viewportRows = 5L, workingMarginRows = 2L)
         val second = GridVerticalLayout.measure(placements, viewportRows = 5L, workingMarginRows = 2L)
 
-        assertEquals(GridVerticalExtent(17L, 19L), first)
+        assertEquals(GridVerticalExtent(17L, 13L, 4L, 17L, 13L), first)
         assertEquals(first, second)
         assertNotSame(first, second)
     }
@@ -124,14 +130,33 @@ class GridVerticalLayoutTest {
     }
 
     @Test
-    fun rejectsExtentThatCannotBeRepresentedAsLong() {
-        assertArithmeticException {
-            GridVerticalLayout.measure(
-                listOf(placement("item", row = Int.MAX_VALUE)),
-                viewportRows = 1L,
-                workingMarginRows = Long.MAX_VALUE,
-            )
-        }
+    fun signedRowsRetainOriginAndMeasureIntrinsicHeight() {
+        val result = GridVerticalLayout.measure(
+            listOf(
+                SignedGridPlacement("above", column = 0, row = -3, span = GridSpan(1, 2)),
+                SignedGridPlacement("below", column = 0, row = 4, span = GridSpan(1, 1)),
+            ),
+            viewportRows = 99L,
+            workingMarginRows = 99L,
+        )
+
+        assertEquals(-3L, result.occupiedMinRow)
+        assertEquals(5L, result.occupiedMaxRowExclusive)
+        assertEquals(8L, result.occupiedHeightRows)
+        assertEquals(8L, result.totalScrollableRows)
+    }
+
+    @Test
+    fun verticalMeasurementDoesNotRejectPlacementBeyondDefaultFiveColumns() {
+        val result = GridVerticalLayout.measure(
+            listOf(SignedGridPlacement("wide-grid-item", column = 5, row = 7, span = GridSpan(1, 3))),
+            viewportRows = 1L,
+            workingMarginRows = 0L,
+        )
+
+        assertEquals(7L, result.occupiedMinRow)
+        assertEquals(10L, result.occupiedMaxRowExclusive)
+        assertEquals(3L, result.occupiedHeightRows)
     }
 
     private fun placement(id: String, row: Int, spanRows: Int = 1) =
