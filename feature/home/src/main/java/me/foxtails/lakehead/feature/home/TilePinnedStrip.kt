@@ -52,9 +52,9 @@ object TilePinnedStrip {
         shortcuts: List<LauncherShortcut>,
     ): List<PinnedTileShortcut> {
         if (binding.pinnedShortcuts.isEmpty() || shortcuts.isEmpty()) return emptyList()
-        val labelsById = shortcuts.associate { it.ref.shortcutId to it.label }
+        val labelsByRef = shortcuts.associate { it.ref to it.label }
         return binding.pinnedShortcuts.mapNotNull { ref ->
-            val label = labelsById[ref.shortcutId] ?: return@mapNotNull null
+            val label = labelsByRef[ref] ?: return@mapNotNull null
             PinnedTileShortcut(id = ref.shortcutId, label = label)
         }
     }

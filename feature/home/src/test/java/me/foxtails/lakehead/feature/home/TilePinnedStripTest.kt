@@ -71,6 +71,29 @@ class TilePinnedStripTest {
         )
     }
 
+    @Test
+    fun resolve_matchesFullRef_notShortcutIdAlone_andDoesNotPruneBinding() {
+        val binding = binding("same")
+        val wrongPackage = LauncherShortcut(
+            ShortcutRef("com.other", profile, "same"),
+            "Wrong package",
+            0,
+        )
+        val wrongProfile = LauncherShortcut(
+            ShortcutRef("com.example", ProfileId("work"), "same"),
+            "Wrong profile",
+            1,
+        )
+
+        assertTrue(TilePinnedStrip.resolve(binding, listOf(wrongPackage, wrongProfile)).isEmpty())
+        assertEquals(listOf(ref("same")), binding.pinnedShortcuts)
+
+        assertEquals(
+            listOf(PinnedTileShortcut("same", "Correct")),
+            TilePinnedStrip.resolve(binding, listOf(shortcut("same", "Correct"))),
+        )
+    }
+
     // ── arrange: capacity ───────────────────────────────────────────
 
     private fun resolved(vararg ids: String) =
