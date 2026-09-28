@@ -3,7 +3,6 @@ package me.foxtails.lakehead.core.designsystem
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -145,17 +144,24 @@ fun isLargeTileSpan(span: GridSpan): Boolean =
  * names (see [pinnedShortcutDescription]) rather than visible text.
  *
  * Layout: the outer [Box] is a non-clickable anchor container (background and
- * selection border only). Its children are siblings, never nested clickables, in
- * TalkBack order:
+ * selection border only; never a gesture detector). Its children are siblings,
+ * never nested clickables, in TalkBack order:
  *
  * - TileBody: full-size [Box.combinedClickable] (`onClick = onBodyClick`,
- *   Body-only `onLongClick`, [Role.Button]) with `semantics(mergeDescendants = true)`.
- * - AppLaunchButton: [Box.clickable] (`onClick = onSymbolClick`, [Role.Button])
+ *   `onLongClick` = tile callback, [Role.Button]) with `semantics(mergeDescendants = true)`.
+ *   Owns empty-area taps and long-press; glyph siblings drawn above it cover
+ *   their own boxes and forward the same tile long-press.
+ * - AppLaunchButton: [Box.combinedClickable] (`onClick = onSymbolClick`,
+ *   `onLongClick` = tile callback, [Role.Button])
  *   wrapping the [icon] slot, with `semantics(mergeDescendants = true)`.
+ *   One detector per hit region; no root or competing detector.
  * - Pinned shortcut strip (only when [pinnedShortcuts] is non-empty): the app icon
  *   moves to its compact anchor and each visible shortcut becomes its own
- *   [Role.Button] glyph carrying [onShortcutClick] with its opaque id and its own
- *   accessible label, so TalkBack announces app and shortcuts as discrete actions.
+ *   [Role.Button] glyph carrying [onShortcutClick] with its opaque id, its own
+ *   accessible label, and the same tile `onLongClick` (one `combinedClickable`
+ *   per glyph), so TalkBack announces app and shortcuts as discrete actions
+ *   while a physical long-press anywhere on the tile enters the one tile
+ *   long-press path.
  *   Wide and square spans lay the group out as one bottom-centered [Row] (app
  *   rightmost, first-pinned nearest the app, stable pin order, mid-aligned in
  *   the control-clear region so the group never drifts to an end); narrow
@@ -199,15 +205,20 @@ fun isLargeTileSpan(span: GridSpan): Boolean =
  * content description, the `selected` flag for [AppTileState.isSelected], and
  * [AppTileDefaults.PressedStateDescription] while [AppTileState.isPressed] is true.
  * Selected/pressed semantics live on TileBody only; the symbol region exposes only
- * its own content description. Pressed/selected visuals are caller-driven through
+ * its own content description. Every hit region (TileBody, app launch/strip glyph,
+ * each shortcut glyph) exposes the same tile `onLongClick` when non-null and no
+ * long-click action when null; short taps stay target-specific and a long-press
+ * release never fires a short click.
+ * Pressed/selected visuals are caller-driven through
  * state; the tile holds no state and issues no events beyond the supplied callbacks.
  *
  * @param onBodyClick invoked from TileBody; callers keep it launch-equivalent to
  * [onSymbolClick] today (Body diverges to a notification surface later per
  * `docs/grid.md` section 10).
- * @param onSymbolClick invoked from AppLaunchButton.
- * @param onLongClick when null TileBody exposes no long-click action; AppLaunchButton
- * never exposes one.
+ * @param onSymbolClick invoked from AppLaunchButton / app strip glyph.
+ * @param onLongClick shared tile long-press callback invoked from TileBody, the app
+ * launch/strip glyph and every shortcut glyph (one `combinedClickable` per hit
+ * region, no root detector). When null no region exposes a long-click action.
  * @param icon caller-composed symbol slot.  Receives the resolved square symbol
  * extent for this layout (reference size, compact unit size, or the large centered
  * extent) so the caller can scale [AppSymbol] without measuring the tile itself.
@@ -226,10 +237,11 @@ fun isLargeTileSpan(span: GridSpan): Boolean =
  * still announced via TileBody semantics in those cases.
  * @param onShortcutClick invoked with the tapped shortcut's opaque id; pin
  * toggling and persistence stay with the caller and never execute here.
- * @param isInteractionEnabled when false both hit regions keep their minima,
+ * @param isInteractionEnabled when false every hit region keeps its minima,
  * merged-descendants semantics, [Role.Button], descriptions and border visuals
- * but expose no click/long-click actions (`enabled = false` on TileBody's
- * `combinedClickable` and the symbol `clickable`), so in-edit drag gestures win
+ * but exposes no click/long-click actions (no gesture detector while disabled;
+ * TileBody keeps its `combinedClickable` with `enabled = false`), so in-edit
+ * drag gestures win
  * the slop race. Defaults to true (fully interactive).  Shortcut glyphs follow
  * the same gate: disabled in edit mode so the tile drags as one object and
  * shortcut invocation never interferes with tile editing.
@@ -332,7 +344,9 @@ fun AppTile(
                 null
             }
         val isFullBleed = state.span == GridSpan(1, 1)
-        // TileBody: primary hit region; the only region with a long-click action.
+        // TileBody: primary hit region and fallback empty-area long-press
+        // target; glyph regions (AppLaunchRegion/AppStripGlyph/ShortcutGlyph)
+        // also forward the shared onLongClick via their own combinedClickable.
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -362,6 +376,7 @@ fun AppTile(
                     resolvedSymbolDescription = resolvedSymbolDescription,
                     isInteractionEnabled = isInteractionEnabled,
                     onSymbolClick = onSymbolClick,
+                    onLongClick = onLongClick,
                     boxModifier = Modifier.align(Alignment.Center)
                         .size(dimensions.symbolSize.coerceAtLeast(48.dp))
                         .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp),
@@ -378,6 +393,7 @@ fun AppTile(
                         resolvedSymbolDescription = resolvedSymbolDescription,
                         isInteractionEnabled = isInteractionEnabled,
                         onSymbolClick = onSymbolClick,
+                        onLongClick = onLongClick,
                         boxModifier = Modifier.defaultMinSize(minWidth = 48.dp, minHeight = 48.dp),
                     ) { icon?.invoke(largeExtent) }
                 }
@@ -394,6 +410,7 @@ fun AppTile(
                         resolvedSymbolDescription = resolvedSymbolDescription,
                         isInteractionEnabled = isInteractionEnabled,
                         onSymbolClick = onSymbolClick,
+                        onLongClick = onLongClick,
                         boxModifier = Modifier
                             .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp),
                     ) { icon?.invoke(dimensions.symbolSize) }
@@ -432,6 +449,7 @@ fun AppTile(
                             pinned = pinned,
                             isInteractionEnabled = isInteractionEnabled,
                             onShortcutClick = onShortcutClick,
+                            onLongClick = onLongClick,
                         )
                     }
                     if (fit.showAppGlyph) {
@@ -439,6 +457,7 @@ fun AppTile(
                             resolvedSymbolDescription = resolvedSymbolDescription,
                             isInteractionEnabled = isInteractionEnabled,
                             onSymbolClick = onSymbolClick,
+                            onLongClick = onLongClick,
                             icon = icon,
                         )
                     }
@@ -477,6 +496,7 @@ fun AppTile(
                             pinned = pinned,
                             isInteractionEnabled = isInteractionEnabled,
                             onShortcutClick = onShortcutClick,
+                            onLongClick = onLongClick,
                         )
                     }
                     if (fit.showAppGlyph) {
@@ -484,6 +504,7 @@ fun AppTile(
                             resolvedSymbolDescription = resolvedSymbolDescription,
                             isInteractionEnabled = isInteractionEnabled,
                             onSymbolClick = onSymbolClick,
+                            onLongClick = onLongClick,
                             icon = icon,
                         )
                     }
@@ -496,13 +517,17 @@ fun AppTile(
 /**
  * App symbol hit region: a sibling of TileBody (never nested inside it) with
  * `semantics(mergeDescendants = true)` exposing only its own content
- * description.  Never exposes a long-click action.
+ * description.  Short tap invokes [onSymbolClick]; long-press forwards the
+ * shared tile [onLongClick] (null exposes no long-click action).  One
+ * `combinedClickable` per region; never a root detector.
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun AppLaunchRegion(
     resolvedSymbolDescription: String,
     isInteractionEnabled: Boolean,
     onSymbolClick: () -> Unit,
+    onLongClick: (() -> Unit)?,
     boxModifier: Modifier,
     content: @Composable () -> Unit,
 ) {
@@ -510,11 +535,18 @@ private fun AppLaunchRegion(
         modifier = boxModifier
             .semantics(mergeDescendants = true) {
                 this.contentDescription = resolvedSymbolDescription
+                this.role = Role.Button
             }
-            .clickable(
-                enabled = isInteractionEnabled,
-                onClick = onSymbolClick,
-                role = Role.Button,
+            .then(
+                if (isInteractionEnabled) {
+                    Modifier.combinedClickable(
+                        onClick = onSymbolClick,
+                        onLongClick = onLongClick,
+                        role = Role.Button,
+                    )
+                } else {
+                    Modifier
+                },
             ),
         contentAlignment = Alignment.Center,
     ) {
@@ -525,14 +557,18 @@ private fun AppLaunchRegion(
 /**
  * Compact app glyph inside the pinned strip: [LauncherDimensions.unitIconSize]
  * visual (the shared 1×1-equivalent metric per the shortcut spec), own
- * accessible name, own click.  A sibling of the shortcut glyphs, never merged
- * with them, so TalkBack announces the app launch separately from shortcuts.
+ * accessible name, own click plus the shared tile long-press.  A sibling of
+ * the shortcut glyphs, never merged with them, so TalkBack announces the app
+ * launch separately from shortcuts.  One `combinedClickable` when interaction is
+ * enabled (no detector while disabled).
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun AppStripGlyph(
     resolvedSymbolDescription: String,
     isInteractionEnabled: Boolean,
     onSymbolClick: () -> Unit,
+    onLongClick: (() -> Unit)?,
     icon: (@Composable (symbolExtent: Dp) -> Unit)?,
 ) {
     val dimensions = LocalLauncherDimensions.current
@@ -546,8 +582,9 @@ private fun AppStripGlyph(
             }
             .then(
                 if (isInteractionEnabled) {
-                    Modifier.clickable(
+                    Modifier.combinedClickable(
                         onClick = onSymbolClick,
+                        onLongClick = onLongClick,
                         role = Role.Button,
                     )
                 } else {
@@ -562,17 +599,20 @@ private fun AppStripGlyph(
 
 /**
  * One pinned shortcut glyph: [LauncherDimensions.unitIconSize] neutral marker
- * (outline ring, distinct from the app bitmap) with its own accessible label
- * and its own click reporting the opaque [PinnedTileShortcut.id].  Icon-only
- * visuals (no visible text); the label lives in semantics.  Disabled (but
- * still described) while interaction is disabled so the tile drags as one
- * object in edit mode.
+ * (outline ring, distinct from the app bitmap) with its own accessible label,
+ * its own click reporting the opaque [PinnedTileShortcut.id], and the shared
+ * tile [onLongClick] (null exposes no long-click action).  Icon-only
+ * visuals (no visible text); the label lives in semantics.  One
+ * `combinedClickable` when interaction is enabled (no detector while disabled)
+ * so the tile drags as one object in edit mode.
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ShortcutGlyph(
     pinned: PinnedTileShortcut,
     isInteractionEnabled: Boolean,
     onShortcutClick: (String) -> Unit,
+    onLongClick: (() -> Unit)?,
 ) {
     val scheme = MaterialTheme.colorScheme
     val dimensions = LocalLauncherDimensions.current
@@ -586,8 +626,9 @@ private fun ShortcutGlyph(
             }
             .then(
                 if (isInteractionEnabled) {
-                    Modifier.clickable(
+                    Modifier.combinedClickable(
                         onClick = { onShortcutClick(pinned.id) },
+                        onLongClick = onLongClick,
                         role = Role.Button,
                     )
                 } else {

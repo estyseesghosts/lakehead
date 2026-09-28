@@ -1,8 +1,10 @@
 package me.foxtails.lakehead.core.designsystem
 
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.size
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
@@ -13,14 +15,19 @@ import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsNotSelected
 import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.click
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasStateDescription
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onAllNodesWithContentDescription
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import me.foxtails.lakehead.core.grid.GridSpan
@@ -99,7 +106,7 @@ class AppTileTest {
             AppTile(
                 state = AppTileState(label = "Calendar", span = GridSpan(1, 1)),
                 onBodyClick = {}, onSymbolClick = {},
-                icon = { Box(Modifier.testTag("tile-icon").size(24.dp)) },
+                icon = { _ -> Box(Modifier.testTag("tile-icon").size(24.dp)) },
             )
         }
 
@@ -127,12 +134,14 @@ class AppTileTest {
     fun wideSpanAnchorsIconBottomEnd() {
         composeRule.setContent {
             LauncherTheme {
-                Box(Modifier.size(320.dp, 160.dp)) {
+                // Realistic 2x1 tile on a six-cell normal-phone grid
+                // (56.dp cells, 8.dp gaps): 120x56.dp.
+                Box(Modifier.size(120.dp, 56.dp)) {
                     AppTile(
                         state = AppTileState(label = "Calendar", span = GridSpan(2, 1)),
                         onBodyClick = {}, onSymbolClick = {},
-                        icon = { Box(Modifier.testTag("tile-icon").size(24.dp)) },
-                        pinnedCount = 1,
+                        icon = { _ -> Box(Modifier.testTag("tile-icon").size(24.dp)) },
+                        pinnedShortcuts = listOf(PinnedTileShortcut("new-post", "New post")),
                     )
                 }
             }
@@ -141,30 +150,36 @@ class AppTileTest {
 
         // Tile bounds come from TileBody (index 0: first sibling, full-size region).
         val tileBounds = boundsInRoot(composeRule.onAllNodesWithContentDescription("Calendar")[0])
+        val appBounds = boundsInRoot(
+            composeRule.onNodeWithTag(APP_STRIP_GLYPH_TAG, useUnmergedTree = true),
+        )
         val iconBounds = boundsInRoot(composeRule.onNodeWithTag("tile-icon", useUnmergedTree = true))
+        val insetPx = with(composeRule.density) { 8.dp.toPx() }
         assertTrue(
-            "2x1 span must anchor the icon to the tile end " +
-                "(tileCenterX=${tileBounds.center.x} iconCenterX=${iconBounds.center.x})",
-            iconBounds.center.x > tileBounds.center.x,
+            "2x1 app glyph must sit on the tile right edge " +
+                "(tileRight=${tileBounds.right} appRight=${appBounds.right})",
+            abs(tileBounds.right - appBounds.right - insetPx) <= 2f,
         )
         assertTrue(
-            "2x1 span must anchor the icon to the tile bottom " +
-                "(tileCenterY=${tileBounds.center.y} iconCenterY=${iconBounds.center.y})",
-            iconBounds.center.y > tileBounds.center.y,
+            "2x1 app glyph must sit on the tile bottom edge " +
+                "(tileBottom=${tileBounds.bottom} appBottom=${appBounds.bottom})",
+            abs(tileBounds.bottom - appBounds.bottom - insetPx) <= 2f,
         )
         assertIconInsideTile(tileBounds, iconBounds)
     }
 
     @Test
-    fun tallSpanCentersIconHorizontally() {
+    fun tallSpanWithPins_anchorsAppBottomRight() {
         composeRule.setContent {
             LauncherTheme {
-                Box(Modifier.size(160.dp, 320.dp)) {
+                // Realistic 1x2 tile (56x120.dp): app + 1 exactly fills the
+                // right edge at the grid-unit pitch.
+                Box(Modifier.size(56.dp, 120.dp)) {
                     AppTile(
                         state = AppTileState(label = "Calendar", span = GridSpan(1, 2)),
                         onBodyClick = {}, onSymbolClick = {},
-                        icon = { Box(Modifier.testTag("tile-icon").size(24.dp)) },
-                        pinnedCount = 1,
+                        icon = { _ -> Box(Modifier.testTag("tile-icon").size(24.dp)) },
+                        pinnedShortcuts = listOf(PinnedTileShortcut("new-post", "New post")),
                     )
                 }
             }
@@ -173,16 +188,20 @@ class AppTileTest {
 
         // Tile bounds come from TileBody (index 0: first sibling, full-size region).
         val tileBounds = boundsInRoot(composeRule.onAllNodesWithContentDescription("Calendar")[0])
+        val appBounds = boundsInRoot(
+            composeRule.onNodeWithTag(APP_STRIP_GLYPH_TAG, useUnmergedTree = true),
+        )
         val iconBounds = boundsInRoot(composeRule.onNodeWithTag("tile-icon", useUnmergedTree = true))
+        val insetPx = with(composeRule.density) { 8.dp.toPx() }
         assertTrue(
-            "1x2 span with pinned shortcuts must x-center the icon (BottomCenter) " +
-                "(tileCenterX=${tileBounds.center.x} iconCenterX=${iconBounds.center.x})",
-            abs(iconBounds.center.x - tileBounds.center.x) <= 1f,
+            "1x2 span with pinned shortcuts must anchor the app to the tile right edge " +
+                "(tileRight=${tileBounds.right} appRight=${appBounds.right})",
+            abs(tileBounds.right - appBounds.right - insetPx) <= 2f,
         )
         assertTrue(
-            "1x2 span with pinned shortcuts must anchor the icon to the tile bottom " +
-                "(tileCenterY=${tileBounds.center.y} iconCenterY=${iconBounds.center.y})",
-            iconBounds.center.y > tileBounds.center.y,
+            "1x2 span with pinned shortcuts must anchor the app to the tile bottom " +
+                "(tileBottom=${tileBounds.bottom} appBottom=${appBounds.bottom})",
+            abs(tileBounds.bottom - appBounds.bottom - insetPx) <= 2f,
         )
         assertIconInsideTile(tileBounds, iconBounds)
     }
@@ -191,12 +210,13 @@ class AppTileTest {
     fun largeSquareSpanAnchorsIconBottomEnd() {
         composeRule.setContent {
             LauncherTheme {
-                Box(Modifier.size(320.dp, 320.dp)) {
+                // Realistic 2x2 tile (120x120.dp).
+                Box(Modifier.size(120.dp, 120.dp)) {
                     AppTile(
                         state = AppTileState(label = "Calendar", span = GridSpan(2, 2)),
                         onBodyClick = {}, onSymbolClick = {},
-                        icon = { Box(Modifier.testTag("tile-icon").size(24.dp)) },
-                        pinnedCount = 1,
+                        icon = { _ -> Box(Modifier.testTag("tile-icon").size(24.dp)) },
+                        pinnedShortcuts = listOf(PinnedTileShortcut("new-post", "New post")),
                     )
                 }
             }
@@ -351,21 +371,23 @@ class AppTileTest {
     fun longClickInvokesCallbackWhenSupplied() {
         var longClicks = 0
         composeRule.setContent {
-            AppTile(
-                state = AppTileState(label = "Calendar", span = GridSpan(1, 1)),
-                onBodyClick = {}, onSymbolClick = {},
-                onLongClick = { longClicks++ },
-            )
+            LauncherTheme {
+                AppTile(
+                    state = AppTileState(label = "Calendar", span = GridSpan(1, 1)),
+                    onBodyClick = {}, onSymbolClick = {},
+                    onLongClick = { longClicks++ },
+                )
+            }
         }
         composeRule.waitForIdle()
 
-        // Only TileBody exposes the long-click action; AppLaunchButton never does.
+        // TileBody and AppLaunchButton share the one tile long-press path.
         val nodes = composeRule.onAllNodesWithContentDescription("Calendar")
         nodes.assertCountEquals(2)
         val withLongClick = nodes.fetchSemanticsNodes()
             .filter { it.config.contains(SemanticsActions.OnLongClick) }
-        composeRule.runOnIdle { assertEquals("long-click lives on TileBody only", 1, withLongClick.size) }
-        val action = withLongClick.single().config[SemanticsActions.OnLongClick]
+        composeRule.runOnIdle { assertEquals("long-click lives on every tile hit region", 2, withLongClick.size) }
+        val action = withLongClick.first().config[SemanticsActions.OnLongClick]
         composeRule.runOnIdle { action.action?.invoke() }
         composeRule.runOnIdle { assertEquals(1, longClicks) }
     }
@@ -373,11 +395,13 @@ class AppTileTest {
     @Test
     fun noLongClickActionWhenNotSupplied() {
         composeRule.setContent {
-            AppTile(
-                state = AppTileState(label = "Calendar", span = GridSpan(1, 1)),
-                onBodyClick = {}, onSymbolClick = {},
-                onLongClick = null,
-            )
+            LauncherTheme {
+                AppTile(
+                    state = AppTileState(label = "Calendar", span = GridSpan(1, 1)),
+                    onBodyClick = {}, onSymbolClick = {},
+                    onLongClick = null,
+                )
+            }
         }
         composeRule.waitForIdle()
 
@@ -433,7 +457,7 @@ class AppTileTest {
                         onBodyClick = {}, onSymbolClick = {},
                         symbolContentDescription = "Launch Calendar",
                         onLongClick = {},
-                        icon = { Box(Modifier.testTag("tile-icon").size(24.dp)) },
+                        icon = { _ -> Box(Modifier.testTag("tile-icon").size(24.dp)) },
                     )
                 }
             }
@@ -475,15 +499,15 @@ class AppTileTest {
                 "TileBody must still expose OnLongClick",
                 bodyNode.config.contains(SemanticsActions.OnLongClick),
             )
-            assertFalse(
-                "AppLaunchButton must never expose OnLongClick",
+            assertTrue(
+                "AppLaunchButton shares the tile OnLongClick",
                 symbolNode.config.contains(SemanticsActions.OnLongClick),
             )
         }
     }
 
     @Test
-    fun defaultShowsNoShortcutPlaceholders() {
+    fun defaultShowsNoStrip() {
         composeRule.setContent {
             LauncherTheme {
                 AppTile(
@@ -493,124 +517,221 @@ class AppTileTest {
             }
         }
 
-        composeRule.onAllNodesWithContentDescription("Shortcut placeholder 1").assertCountEquals(0)
-        composeRule.onAllNodesWithContentDescription("Shortcut placeholder 2").assertCountEquals(0)
+        composeRule.onNodeWithTag(PINNED_OVERFLOW_TAG, useUnmergedTree = true).assertDoesNotExist()
+        composeRule.onNodeWithTag(APP_STRIP_GLYPH_TAG, useUnmergedTree = true).assertDoesNotExist()
+        // Body + symbol only; no strip glyphs.
+        composeRule.onAllNodesWithContentDescription("Calendar").assertCountEquals(2)
     }
 
     @Test
-    fun negativeShortcutPlaceholdersRejected() {
+    fun negativeOverflowCountRejected() {
         assertThrows(IllegalArgumentException::class.java) {
             composeRule.setContent {
                 AppTile(
                     state = AppTileState(label = "Calendar", span = GridSpan(1, 1)),
                     onBodyClick = {}, onSymbolClick = {},
-                    shortcutPlaceholders = -1,
+                    overflowCount = -1,
                 )
             }
         }
     }
 
     @Test
-    fun wideSpanPlaceholders_areTwoDistinctInertNodes_bodySymbolUnaffected() {
+    fun wideSpanPinnedShortcuts_areDistinctButtons_bodySymbolUnaffected() {
         var bodyClicks = 0
         var symbolClicks = 0
+        val shortcutClicks = mutableListOf<String>()
         composeRule.setContent {
             LauncherTheme {
-                Box(Modifier.size(320.dp, 160.dp)) {
+                // Realistic 3x1 tile (184x56.dp): app + 2 exactly fills the
+                // bottom edge at the grid-unit pitch.
+                Box(Modifier.size(184.dp, 56.dp)) {
                     AppTile(
-                        // 3x1 capacity is columns - 1 = 2, so both dots render.
+                        // 3x1 capacity is columns - 1 = 2: the caller passes the
+                        // pre-clamped visible list in pin order.
                         state = AppTileState(label = "Calendar", span = GridSpan(3, 1)),
                         onBodyClick = { bodyClicks++ },
                         onSymbolClick = { symbolClicks++ },
-                        shortcutPlaceholders = 2,
+                        pinnedShortcuts = listOf(
+                            PinnedTileShortcut("new-post", "New post"),
+                            PinnedTileShortcut("camera", "Camera"),
+                        ),
+                        onShortcutClick = { shortcutClicks.add(it) },
                     )
                 }
             }
         }
         composeRule.waitForIdle()
 
-        // Exactly two distinct placeholder nodes, one per slot.
-        composeRule.onAllNodesWithContentDescription("Shortcut placeholder 1").assertCountEquals(1)
-        composeRule.onAllNodesWithContentDescription("Shortcut placeholder 2").assertCountEquals(1)
-        val placeholders = listOf("Shortcut placeholder 1", "Shortcut placeholder 2")
-            .map { composeRule.onNodeWithContentDescription(it).fetchSemanticsNode() }
+        // Each shortcut is its own Role.Button node with its own label,
+        // distinct from the tile's app regions.
+        val first = composeRule.onNodeWithContentDescription("New post, shortcut")
+        val second = composeRule.onNodeWithContentDescription("Camera, shortcut")
+        first.assertExists().assert(hasClickAction())
+        second.assertExists().assert(hasClickAction())
+        val firstNode = first.fetchSemanticsNode()
+        val secondNode = second.fetchSemanticsNode()
         composeRule.runOnIdle {
-            placeholders.forEach { node ->
-                assertFalse(
-                    "shortcut placeholder must expose no click action",
-                    node.config.contains(SemanticsActions.OnClick),
-                )
-                assertFalse(
-                    "shortcut placeholder must expose no long-click action",
-                    node.config.contains(SemanticsActions.OnLongClick),
-                )
-                assertFalse(
-                    "shortcut placeholder must not be a button",
-                    node.config.contains(SemanticsProperties.Role),
-                )
-            }
+            assertEquals(
+                Role.Button,
+                firstNode.config[SemanticsProperties.Role],
+            )
+            assertEquals(
+                Role.Button,
+                secondNode.config[SemanticsProperties.Role],
+            )
         }
+        first.performClick()
+        second.performClick()
+        composeRule.runOnIdle { assertEquals(listOf("new-post", "camera"), shortcutClicks) }
 
         // Existing Body/Symbol separation still passes: two Role.Button regions route
-        // to exactly one callback each, so placeholders trigger neither.
+        // to exactly one callback each, so strip taps trigger neither. TileBody
+        // center sits under the middle shortcut glyph on a realistic tile (a
+        // center tap would correctly hit the glyph), so the body tap targets
+        // a strip-clear point in the top padding band instead.
         val regions = composeRule.onAllNodesWithContentDescription("Calendar")
         regions.assertCountEquals(2)
-        regions[0].assert(hasClickAction()).performClick()
+        val bodyNode = regions[0].assert(hasClickAction()).fetchSemanticsNode()
+        val clearTap = with(composeRule.density) {
+            Offset(x = bodyNode.size.width / 2f, y = 4.dp.toPx())
+        }
+        regions[0].performTouchInput { click(clearTap) }
         regions[1].assert(hasClickAction()).performClick()
         composeRule.runOnIdle {
             assertEquals(1, bodyClicks)
             assertEquals(1, symbolClicks)
+            assertEquals(2, shortcutClicks.size)
         }
     }
 
     @Test
-    fun overCountPlaceholders_clampedToSpanMax_neverCrashes() {
-        // 1x1 capacity is 0: over-count renders none instead of crashing.
+    fun pinnedList_rendersFittedWindow_overflowAnnounced() {
+        // 2x2 capacity is columns - 1 = 1: the caller passes one visible glyph
+        // plus the hidden count (clamping lives in :feature:home arrangement,
+        // never in this tile). On a realistic 120.dp tile app + pin exactly
+        // fills the edge, so the +N node (which would overflow) yields to
+        // TileBody semantics while the pin stays visible and tappable.
         composeRule.setContent {
             LauncherTheme {
-                AppTile(
-                    state = AppTileState(label = "Calendar", span = GridSpan(1, 1)),
-                    onBodyClick = {}, onSymbolClick = {},
-                    shortcutPlaceholders = 3,
-                )
-            }
-        }
-        composeRule.onAllNodesWithContentDescription("Shortcut placeholder 1").assertCountEquals(0)
-
-        // 2x2 capacity is columns - 1 = 1: over-count renders exactly one dot.
-        composeRule.setContent {
-            LauncherTheme {
-                Box(Modifier.size(320.dp, 320.dp)) {
+                Box(Modifier.size(120.dp, 120.dp)) {
                     AppTile(
                         state = AppTileState(label = "Calendar", span = GridSpan(2, 2)),
                         onBodyClick = {}, onSymbolClick = {},
-                        shortcutPlaceholders = 5,
+                        pinnedShortcuts = listOf(PinnedTileShortcut("new-post", "New post")),
+                        overflowCount = 4,
+                        showOverflowIndicator = true,
                     )
                 }
             }
         }
         composeRule.waitForIdle()
-        composeRule.onAllNodesWithContentDescription("Shortcut placeholder 1").assertCountEquals(1)
-        composeRule.onAllNodesWithContentDescription("Shortcut placeholder 2").assertCountEquals(0)
+        composeRule.onNodeWithContentDescription("New post, shortcut").assertExists()
+        composeRule.onNodeWithContentDescription("Camera, shortcut").assertDoesNotExist()
+        composeRule.onNodeWithTag(PINNED_OVERFLOW_TAG, useUnmergedTree = true).assertDoesNotExist()
+        composeRule.onNode(hasStateDescription("4 more shortcuts")).assertExists()
     }
 
     @Test
-    fun singleColumnCapacity_followsRowsMinusOne() {
-        // 1x2 capacity is rows - 1 = 1: requesting 3 renders exactly one dot.
+    fun overflowIndicator_isVisibleNonLaunchableNode() {
         composeRule.setContent {
             LauncherTheme {
-                Box(Modifier.size(160.dp, 320.dp)) {
+                // Realistic 4x2 tile (248x120.dp): app + 2 + node exactly
+                // fills the bottom edge, so the +N node renders in bounds.
+                Box(Modifier.size(248.dp, 120.dp)) {
                     AppTile(
-                        state = AppTileState(label = "Calendar", span = GridSpan(1, 2)),
+                        state = AppTileState(label = "Calendar", span = GridSpan(4, 2)),
                         onBodyClick = {}, onSymbolClick = {},
-                        shortcutPlaceholders = 3,
+                        pinnedShortcuts = listOf(
+                            PinnedTileShortcut("new-post", "New post"),
+                            PinnedTileShortcut("camera", "Camera"),
+                        ),
+                        overflowCount = 1,
+                        showOverflowIndicator = true,
                     )
                 }
             }
         }
         composeRule.waitForIdle()
-        composeRule.onAllNodesWithContentDescription("Shortcut placeholder 1").assertCountEquals(1)
-        composeRule.onAllNodesWithContentDescription("Shortcut placeholder 2").assertCountEquals(0)
+
+        val overflow = composeRule.onNodeWithTag(PINNED_OVERFLOW_TAG, useUnmergedTree = true)
+        overflow.assertExists()
+        composeRule.onNodeWithContentDescription("1 more shortcuts").assertExists()
+        // The node stays inside the tile bounds.
+        val tileBounds = boundsInRoot(composeRule.onAllNodesWithContentDescription("Calendar")[0])
+        val nodeBounds = boundsInRoot(overflow)
+        assertTrue(
+            "overflow node must stay inside the tile (tile=$tileBounds node=$nodeBounds)",
+            nodeBounds.left >= tileBounds.left - 1f &&
+                nodeBounds.top >= tileBounds.top - 1f &&
+                nodeBounds.right <= tileBounds.right + 1f &&
+                nodeBounds.bottom <= tileBounds.bottom + 1f,
+        )
+        val overflowNode = overflow.fetchSemanticsNode()
+        composeRule.runOnIdle {
+            assertFalse(
+                "overflow indicator must expose no click action",
+                overflowNode.config.contains(SemanticsActions.OnClick),
+            )
+            assertFalse(
+                "overflow indicator must not be a button",
+                overflowNode.config.contains(SemanticsProperties.Role),
+            )
+        }
+    }
+
+    @Test
+    fun hiddenOverflow_mergesIntoBodySemantics() {
+        composeRule.setContent {
+            LauncherTheme {
+                Box(Modifier.size(120.dp, 120.dp)) {
+                    AppTile(
+                        state = AppTileState(label = "Calendar", span = GridSpan(2, 2)),
+                        onBodyClick = {}, onSymbolClick = {},
+                        pinnedShortcuts = listOf(PinnedTileShortcut("new-post", "New post")),
+                        // Edit-selected / zero-capacity: no +N node.
+                        overflowCount = 2,
+                        showOverflowIndicator = false,
+                    )
+                }
+            }
+        }
+        composeRule.waitForIdle()
+
+        composeRule.onNodeWithTag(PINNED_OVERFLOW_TAG, useUnmergedTree = true).assertDoesNotExist()
+        // The hidden count stays announced on the tile body.
+        composeRule.onNode(hasStateDescription("2 more shortcuts")).assertExists()
+    }
+
+    @Test
+    fun disabledInteraction_disablesStripGlyphs_keepsLabelsAndRoles() {
+        composeRule.setContent {
+            LauncherTheme {
+                Box(Modifier.size(120.dp, 120.dp)) {
+                    AppTile(
+                        state = AppTileState(label = "Calendar", span = GridSpan(2, 2)),
+                        onBodyClick = {}, onSymbolClick = {},
+                        onShortcutClick = { error("must not execute while disabled") },
+                        pinnedShortcuts = listOf(PinnedTileShortcut("new-post", "New post")),
+                        isInteractionEnabled = false,
+                    )
+                }
+            }
+        }
+        composeRule.waitForIdle()
+
+        // Shortcut glyphs keep their accessible names and roles but expose no
+        // click action, so the tile drags as one object in edit mode.
+        val glyph = composeRule.onNodeWithContentDescription("New post, shortcut")
+        glyph.assertExists()
+        val glyphNode = glyph.fetchSemanticsNode()
+        composeRule.runOnIdle {
+            assertFalse(
+                "disabled shortcut glyph must expose no click action",
+                glyphNode.config.contains(SemanticsActions.OnClick),
+            )
+            assertEquals(Role.Button, glyphNode.config[SemanticsProperties.Role])
+        }
     }
 
     @Test
@@ -621,8 +742,7 @@ class AppTileTest {
                     AppTile(
                         state = AppTileState(label = "Calendar", span = GridSpan(2, 2)),
                         onBodyClick = {}, onSymbolClick = {},
-                        icon = { Box(Modifier.testTag("tile-icon").size(24.dp)) },
-                        pinnedCount = 0,
+                        icon = { _ -> Box(Modifier.testTag("tile-icon").size(24.dp)) },
                     )
                 }
             }
@@ -641,19 +761,58 @@ class AppTileTest {
                 "(tileCenterY=${tileBounds.center.y} iconCenterY=${iconBounds.center.y})",
             abs(iconBounds.center.y - tileBounds.center.y) <= 2f,
         )
-        composeRule.onAllNodesWithContentDescription("Shortcut placeholder 1").assertCountEquals(0)
+        // No strip: only Body + symbol share the label, no strip glyphs.
+        composeRule.onAllNodesWithContentDescription("Calendar").assertCountEquals(2)
+        composeRule.onNodeWithTag(PINNED_OVERFLOW_TAG, useUnmergedTree = true).assertDoesNotExist()
+        composeRule.onNodeWithTag(APP_STRIP_GLYPH_TAG, useUnmergedTree = true).assertDoesNotExist()
     }
 
     @Test
-    fun zeroPinned_narrowTileCentersSymbolAndRendersNoStrip() {
+    fun largeTile_passesCenteredExtentToIconSlot() {
+        var capturedExtent: Dp? = null
         composeRule.setContent {
             LauncherTheme {
-                Box(Modifier.size(160.dp, 320.dp)) {
+                Box(Modifier.size(320.dp, 320.dp)) {
+                    AppTile(
+                        state = AppTileState(label = "Calendar", span = GridSpan(2, 2)),
+                        onBodyClick = {}, onSymbolClick = {},
+                        icon = { extent ->
+                            capturedExtent = extent
+                            Box(Modifier.testTag("tile-icon").size(extent))
+                        },
+                    )
+                }
+            }
+        }
+        composeRule.waitForIdle()
+
+        // min(availW, availH) after tile padding: 320 - 2 * 8 = 304.
+        composeRule.runOnIdle { assertEquals(304.dp, capturedExtent) }
+        val tileBounds = boundsInRoot(composeRule.onAllNodesWithContentDescription("Calendar")[0])
+        val iconBounds = boundsInRoot(composeRule.onNodeWithTag("tile-icon", useUnmergedTree = true))
+        assertTrue(
+            "large centered icon must x-center " +
+                "(tileCenterX=${tileBounds.center.x} iconCenterX=${iconBounds.center.x})",
+            abs(iconBounds.center.x - tileBounds.center.x) <= 2f,
+        )
+        assertTrue(
+            "large centered icon must y-center " +
+                "(tileCenterY=${tileBounds.center.y} iconCenterY=${iconBounds.center.y})",
+            abs(iconBounds.center.y - tileBounds.center.y) <= 2f,
+        )
+    }
+
+    @Test
+    fun zeroPinned_narrowTile_anchorsBottomCenterAndRendersNoStrip() {
+        composeRule.setContent {
+            LauncherTheme {
+                // Realistic 1x2 tile (56x120.dp) with zero pins: the small-span
+                // unpinned anchor is bottom-center per docs/grid.md section 4.
+                Box(Modifier.size(56.dp, 120.dp)) {
                     AppTile(
                         state = AppTileState(label = "Calendar", span = GridSpan(1, 2)),
                         onBodyClick = {}, onSymbolClick = {},
-                        icon = { Box(Modifier.testTag("tile-icon").size(24.dp)) },
-                        pinnedCount = 0,
+                        icon = { _ -> Box(Modifier.testTag("tile-icon").size(24.dp)) },
                     )
                 }
             }
@@ -667,38 +826,29 @@ class AppTileTest {
                 "(tileCenterX=${tileBounds.center.x} iconCenterX=${iconBounds.center.x})",
             abs(iconBounds.center.x - tileBounds.center.x) <= 2f,
         )
+        val bottomInsetPx = with(composeRule.density) { 8.dp.toPx() }
         assertTrue(
-            "1x2 with zero pinned must y-center the symbol " +
-                "(tileCenterY=${tileBounds.center.y} iconCenterY=${iconBounds.center.y})",
-            abs(iconBounds.center.y - tileBounds.center.y) <= 2f,
+            "1x2 with zero pinned must sit on the tile bottom edge above padding " +
+                "(tileBottom=${tileBounds.bottom} iconBottom=${iconBounds.bottom})",
+            iconBounds.bottom <= tileBounds.bottom - bottomInsetPx + 2f &&
+                iconBounds.bottom > tileBounds.center.y,
         )
-        composeRule.onAllNodesWithContentDescription("Shortcut placeholder 1").assertCountEquals(0)
+        assertIconInsideTile(tileBounds, iconBounds)
+        composeRule.onAllNodesWithContentDescription("Calendar").assertCountEquals(2)
+        composeRule.onNodeWithTag(PINNED_OVERFLOW_TAG, useUnmergedTree = true).assertDoesNotExist()
     }
 
     @Test
-    fun negativePinnedCountIsRejected() {
-        assertThrows(IllegalArgumentException::class.java) {
-            composeRule.setContent {
-                AppTile(
-                    state = AppTileState(label = "Calendar", span = GridSpan(2, 2)),
-                    onBodyClick = {}, onSymbolClick = {},
-                    pinnedCount = -1,
-                )
-            }
-        }
-    }
-
-    @Test
-    fun wideStrip_anchorsBottomEnd_indexZeroNearestAnchor() {
+    fun zeroPinned_smallWideTile_anchorsBottomEndAndRendersNoStrip() {
         composeRule.setContent {
             LauncherTheme {
-                Box(Modifier.size(480.dp, 160.dp)) {
+                // Realistic 2x1 tile (120x56.dp) with zero pins: the
+                // small-span unpinned anchor is bottom-right.
+                Box(Modifier.size(120.dp, 56.dp)) {
                     AppTile(
-                        // 4x1 capacity is columns - 1 = 3.
-                        state = AppTileState(label = "Calendar", span = GridSpan(4, 1)),
+                        state = AppTileState(label = "Calendar", span = GridSpan(2, 1)),
                         onBodyClick = {}, onSymbolClick = {},
-                        shortcutPlaceholders = 3,
-                        pinnedCount = 3,
+                        icon = { _ -> Box(Modifier.testTag("tile-icon").size(24.dp)) },
                     )
                 }
             }
@@ -706,64 +856,21 @@ class AppTileTest {
         composeRule.waitForIdle()
 
         val tileBounds = boundsInRoot(composeRule.onAllNodesWithContentDescription("Calendar")[0])
-        val first = boundsInRoot(composeRule.onNodeWithContentDescription("Shortcut placeholder 1"))
-        val third = boundsInRoot(composeRule.onNodeWithContentDescription("Shortcut placeholder 3"))
-        // Strip sits on the bottom edge, anchored to the end.
+        val iconBounds = boundsInRoot(composeRule.onNodeWithTag("tile-icon", useUnmergedTree = true))
         assertTrue(
-            "wide strip must sit on the tile bottom (tileBottom=${tileBounds.bottom} firstBottom=${first.bottom})",
-            first.bottom >= tileBounds.bottom - 12f,
+            "2x1 with zero pinned must anchor the symbol to the tile end " +
+                "(tileCenterX=${tileBounds.center.x} iconCenterX=${iconBounds.center.x})",
+            iconBounds.center.x > tileBounds.center.x,
         )
         assertTrue(
-            "wide strip index 0 must be nearest the BottomEnd anchor " +
-                "(firstCenterX=${first.center.x} thirdCenterX=${third.center.x})",
-            first.center.x > third.center.x,
+            "2x1 with zero pinned must anchor the symbol to the tile bottom " +
+                "(tileCenterY=${tileBounds.center.y} iconBottom=${iconBounds.bottom})",
+            iconBounds.bottom > tileBounds.center.y,
         )
-        // Fixed pitch: centers share the same Y and are evenly spaced.
-        assertTrue(
-            "wide strip slots must share one row (firstY=${first.center.y} thirdY=${third.center.y})",
-            abs(first.center.y - third.center.y) <= 1f,
-        )
-        val second = boundsInRoot(composeRule.onNodeWithContentDescription("Shortcut placeholder 2"))
-        assertTrue(
-            "wide strip pitch must be fixed (1-2=${first.center.x - second.center.x} 2-3=${second.center.x - third.center.x})",
-            abs((first.center.x - second.center.x) - (second.center.x - third.center.x)) <= 1f,
-        )
-    }
-
-    @Test
-    fun narrowStrip_anchorsBottomCenter_indexZeroNearestAnchor() {
-        composeRule.setContent {
-            LauncherTheme {
-                Box(Modifier.size(160.dp, 480.dp)) {
-                    AppTile(
-                        // 1x3 capacity is rows - 1 = 2.
-                        state = AppTileState(label = "Calendar", span = GridSpan(1, 3)),
-                        onBodyClick = {}, onSymbolClick = {},
-                        shortcutPlaceholders = 2,
-                        pinnedCount = 2,
-                    )
-                }
-            }
-        }
-        composeRule.waitForIdle()
-
-        val tileBounds = boundsInRoot(composeRule.onAllNodesWithContentDescription("Calendar")[0])
-        val first = boundsInRoot(composeRule.onNodeWithContentDescription("Shortcut placeholder 1"))
-        val second = boundsInRoot(composeRule.onNodeWithContentDescription("Shortcut placeholder 2"))
-        assertTrue(
-            "narrow strip must x-center on the tile " +
-                "(tileCenterX=${tileBounds.center.x} firstCenterX=${first.center.x})",
-            abs(first.center.x - tileBounds.center.x) <= 2f,
-        )
-        assertTrue(
-            "narrow strip index 0 must be nearest the BottomCenter anchor " +
-                "(firstCenterY=${first.center.y} secondCenterY=${second.center.y})",
-            first.center.y > second.center.y,
-        )
-        assertTrue(
-            "narrow strip slots must share one column (firstX=${first.center.x} secondX=${second.center.x})",
-            abs(first.center.x - second.center.x) <= 1f,
-        )
+        assertIconInsideTile(tileBounds, iconBounds)
+        composeRule.onAllNodesWithContentDescription("Calendar").assertCountEquals(2)
+        composeRule.onNodeWithTag(PINNED_OVERFLOW_TAG, useUnmergedTree = true).assertDoesNotExist()
+        composeRule.onNodeWithTag(APP_STRIP_GLYPH_TAG, useUnmergedTree = true).assertDoesNotExist()
     }
 
     @Test
@@ -854,6 +961,563 @@ class AppTileTest {
         composeRule.runOnIdle {
             assertNotEquals(androidx.compose.ui.graphics.Color.Black, darkSelected!!.container)
             assertNotEquals(androidx.compose.ui.graphics.Color.White, darkSelected!!.container)
+        }
+    }
+
+    @Test
+    fun wideStrip_bottomCenteredGroup_indexZeroNearestApp() {
+        composeRule.setContent {
+            LauncherTheme {
+                // Realistic 4x2 tile (248x120.dp): app + 3 exactly fills the
+                // bottom edge at the grid-unit pitch.
+                Box(Modifier.size(248.dp, 120.dp)) {
+                    AppTile(
+                        // 4x2 capacity is columns - 1 = 3: app + 3 centered group.
+                        state = AppTileState(label = "Calendar", span = GridSpan(4, 2)),
+                        onBodyClick = {}, onSymbolClick = {},
+                        pinnedShortcuts = listOf(
+                            PinnedTileShortcut("new-post", "New post"),
+                            PinnedTileShortcut("camera", "Camera"),
+                            PinnedTileShortcut("search", "Search"),
+                        ),
+                    )
+                }
+            }
+        }
+        composeRule.waitForIdle()
+
+        val tileBounds = boundsInRoot(composeRule.onAllNodesWithContentDescription("Calendar")[0])
+        // Row order is farthest-first: search leftmost, new-post nearest app.
+        val farthest = boundsInRoot(composeRule.onNodeWithContentDescription("Search, shortcut"))
+        val middle = boundsInRoot(composeRule.onNodeWithContentDescription("Camera, shortcut"))
+        val nearest = boundsInRoot(composeRule.onNodeWithContentDescription("New post, shortcut"))
+        val app = boundsInRoot(
+            composeRule.onNodeWithTag(APP_STRIP_GLYPH_TAG, useUnmergedTree = true),
+        )
+        // Strip sits on the bottom edge, inset by exactly the tile padding.
+        val bottomInsetPx = with(composeRule.density) { 8.dp.roundToPx() }
+        assertTrue(
+            "wide strip must sit on the tile bottom edge " +
+                "(tileBottom=${tileBounds.bottom} bottom=${farthest.bottom} insetPx=$bottomInsetPx)",
+            abs(tileBounds.bottom - farthest.bottom - bottomInsetPx) <= 2f,
+        )
+        // Pin order is spatially stable: index 0 nearest the app (rightmost).
+        assertTrue(
+            "index 0 must be nearest the app (nearestX=${nearest.center.x} farthestX=${farthest.center.x})",
+            nearest.center.x > farthest.center.x,
+        )
+        assertTrue(
+            "app glyph must be rightmost (appX=${app.center.x} nearestX=${nearest.center.x})",
+            app.center.x > nearest.center.x,
+        )
+        // Fixed pitch: centers share one row and are evenly spaced.
+        assertTrue(
+            "wide strip slots must share one row",
+            abs(farthest.center.y - nearest.center.y) <= 1f &&
+                abs(nearest.center.y - app.center.y) <= 1f,
+        )
+        assertTrue(
+            "wide strip pitch must be fixed",
+            abs((nearest.center.x - middle.center.x) - (middle.center.x - farthest.center.x)) <= 1f,
+        )
+        // Centered group (not BottomEnd): group mid aligns with tile mid.
+        val groupCenterX = (farthest.left + app.right) / 2f
+        assertTrue(
+            "group must mid-align with the tile (groupCenterX=$groupCenterX tileCenterX=${tileBounds.center.x})",
+            abs(groupCenterX - tileBounds.center.x) <= 2f,
+        )
+    }
+
+    @Test
+    fun narrowStrip_rightEdgeUpward_indexZeroNearestApp() {
+        composeRule.setContent {
+            LauncherTheme {
+                // Realistic 1x3 tile (56x184.dp): app + 2 exactly fills the
+                // right edge at the grid-unit pitch.
+                Box(Modifier.size(56.dp, 184.dp)) {
+                    AppTile(
+                        // 1x3 capacity is rows - 1 = 2: app bottom-right + upward.
+                        state = AppTileState(label = "Calendar", span = GridSpan(1, 3)),
+                        onBodyClick = {}, onSymbolClick = {},
+                        pinnedShortcuts = listOf(
+                            PinnedTileShortcut("new-post", "New post"),
+                            PinnedTileShortcut("camera", "Camera"),
+                        ),
+                    )
+                }
+            }
+        }
+        composeRule.waitForIdle()
+
+        val tileBounds = boundsInRoot(composeRule.onAllNodesWithContentDescription("Calendar")[0])
+        // Column order is farthest-first (top): camera above, new-post nearest app.
+        val farthest = boundsInRoot(composeRule.onNodeWithContentDescription("Camera, shortcut"))
+        val nearest = boundsInRoot(composeRule.onNodeWithContentDescription("New post, shortcut"))
+        val app = boundsInRoot(
+            composeRule.onNodeWithTag(APP_STRIP_GLYPH_TAG, useUnmergedTree = true),
+        )
+        // Right edge: glyphs sit one tile padding from the tile right.
+        // (On a realistic single-cell-wide tile the 40.dp column is centered,
+        // so edge-ness is the right inset, not the center offset.)
+        val insetPx = with(composeRule.density) { 8.dp.toPx() }
+        assertTrue(
+            "narrow strip must hug the right edge " +
+                "(tileRight=${tileBounds.right} firstRight=${farthest.right})",
+            abs(tileBounds.right - farthest.right - insetPx) <= 2f,
+        )
+        assertTrue(
+            "app glyph must sit bottom-right (tileRight=${tileBounds.right} appRight=${app.right})",
+            abs(tileBounds.right - app.right - insetPx) <= 2f,
+        )
+        // Upward growth: index 0 sits directly above the app, index 1 above it.
+        assertTrue(
+            "narrow strip index 0 must be nearest the app " +
+                "(nearestY=${nearest.center.y} farthestY=${farthest.center.y} appY=${app.center.y})",
+            nearest.center.y > farthest.center.y && app.center.y > nearest.center.y,
+        )
+        assertTrue(
+            "narrow strip slots must share one column",
+            abs(farthest.center.x - nearest.center.x) <= 1f &&
+                abs(nearest.center.x - app.center.x) <= 1f,
+        )
+        // Fixed pitch upward.
+        assertTrue(
+            "narrow strip pitch must be fixed",
+            abs((nearest.center.y - farthest.center.y) - (app.center.y - nearest.center.y)) <= 1f,
+        )
+    }
+
+    @Test
+    fun stripPitch_adaptsToMeasuredWidth() {
+        // Same 2x2 span at two tile widths side by side: slot pitch derives
+        // from the measured edge (64.dp at 120.dp wide, 104.dp at 200.dp
+        // wide), never a hard-coded adjacency pitch.
+        composeRule.setContent {
+            LauncherTheme {
+                Row {
+                    Box(Modifier.size(120.dp, 120.dp)) {
+                        AppTile(
+                            state = AppTileState(label = "Narrow", span = GridSpan(2, 2)),
+                            onBodyClick = {}, onSymbolClick = {},
+                            pinnedShortcuts = listOf(
+                                PinnedTileShortcut("narrow-post", "Narrow post"),
+                            ),
+                        )
+                    }
+                    Box(Modifier.size(200.dp, 200.dp)) {
+                        AppTile(
+                            state = AppTileState(label = "Wide", span = GridSpan(2, 2)),
+                            onBodyClick = {}, onSymbolClick = {},
+                            pinnedShortcuts = listOf(
+                                PinnedTileShortcut("wide-post", "Wide post"),
+                            ),
+                        )
+                    }
+                }
+            }
+        }
+        composeRule.waitForIdle()
+        val narrowApp = boundsInRoot(
+            composeRule.onAllNodesWithTag(APP_STRIP_GLYPH_TAG, useUnmergedTree = true)[0],
+        )
+        val narrowPin = boundsInRoot(composeRule.onNodeWithContentDescription("Narrow post, shortcut"))
+        val narrowPitchPx = narrowApp.center.x - narrowPin.center.x
+
+        val wideApp = boundsInRoot(
+            composeRule.onAllNodesWithTag(APP_STRIP_GLYPH_TAG, useUnmergedTree = true)[1],
+        )
+        val widePin = boundsInRoot(composeRule.onNodeWithContentDescription("Wide post, shortcut"))
+        val widePitchPx = wideApp.center.x - widePin.center.x
+
+        val expectedNarrowPx = with(composeRule.density) { 64.dp.toPx() }
+        val expectedWidePx = with(composeRule.density) { 104.dp.toPx() }
+        assertTrue(
+            "pitch must derive from the measured edge " +
+                "(narrow=$narrowPitchPx expected=$expectedNarrowPx)",
+            abs(narrowPitchPx - expectedNarrowPx) <= 2f,
+        )
+        assertTrue(
+            "pitch must adapt to width (wide=$widePitchPx expected=$expectedWidePx)",
+            abs(widePitchPx - expectedWidePx) <= 2f,
+        )
+    }
+
+    @Test
+    fun pinnedStrip_realisticTwoByTwo_overflowStaysInBounds() {
+        composeRule.setContent {
+            LauncherTheme {
+                // Realistic 2x2 tile (120x120.dp) with caller overflow: app +
+                // pin + node would exceed the edge, so the node yields to body
+                // semantics while the pin stays visible; everything rendered
+                // stays inside the tile.
+                Box(Modifier.size(120.dp, 120.dp)) {
+                    AppTile(
+                        state = AppTileState(label = "Calendar", span = GridSpan(2, 2)),
+                        onBodyClick = {}, onSymbolClick = {},
+                        pinnedShortcuts = listOf(PinnedTileShortcut("new-post", "New post")),
+                        overflowCount = 1,
+                        showOverflowIndicator = true,
+                    )
+                }
+            }
+        }
+        composeRule.waitForIdle()
+
+        val tileBounds = boundsInRoot(composeRule.onAllNodesWithContentDescription("Calendar")[0])
+        composeRule.onNodeWithContentDescription("New post, shortcut").assertExists()
+        composeRule.onNodeWithTag(PINNED_OVERFLOW_TAG, useUnmergedTree = true).assertDoesNotExist()
+        composeRule.onNode(hasStateDescription("1 more shortcuts")).assertExists()
+        val app = boundsInRoot(
+            composeRule.onNodeWithTag(APP_STRIP_GLYPH_TAG, useUnmergedTree = true),
+        )
+        val pin = boundsInRoot(composeRule.onNodeWithContentDescription("New post, shortcut"))
+        for ((name, rect) in listOf("app" to app, "pin" to pin)) {
+            assertTrue(
+                "$name glyph must stay inside the tile (tile=$tileBounds rect=$rect)",
+                rect.left >= tileBounds.left - 1f &&
+                    rect.top >= tileBounds.top - 1f &&
+                    rect.right <= tileBounds.right + 1f &&
+                    rect.bottom <= tileBounds.bottom + 1f,
+            )
+        }
+    }
+
+    @Test
+    fun pinnedStrip_realisticOneByTwo_editSelected_appClearsResizeHandle() {
+        composeRule.setContent {
+            LauncherTheme {
+                // Realistic edit-selected 1x2 tile (56x120.dp): the shortcut
+                // yields so the app glyph sits above the 48.dp resize corner
+                // reserve with no overlap; the hidden pin is announced.
+                Box(Modifier.size(56.dp, 120.dp)) {
+                    AppTile(
+                        state = AppTileState(label = "Calendar", span = GridSpan(1, 2)),
+                        onBodyClick = {}, onSymbolClick = {},
+                        pinnedShortcuts = listOf(PinnedTileShortcut("new-post", "New post")),
+                        isEditSelected = true,
+                    )
+                }
+            }
+        }
+        composeRule.waitForIdle()
+
+        val tileBounds = boundsInRoot(composeRule.onAllNodesWithContentDescription("Calendar")[0])
+        composeRule.onNodeWithTag(APP_STRIP_GLYPH_TAG, useUnmergedTree = true).assertExists()
+        composeRule.onNodeWithContentDescription("New post, shortcut").assertDoesNotExist()
+        composeRule.onNodeWithTag(PINNED_OVERFLOW_TAG, useUnmergedTree = true).assertDoesNotExist()
+        composeRule.onNode(hasStateDescription("1 more shortcuts")).assertExists()
+        val app = boundsInRoot(
+            composeRule.onNodeWithTag(APP_STRIP_GLYPH_TAG, useUnmergedTree = true),
+        )
+        // Resize handle in-tile footprint: the 48.dp touch square
+        // center-pinned on the bottom-right corner extends half inside.
+        val halfPx = with(composeRule.density) { 24.dp.toPx() }
+        val resizeLeft = tileBounds.right - halfPx
+        val resizeTop = tileBounds.bottom - halfPx
+        assertTrue(
+            "edit app glyph must clear the resize corner " +
+                "(app=$app resizeLeft=$resizeLeft resizeTop=$resizeTop)",
+            app.right <= resizeLeft + 1f ||
+                app.left >= tileBounds.right - 1f ||
+                app.bottom <= resizeTop + 1f ||
+                app.top >= tileBounds.bottom - 1f,
+        )
+        assertTrue(
+            "edit app glyph must stay inside the tile (tile=$tileBounds app=$app)",
+            app.left >= tileBounds.left - 1f &&
+                app.top >= tileBounds.top - 1f &&
+                app.right <= tileBounds.right + 1f &&
+                app.bottom <= tileBounds.bottom + 1f,
+        )
+    }
+
+    @Test
+    fun pinnedStrip_realisticTwoByTwo_editSelected_yieldsToCenteredControl() {
+        composeRule.setContent {
+            LauncherTheme {
+                // Realistic edit-selected 2x2 tile (120x120.dp): a centered
+                // 48.dp remove control leaves no 40.dp slot clear of both
+                // controls, so the strip yields entirely and the body
+                // announces app + retained pins (nothing deleted).
+                Box(Modifier.size(120.dp, 120.dp)) {
+                    AppTile(
+                        state = AppTileState(label = "Calendar", span = GridSpan(2, 2)),
+                        onBodyClick = {}, onSymbolClick = {},
+                        pinnedShortcuts = listOf(PinnedTileShortcut("new-post", "New post")),
+                        overflowCount = 1,
+                        showOverflowIndicator = false,
+                        isEditSelected = true,
+                    )
+                }
+            }
+        }
+        composeRule.waitForIdle()
+
+        composeRule.onNodeWithTag(APP_STRIP_GLYPH_TAG, useUnmergedTree = true).assertDoesNotExist()
+        composeRule.onNodeWithContentDescription("New post, shortcut").assertDoesNotExist()
+        composeRule.onNodeWithTag(PINNED_OVERFLOW_TAG, useUnmergedTree = true).assertDoesNotExist()
+        // Tile body still carries the app name and the retained total.
+        composeRule.onAllNodesWithContentDescription("Calendar").assertCountEquals(1)
+        composeRule.onNode(hasStateDescription("2 more shortcuts")).assertExists()
+    }
+
+    @Test
+    fun zeroPins_longPressAppAndEmpty_shareTileCallback_noClickOnRelease() {
+        var bodyClicks = 0
+        var symbolClicks = 0
+        var longClicks = 0
+        composeRule.setContent {
+            LauncherTheme {
+                Box(Modifier.size(160.dp)) {
+                    AppTile(
+                        state = AppTileState(label = "Calendar", span = GridSpan(1, 1)),
+                        onBodyClick = { bodyClicks++ },
+                        onSymbolClick = { symbolClicks++ },
+                        symbolContentDescription = "Launch Calendar",
+                        onLongClick = { longClicks++ },
+                        icon = { _ -> Box(Modifier.testTag("tile-icon").size(24.dp)) },
+                    )
+                }
+            }
+        }
+        composeRule.waitForIdle()
+
+        // Physical long-press on the app symbol hits the launch region but
+        // fires the shared tile callback once with no short click on release.
+        composeRule.onNodeWithContentDescription("Launch Calendar")
+            .performTouchInput { longClick() }
+        composeRule.waitForIdle()
+        composeRule.runOnIdle {
+            assertEquals(1, longClicks)
+            assertEquals(0, bodyClicks)
+            assertEquals(0, symbolClicks)
+        }
+
+        // Physical long-press on empty tile area (top-left corner, outside the
+        // centered symbol) hits TileBody and fires the same callback once.
+        val tileBounds = boundsInRoot(composeRule.onNodeWithContentDescription("Calendar"))
+        val symbolBounds = boundsInRoot(composeRule.onNodeWithContentDescription("Launch Calendar"))
+        val insetPx = with(composeRule.density) { 8.dp.toPx() }
+        val emptyRoot = Offset(tileBounds.left + insetPx, tileBounds.top + insetPx)
+        composeRule.runOnIdle {
+            assertFalse(
+                "empty probe must sit outside the symbol (empty=$emptyRoot symbol=$symbolBounds)",
+                symbolBounds.contains(emptyRoot),
+            )
+        }
+        val emptyLocal = Offset(emptyRoot.x - tileBounds.left, emptyRoot.y - tileBounds.top)
+        composeRule.onNodeWithContentDescription("Calendar")
+            .performTouchInput { longClick(emptyLocal) }
+        composeRule.waitForIdle()
+        composeRule.runOnIdle {
+            assertEquals(2, longClicks)
+            assertEquals(0, bodyClicks)
+            assertEquals(0, symbolClicks)
+        }
+    }
+
+    @Test
+    fun oneShortcut_longPressEveryRegion_sharesTileCallback() {
+        var bodyClicks = 0
+        var symbolClicks = 0
+        val shortcutClicks = mutableListOf<String>()
+        var longClicks = 0
+        composeRule.setContent {
+            LauncherTheme {
+                Box(Modifier.size(120.dp, 120.dp)) {
+                    AppTile(
+                        state = AppTileState(label = "Calendar", span = GridSpan(2, 2)),
+                        onBodyClick = { bodyClicks++ },
+                        onSymbolClick = { symbolClicks++ },
+                        onLongClick = { longClicks++ },
+                        pinnedShortcuts = listOf(PinnedTileShortcut("new-post", "New post")),
+                        onShortcutClick = { shortcutClicks.add(it) },
+                    )
+                }
+            }
+        }
+        composeRule.waitForIdle()
+
+        // App strip glyph.
+        composeRule.onNodeWithTag(APP_STRIP_GLYPH_TAG, useUnmergedTree = true)
+            .performTouchInput { longClick() }
+        composeRule.waitForIdle()
+        composeRule.runOnIdle { assertEquals(1, longClicks) }
+
+        // Single shortcut glyph.
+        composeRule.onNodeWithContentDescription("New post, shortcut")
+            .performTouchInput { longClick() }
+        composeRule.waitForIdle()
+        composeRule.runOnIdle { assertEquals(2, longClicks) }
+
+        // Empty area: top-center above the bottom strip.
+        val tileBounds = boundsInRoot(composeRule.onAllNodesWithContentDescription("Calendar")[0])
+        val appBounds = boundsInRoot(
+            composeRule.onNodeWithTag(APP_STRIP_GLYPH_TAG, useUnmergedTree = true),
+        )
+        val pinBounds = boundsInRoot(composeRule.onNodeWithContentDescription("New post, shortcut"))
+        val emptyRoot = Offset(
+            tileBounds.center.x,
+            tileBounds.top + with(composeRule.density) { 4.dp.toPx() },
+        )
+        composeRule.runOnIdle {
+            assertFalse("empty probe must miss app ($appBounds)", appBounds.contains(emptyRoot))
+            assertFalse("empty probe must miss pin ($pinBounds)", pinBounds.contains(emptyRoot))
+        }
+        val emptyLocal = Offset(emptyRoot.x - tileBounds.left, emptyRoot.y - tileBounds.top)
+        composeRule.onAllNodesWithContentDescription("Calendar")[0]
+            .performTouchInput { longClick(emptyLocal) }
+        composeRule.waitForIdle()
+        composeRule.runOnIdle {
+            assertEquals(3, longClicks)
+            assertEquals(0, bodyClicks)
+            assertEquals(0, symbolClicks)
+            assertTrue("no short click on release", shortcutClicks.isEmpty())
+        }
+    }
+
+    @Test
+    fun multiShortcuts_longPressEveryRegion_sharesTileCallback() {
+        var bodyClicks = 0
+        var symbolClicks = 0
+        val shortcutClicks = mutableListOf<String>()
+        var longClicks = 0
+        composeRule.setContent {
+            LauncherTheme {
+                // Realistic 4x2 tile (248x120.dp): app + 2 exactly fills the
+                // bottom edge at the grid-unit pitch.
+                Box(Modifier.size(248.dp, 120.dp)) {
+                    AppTile(
+                        state = AppTileState(label = "Calendar", span = GridSpan(4, 2)),
+                        onBodyClick = { bodyClicks++ },
+                        onSymbolClick = { symbolClicks++ },
+                        onLongClick = { longClicks++ },
+                        pinnedShortcuts = listOf(
+                            PinnedTileShortcut("new-post", "New post"),
+                            PinnedTileShortcut("camera", "Camera"),
+                        ),
+                        onShortcutClick = { shortcutClicks.add(it) },
+                    )
+                }
+            }
+        }
+        composeRule.waitForIdle()
+
+        composeRule.onNodeWithTag(APP_STRIP_GLYPH_TAG, useUnmergedTree = true)
+            .performTouchInput { longClick() }
+        composeRule.waitForIdle()
+        composeRule.runOnIdle { assertEquals(1, longClicks) }
+
+        composeRule.onNodeWithContentDescription("New post, shortcut")
+            .performTouchInput { longClick() }
+        composeRule.waitForIdle()
+        composeRule.runOnIdle { assertEquals(2, longClicks) }
+
+        composeRule.onNodeWithContentDescription("Camera, shortcut")
+            .performTouchInput { longClick() }
+        composeRule.waitForIdle()
+        composeRule.runOnIdle { assertEquals(3, longClicks) }
+
+        // Empty area: top-center above the bottom strip.
+        val tileBounds = boundsInRoot(composeRule.onAllNodesWithContentDescription("Calendar")[0])
+        val appBounds = boundsInRoot(
+            composeRule.onNodeWithTag(APP_STRIP_GLYPH_TAG, useUnmergedTree = true),
+        )
+        val firstBounds = boundsInRoot(composeRule.onNodeWithContentDescription("New post, shortcut"))
+        val secondBounds = boundsInRoot(composeRule.onNodeWithContentDescription("Camera, shortcut"))
+        val emptyRoot = Offset(
+            tileBounds.center.x,
+            tileBounds.top + with(composeRule.density) { 4.dp.toPx() },
+        )
+        composeRule.runOnIdle {
+            assertFalse("empty probe must miss app ($appBounds)", appBounds.contains(emptyRoot))
+            assertFalse("empty probe must miss first ($firstBounds)", firstBounds.contains(emptyRoot))
+            assertFalse("empty probe must miss second ($secondBounds)", secondBounds.contains(emptyRoot))
+        }
+        val emptyLocal = Offset(emptyRoot.x - tileBounds.left, emptyRoot.y - tileBounds.top)
+        composeRule.onAllNodesWithContentDescription("Calendar")[0]
+            .performTouchInput { longClick(emptyLocal) }
+        composeRule.waitForIdle()
+        composeRule.runOnIdle {
+            assertEquals(4, longClicks)
+            assertEquals(0, bodyClicks)
+            assertEquals(0, symbolClicks)
+            assertTrue("no short click on release", shortcutClicks.isEmpty())
+        }
+    }
+
+    @Test
+    fun shortTaps_stayTargetSpecific_withSharedLongPress() {
+        var bodyClicks = 0
+        var symbolClicks = 0
+        val shortcutClicks = mutableListOf<String>()
+        var longClicks = 0
+        composeRule.setContent {
+            LauncherTheme {
+                Box(Modifier.size(248.dp, 120.dp)) {
+                    AppTile(
+                        state = AppTileState(label = "Calendar", span = GridSpan(4, 2)),
+                        onBodyClick = { bodyClicks++ },
+                        onSymbolClick = { symbolClicks++ },
+                        onLongClick = { longClicks++ },
+                        pinnedShortcuts = listOf(
+                            PinnedTileShortcut("new-post", "New post"),
+                            PinnedTileShortcut("camera", "Camera"),
+                        ),
+                        onShortcutClick = { shortcutClicks.add(it) },
+                    )
+                }
+            }
+        }
+        composeRule.waitForIdle()
+
+        // Short tap on the app glyph routes to the symbol callback only.
+        composeRule.onNodeWithTag(APP_STRIP_GLYPH_TAG, useUnmergedTree = true)
+            .performTouchInput { click() }
+        composeRule.waitForIdle()
+        composeRule.runOnIdle {
+            assertEquals(1, symbolClicks)
+            assertEquals(0, bodyClicks)
+            assertEquals(0, longClicks)
+            assertTrue(shortcutClicks.isEmpty())
+        }
+
+        // Short tap on one shortcut routes to its own id only.
+        composeRule.onNodeWithContentDescription("New post, shortcut")
+            .performTouchInput { click() }
+        composeRule.waitForIdle()
+        composeRule.runOnIdle {
+            assertEquals(listOf("new-post"), shortcutClicks)
+            assertEquals(1, symbolClicks)
+            assertEquals(0, bodyClicks)
+            assertEquals(0, longClicks)
+        }
+
+        // Short tap on empty tile area routes to the body callback only.
+        val tileBounds = boundsInRoot(composeRule.onAllNodesWithContentDescription("Calendar")[0])
+        val appBounds = boundsInRoot(
+            composeRule.onNodeWithTag(APP_STRIP_GLYPH_TAG, useUnmergedTree = true),
+        )
+        val firstBounds = boundsInRoot(composeRule.onNodeWithContentDescription("New post, shortcut"))
+        val secondBounds = boundsInRoot(composeRule.onNodeWithContentDescription("Camera, shortcut"))
+        val emptyRoot = Offset(
+            tileBounds.center.x,
+            tileBounds.top + with(composeRule.density) { 4.dp.toPx() },
+        )
+        composeRule.runOnIdle {
+            assertFalse("empty probe must miss app ($appBounds)", appBounds.contains(emptyRoot))
+            assertFalse("empty probe must miss first ($firstBounds)", firstBounds.contains(emptyRoot))
+            assertFalse("empty probe must miss second ($secondBounds)", secondBounds.contains(emptyRoot))
+        }
+        val emptyLocal = Offset(emptyRoot.x - tileBounds.left, emptyRoot.y - tileBounds.top)
+        composeRule.onAllNodesWithContentDescription("Calendar")[0]
+            .performTouchInput { click(emptyLocal) }
+        composeRule.waitForIdle()
+        composeRule.runOnIdle {
+            assertEquals(1, bodyClicks)
+            assertEquals(1, symbolClicks)
+            assertEquals(listOf("new-post"), shortcutClicks)
+            assertEquals(0, longClicks)
         }
     }
 
