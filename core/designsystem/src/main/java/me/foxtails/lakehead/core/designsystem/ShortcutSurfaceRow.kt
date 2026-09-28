@@ -5,8 +5,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.defaultMinSize
-import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.BasicText
@@ -68,8 +67,10 @@ fun pinToggleDescription(label: String, isPinned: Boolean): String {
  * children are siblings, never nested clickables (extends the tile Body/AppSymbol
  * sibling rule):
  *
- * - RowLaunchZone: weight-filling [Row.clickable] (`onClick = onExecute`,
- *   [Role.Button]) with `semantics(mergeDescendants = true)` exposing [entry]'s label.
+ * - RowLaunchZone: horizontally weight-filling [Row.clickable]
+ *   (`onClick = onExecute`, [Role.Button]) with a fixed
+ *   [SHORTCUT_SURFACE_ROW_HEIGHT] height (no `fillMaxHeight` stretch) and
+ *   `semantics(mergeDescendants = true)` exposing [entry]'s label.
  *   Tapping executes the shortcut.
  * - PinToggle: 48dp [Box.clickable] (`onClick = onTogglePin`, [Role.Button]) with
  *   `semantics(mergeDescendants = true)` exposing [pinToggleDescription]. Tapping
@@ -92,15 +93,14 @@ fun ShortcutSurfaceRow(
     val scheme = MaterialTheme.colorScheme
     Row(
         modifier = modifier
-            .defaultMinSize(minHeight = 48.dp)
+            .height(SHORTCUT_SURFACE_ROW_HEIGHT.dp)
             .testTag(SHORTCUT_SURFACE_ROW_TAG),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Row(
             modifier = Modifier
                 .weight(1f)
-                .fillMaxHeight()
-                .defaultMinSize(minHeight = 48.dp)
+                .height(SHORTCUT_SURFACE_ROW_HEIGHT.dp)
                 .testTag(ROW_LAUNCH_ZONE_TAG)
                 .semantics(mergeDescendants = true) {
                     this.contentDescription = entry.label
@@ -194,6 +194,16 @@ const val ROW_LAUNCH_ZONE_TAG: String = "shortcut-row-launch-zone"
 
 /** Test tag on a row's pin toggle (pins/unpins without executing). */
 const val PIN_TOGGLE_TAG: String = "shortcut-pin-toggle"
+
+/**
+ * Shared fixed row height in dp.
+ *
+ * One constant sizes the outer row and the launch zone together, so rows never
+ * stretch to fill the popup: a one-shortcut popup hugs exactly one 56dp row
+ * and multi-row popups grow by whole rows. 56dp accommodates the 48dp pin
+ * target alongside the launch-zone label.
+ */
+const val SHORTCUT_SURFACE_ROW_HEIGHT: Int = 56
 
 /** Visual circle diameter of the pin toggle in dp. */
 private const val PIN_VISUAL_SIZE: Int = 32
