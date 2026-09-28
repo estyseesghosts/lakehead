@@ -73,8 +73,10 @@ import kotlin.math.abs
  *
  * [bottomClearancePx] reserves space for the floating nav pill / system-gesture inset at
  * the viewport bottom. It is owned by `:app` (resolved from Dp/WindowInsets there) and
- * consumed as a plain pixel count here so no Android object enters the grid: the usable
- * canvas height is `max(0, measured - bottomClearancePx)`.
+ * consumed as a plain pixel count here so no Android object enters the grid: the safe
+ * canvas height is `max(0, full - bottomClearancePx)`, and the scroll container extends
+ * the natural content by exactly this reserve (`max(full, natural + bottomClearancePx)`)
+ * so the lowest tile scrolls clear of the pill while tiles stay visible behind it.
  */
 data class HomeCanvasViewportStyle(
     val horizontalPaddingPx: Int = 0,
@@ -93,21 +95,25 @@ data class HomeCanvasViewportStyle(
 /**
  * Internal scrolling grid arrangement for one loaded home.
  *
- * - Geometry comes from the caller-supplied usable height ([usableHeightPx], the raw
- *   viewport minus [HomeCanvasViewportStyle.bottomClearancePx]) plus `BoxWithConstraints`/
- *   density measured width and [SquareCellGeometry.fromViewport] with the loaded state's
+ * - Geometry comes from the caller-supplied full height ([fullHeightPx], the raw
+ *   viewport) plus `BoxWithConstraints`/density measured width and
+ *   [SquareCellGeometry.fromViewport] with the loaded state's
  *   adapted `columns.count` used exactly (five is only the normal-phone reference, never
- *   a clamp). The grid is laid out at exactly the usable height so the scroll range is
- *   the exact overflow.
+ *   a clamp). The grid is laid out at exactly the full height so tiles render
+ *   continuously behind the floating pill; the safe height ([usableHeightPx], raw
+ *   minus [HomeCanvasViewportStyle.bottomClearancePx]) sizes only
+ *   fit/scrollability/rest math, so the scroll range is the exact safe overflow.
  * - Normal scrolling: the natural content height is the intrinsic signed occupied height
  *   (rows × cell + gaps with no trailing gap after the final cell); the container minimum
- *   is `max(natural, usable)` so short/exact-fit content fills the viewport with no tail.
- *   `verticalScroll` is enabled only when the exact overflow is positive (plus the
+ *   is `max(full, natural + clearance)` so short/exact-fit content fills the full
+ *   viewport with no tail and tall content trails a transparent reserve that lands
+ *   the lowest tile clear of the pill.
+ *   `verticalScroll` is enabled only when the exact safe overflow is positive (plus the
  *   active-edit and pager axis guards), and the Compose `ScrollState` is clamped to the
- *   new maximum on shrink and collapsed to zero when content fits.
+ *   new maximum on shrink and collapsed to zero when content fits the safe height.
  * - Transient scroll state is keyed by the loaded `requestedHomeId` so each home keeps its
  *   own position and a home switch resets scrolling.
- * - The visible [GridRowWindow] is derived from the scroll offset, measured viewport height,
+ * - The visible [GridRowWindow] is derived from the scroll offset, full viewport height,
  *   and row stride with checked/saturating `Long` arithmetic; the window plus [overscanRows]
  *   is passed to [WindowedSpanContainer], which owns overscan expansion and sparse selection.
  * - The loaded [GridVerticalExtent] is used only to derive a safe minimum content height;
@@ -176,6 +182,11 @@ internal fun HomeCanvasGrid(
     overscanRows: Long,
     viewportStyle: HomeCanvasViewportStyle,
     usableHeightPx: Int,
+    // A3 floating viewport: the raw full render height (scroll host, visible window
+    // and composition). The safe height ([usableHeightPx], raw minus clearance)
+    // keeps fit/scrollability/rest/edit-boundary math. Defaults to the safe height
+    // so callers that do not track the full viewport keep the exact prior behavior.
+    fullHeightPx: Int = usableHeightPx,
     modifier: Modifier = Modifier,
     onMoveTile: (ItemId, LogicalPosition, Long) -> Unit = { _, _, _ -> },
     onResizeTile: (ItemId, LogicalSpan) -> Unit = { _, _ -> },
@@ -234,6 +245,10 @@ internal fun HomeCanvasGrid(
 ) {
     require(overscanRows >= 0L) { "overscanRows must be non-negative" }
     require(usableHeightPx >= 0) { "usableHeightPx must be non-negative" }
+    require(fullHeightPx >= 0) { "fullHeightPx must be non-negative" }
+    require(usableHeightPx <= fullHeightPx) {
+        "usableHeightPx must not exceed fullHeightPx"
+    }
     // P0 stale-hold guard: the transient hold pair (active edit, wiggle
     // editing) lives inside BoxWithConstraints/key below, which
     // never composes when tiles are empty. Hoist a false emission + dispose
@@ -264,9 +279,11 @@ internal fun HomeCanvasGrid(
     BoxWithConstraints(modifier = modifier) {
         val density = LocalDensity.current
         val availableWidthPx = with(density) { maxWidth.roundToPx() }.coerceAtLeast(1)
-        // A3 normal viewport: the usable height is supplied by the caller (raw viewport
-        // minus bottom clearance); it is never re-measured here so Dp round-trips cannot
-        // skew the overflow math.
+        // A3 floating viewport: the full raw height hosts scrolling, the visible
+        // window and composition (tiles render behind the pill); the safe height
+        // (raw minus bottom clearance) keeps fit/scrollability/rest math. Neither
+        // is re-measured here so Dp round-trips cannot skew the overflow math.
+        val fullViewportPx = fullHeightPx
         val availableHeightPx = usableHeightPx
         val geometry = SquareCellGeometry.fromViewport(
             availableWidthPx = availableWidthPx,
@@ -476,7 +493,7 @@ internal fun HomeCanvasGrid(
             val rowOrigin = rendererRowOrigin(contentBounds)
             val window = visibleWindowFor(
                 scrollPx = scrollState.value,
-                viewportHeightPx = availableHeightPx,
+                viewportHeightPx = fullViewportPx,
                 rowStridePx = rowStridePx,
                 overscanRows = overscanRows,
                 rowOrigin = rowOrigin,
@@ -771,17 +788,23 @@ internal fun HomeCanvasGrid(
             LaunchedEffect(originYPx) {
                 tickOriginYLive = originYPx
             }
-            // A3 container minimum: committed content height or the usable viewport,
-            // whichever is larger, so short content fills the viewport (no tail)
-            // and tall content ends exactly at its last cell. While a MOVE drag
-            // is active the edit height sizes the container instead so the
-            // frontier rows are reachable; idle always uses committed.
+            // A3 floating container: the natural content height plus exactly the
+            // bottom clearance (`max(full, natural + clearance)`), so short content
+            // fills the full viewport (no tail), tall content trails a transparent
+            // reserve that scrolls the lowest tile clear of the pill, and tiles
+            // stay visible behind the pill with no opaque bottom spacer. While a
+            // MOVE drag is active the edit height sizes the container instead so
+            // the frontier rows are reachable; idle always uses committed.
             val layoutHeightPx = if (shouldUseEditLayout(moveActive, editFrontier)) {
                 naturalContentHeightPx
             } else {
                 committedNaturalHeightPx
             }
-            val minHeightPx = layoutHeightPx.coerceAtLeast(availableHeightPx)
+            val minHeightPx = contentContainerHeightPx(
+                naturalHeightPx = layoutHeightPx,
+                fullHeightPx = fullViewportPx,
+                bottomClearancePx = viewportStyle.bottomClearancePx,
+            )
             val children: List<SpanChild<ItemId>> = loaded.tiles.map { tile ->
                 val iconBitmap = iconsByIdentity[tile.appIdentity]
                 // W3 renderedSpan = preview ?: persisted: while RESIZE-dragging the
@@ -2396,6 +2419,34 @@ internal fun contentMinHeightPxSigned(
         }
         val height = Math.addExact(cells, gaps)
         if (height > Int.MAX_VALUE.toLong()) Int.MAX_VALUE else height.toInt()
+    } catch (e: ArithmeticException) {
+        Int.MAX_VALUE
+    }
+}
+
+/**
+ * Floating scroll-container height for the home canvas grid.
+ *
+ * `max(fullHeightPx, naturalHeightPx + bottomClearancePx)` with checked `Long`
+ * arithmetic, saturating to [Int.MAX_VALUE] instead of wrapping: short and
+ * exact-fit-safe content fills the full viewport (no tail), while taller content
+ * trails exactly the bottom clearance as a transparent reserve — no opaque bottom
+ * spacer — so the scroll range (`container - full`) equals the safe overflow
+ * `max(0, natural - safe)` and the lowest tile lands clear of the floating pill.
+ * Pure, framework-free and unit-testable.
+ */
+internal fun contentContainerHeightPx(
+    naturalHeightPx: Int,
+    fullHeightPx: Int,
+    bottomClearancePx: Int,
+): Int {
+    require(naturalHeightPx >= 0) { "naturalHeightPx must be non-negative" }
+    require(fullHeightPx >= 0) { "fullHeightPx must be non-negative" }
+    require(bottomClearancePx >= 0) { "bottomClearancePx must be non-negative" }
+    return try {
+        val withReserve = Math.addExact(naturalHeightPx.toLong(), bottomClearancePx.toLong())
+        val capped = withReserve.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+        maxOf(fullHeightPx, capped)
     } catch (e: ArithmeticException) {
         Int.MAX_VALUE
     }

@@ -3,7 +3,6 @@ package me.foxtails.lakehead.feature.home
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
@@ -56,12 +55,14 @@ import me.foxtails.lakehead.core.model.LogicalSpan
  * - A1 hold signal: [onTransientHoldChange] reports transient hold state owned by
  *   [HomeCanvasGrid] (active edit or wiggle editing) so the shell
  *   can gate pager swipe. Programmatic pill navigation is unaffected.
-+ * - A3 normal viewport: this canvas measures the raw height via BoxWithConstraints
-+ *   and hands HomeCanvasGrid the usable height (`max(0, measured - clearance)`) plus
-+ *   a matching layout height, so the pill/system-gesture reserve never covers the
-+ *   last row and the scroll range is the exact overflow. The clearance arrives as
-+ *   the plain pixel count HomeCanvasViewportStyle.bottomClearancePx (resolved by
-+ *   `:app`); no Android object enters the grid.
++ * - A3 floating viewport: this canvas measures the raw full height via
++ *   BoxWithConstraints and lays the grid out at exactly the full height
++ *   (fillMaxSize) so tiles render continuously behind the floating pill to
++ *   the bottom edge. The safe height (`max(0, raw - clearance)`) travels
++ *   alongside as a plain pixel count for fit/scrollability/rest math. The
++ *   clearance arrives as the plain pixel count
++ *   HomeCanvasViewportStyle.bottomClearancePx (resolved by `:app`); no
++ *   Android object enters the grid.
 + * - A2 tile-touch hold: [onPagerHoldChange] reports the per-press tile-origin
 + *   hold owned by [HomeCanvasGrid] (tile down until release) so a tile touch
 + *   never becomes a page swipe. Separate from the A1 hold; the shell ANDs both.
@@ -149,15 +150,16 @@ fun HomeCanvas(
         )
 
         is HomeRenderState.Loaded -> {
-            // A3 normal viewport: measure the raw height here and lay the grid out at
-            // exactly the usable height (raw minus the style's bottom clearance), so the
-            // pill/system-gesture reserve never covers the last row and the scroll range
-            // is the exact overflow. The grid consumes the usable height for all of its
-            // viewport math; the Dp conversion below only sizes the layout.
+            // A3 floating viewport: measure the raw full height here and lay the grid
+            // out at exactly the full height (fillMaxSize) so tiles render
+            // continuously behind the floating pill to the bottom edge. The safe
+            // height (raw minus the style's bottom clearance) travels alongside
+            // as plain pixels for fit/scrollability/rest math; no Android or
+            // inset object enters the grid.
             BoxWithConstraints(modifier = modifier.fillMaxSize()) {
                 val density = LocalDensity.current
                 val rawHeightPx = with(density) { maxHeight.roundToPx() }.coerceAtLeast(0)
-                val usableHeightPx = usableCanvasHeightPx(
+                val safeHeightPx = usableCanvasHeightPx(
                     rawHeightPx = rawHeightPx,
                     bottomClearancePx = viewportStyle.bottomClearancePx,
                 )
@@ -167,9 +169,9 @@ fun HomeCanvas(
                     onLaunchApp = onLaunchApp,
                     overscanRows = overscanRows,
                     viewportStyle = viewportStyle,
-                    usableHeightPx = usableHeightPx,
-                    modifier = Modifier.fillMaxWidth()
-                        .height(with(density) { usableHeightPx.toDp() }),
+                    usableHeightPx = safeHeightPx,
+                    fullHeightPx = rawHeightPx,
+                    modifier = Modifier.fillMaxSize(),
                     onMoveTile = onMoveTile,
                     onResizeTile = onResizeTile,
                     onRemoveTile = onRemoveTile,

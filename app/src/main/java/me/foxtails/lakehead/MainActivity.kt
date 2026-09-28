@@ -370,8 +370,16 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+@Suppress("DEPRECATION")
 private fun Activity.enterImmersiveMode() {
     WindowCompat.setDecorFitsSystemWindows(window, false)
+    // Genuine edge-to-edge: fully transparent bar backgrounds so no opaque
+    // system-bar color ever simulates the edge (the shell background supplies
+    // continuity). Bars stay hidden via the controller below; transparency only
+    // governs transient reveals. The setters are deprecated on API 35+ (there is
+    // no insets-controller replacement for the background itself), hence scoped.
+    window.statusBarColor = android.graphics.Color.TRANSPARENT
+    window.navigationBarColor = android.graphics.Color.TRANSPARENT
 
     WindowCompat.getInsetsController(
         window,
