@@ -494,8 +494,39 @@ class HomeRouteLoaderTest {
     }
 
     @Test
-    fun decodedIconSnapshotIsImmutableBoundedAndUsesInjectedDecoder() {
-        val imageA = "decoded-image"
+    fun reloadDistantValidRemainsAndContributesToExtentWithoutPositionChange() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val near = placement("near", appA).copy(position = LogicalPosition(0, 0))
+        val far = AppPlacement(
+            requestedHome, ItemId("far"), appB, LogicalPosition(0, 16), LogicalSpan(1, 1),
+            ItemAvailability.AVAILABLE,
+        )
+        var second = false
+        val repository = FakeRepository { _, _, _ ->
+            if (!second) LoadResult.Loaded(listOf(near)) else LoadResult.Loaded(listOf(near, far))
+        }
+        val loader = loader(repository, dispatcher)
+        loader.start(this)
+        advanceUntilIdle()
+        val first = loader.state.value as HomeRenderState.Loaded
+        assertEquals(listOf(ItemId("near")), first.tiles.map { it.itemId })
+        assertEquals(1L, first.extent.occupiedMaxRowExclusive)
+
+        second = true
+        loader.reload()
+        advanceUntilIdle()
+        val reloaded = loader.state.value as HomeRenderState.Loaded
+        // Distant valid tile remains, positions unchanged, extent contributes.
+        assertEquals(listOf(ItemId("near"), ItemId("far")), reloaded.tiles.map { it.itemId })
+        assertEquals(LogicalPosition(0, 0), reloaded.tiles[0].position)
+        assertEquals(LogicalPosition(0, 16), reloaded.tiles[1].position)
+        assertEquals(17L, reloaded.extent.occupiedMaxRowExclusive)
+        assertEquals(17L, reloaded.extent.totalScrollableRows)
+        loader.stop()
+    }
+
+    @Test
+    fun decodedIconSnapshotIsImmutableBoundedAndUsesInjectedDecoder() {        val imageA = "decoded-image"
         var decoded = 0
         val cache = DecodedHomeIconCache<String>(maxEntries = 1) {
             decoded++

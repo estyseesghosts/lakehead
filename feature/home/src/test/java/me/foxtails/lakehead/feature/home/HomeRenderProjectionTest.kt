@@ -550,4 +550,73 @@ class HomeRenderProjectionTest {
         )
         assertEquals(4L, loaded.extent.occupiedBottomRowExclusive)
     }
+
+    // ---- softlock: committed extent parity vs content bounds ----
+
+    @Test
+    fun extentParity_sparseMultiSpanNonZeroMin_matchesBoundsHeight() {
+        val a = identity("p0", "com.a", "A")
+        val b = identity("p0", "com.b", "B")
+        val placements = listOf(
+            placement("near", a, column = 0, row = 5),
+            placement("far", b, column = 1, row = 18, spanColumns = 2, spanRows = 2),
+        )
+        val viewport = inputs()
+        val extent = HomeRenderProjection.measureExtent(
+            placements,
+            viewport.viewportRows,
+            viewport.workingMarginRows,
+        )
+        // Height is maxExcl - min: far ends at row 20, min is 5 → 15 rows.
+        assertEquals(20L, extent.occupiedMaxRowExclusive)
+        assertEquals(5L, extent.occupiedMinRow)
+        assertEquals(15L, extent.occupiedHeightRows)
+        assertEquals(15L, extent.totalScrollableRows)
+        // Same height via the bounds policy (no second measurement).
+        val bounds = me.foxtails.lakehead.core.grid.GridContentBounds.contentBoundsOf(
+            placements.map {
+                me.foxtails.lakehead.core.grid.SignedGridPlacement(
+                    id = it.itemId,
+                    column = it.position.column,
+                    row = it.position.row,
+                    span = me.foxtails.lakehead.core.grid.GridSpan(
+                        it.span.columns,
+                        it.span.rows,
+                    ),
+                )
+            },
+            columns = 6,
+        )!!
+        assertEquals(
+            me.foxtails.lakehead.core.grid.GridContentBounds.contentHeightRows(bounds),
+            extent.occupiedHeightRows,
+        )
+    }
+
+    @Test
+    fun extentParity_empty_isZero() {
+        val extent = HomeRenderProjection.measureExtent(emptyList(), 10L, 0L)
+        assertEquals(0L, extent.occupiedMaxRowExclusive)
+        assertEquals(0L, extent.totalScrollableRows)
+        assertEquals(0L, extent.occupiedHeightRows)
+    }
+
+    @Test
+    fun reload_distantValid_contributesToExtentWithoutMovingTiles() {
+        // A reload that adds a distant valid tile keeps every position and
+        // grows the committed extent to include it (scroll recovery relies on
+        // the committed range, never on moving tiles).
+        val a = identity("p0", "com.a", "A")
+        val b = identity("p0", "com.b", "B")
+        val before = listOf(placement("near", a, column = 0, row = 0))
+        val after = before + placement("far", b, column = 0, row = 16)
+        val viewport = inputs()
+        val first = HomeRenderProjection.project(homeId, before, mapOf(a to metadata("A")), viewport)
+        val second = HomeRenderProjection.project(homeId, after, mapOf(a to metadata("A"), b to metadata("B")), viewport)
+        assertEquals(LogicalPosition(0, 0), second.tiles[0].position)
+        assertEquals(LogicalPosition(0, 16), second.tiles[1].position)
+        assertEquals(1L, first.extent.occupiedMaxRowExclusive)
+        assertEquals(17L, second.extent.occupiedMaxRowExclusive)
+        assertEquals(17L, second.extent.totalScrollableRows)
+    }
 }

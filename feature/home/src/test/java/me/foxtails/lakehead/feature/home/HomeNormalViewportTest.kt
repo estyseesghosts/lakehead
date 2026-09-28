@@ -160,4 +160,53 @@ class HomeNormalViewportTest {
         assertEquals(108L, rest?.scrollRangePx)
         assertTrue(rest?.scrollable ?: false)
     }
+
+    @Test
+    fun onePixelOverflow_scrollsExactlyOnePixel() {
+        // Committed range is max(0, height - usable): a 1px surplus scrolls 1px.
+        val extent = GridVerticalExtent(
+            occupiedBottomRowExclusive = 17L,
+            totalScrollableRows = 17L,
+        )
+        // 17 rows × 100 + 16 × 8 = 1828; usable 1827 → range 1.
+        assertEquals(1, committedScrollMaxPx(extent, 100, 8, 1827))
+        val rest = signedRestFor(1827, 1828, 108L)
+        assertEquals(1L, rest?.scrollRangePx)
+        assertTrue(rest?.scrollable ?: false)
+    }
+
+    @Test
+    fun multiStrideOverflow_rangeIsExactSurplus() {
+        // 20 rows × 100 + 19 × 8 = 2152; usable 1720 → range 432 (4 strides).
+        val extent = GridVerticalExtent(
+            occupiedBottomRowExclusive = 20L,
+            totalScrollableRows = 20L,
+        )
+        assertEquals(432, committedScrollMaxPx(extent, 100, 8, 1720))
+        val rest = signedRestFor(1720, 2152, 108L)
+        assertEquals(432L, rest?.scrollRangePx)
+    }
+
+    @Test
+    fun bottomClearance_usableHeightDrivesCommittedRange() {
+        // Raw 2000px viewport with 280px pill/gesture clearance → usable 1720.
+        // Same 1828px content → committed range 108 (pill never covers last row).
+        val usable = usableCanvasHeightPx(rawHeightPx = 2000, bottomClearancePx = 280)
+        assertEquals(1720, usable)
+        val extent = GridVerticalExtent(
+            occupiedBottomRowExclusive = 17L,
+            totalScrollableRows = 17L,
+        )
+        assertEquals(108, committedScrollMaxPx(extent, 100, 8, usable))
+    }
+
+    @Test
+    fun committedMax_shortContent_isZero() {
+        val extent = GridVerticalExtent(
+            occupiedBottomRowExclusive = 2L,
+            totalScrollableRows = 2L,
+        )
+        // 2 × 100 + 8 = 208 in usable 1800 → fits, range 0.
+        assertEquals(0, committedScrollMaxPx(extent, 100, 8, 1800))
+    }
 }

@@ -137,8 +137,9 @@ data class HomeCanvasViewportStyle(
  *   when it differs from the origin span, staying in edit mode either way.
  *   Routing is decided once at drag start: a MOVE drag never promotes to RESIZE
  *   mid-gesture (gated for W4). Persistence itself stays
- *   with the caller: this grid only reports the committed [ItemId] and [LogicalPosition] or
- *   [LogicalSpan].
+ *   with the caller: this grid only reports the committed [ItemId],
+ *   [LogicalPosition] and per-attempt request id (carried back in the
+ *   commit-result ack) or [LogicalSpan].
  * - B3: a MOVE drag owns a transient edit frontier (normal boundary plus a
  *   bounded margin, extended one margin per bottom-edge auto-scroll step via
  *   `core:grid` policy). Edge proximity auto-scrolls the `ScrollState` (top
@@ -176,7 +177,7 @@ internal fun HomeCanvasGrid(
     viewportStyle: HomeCanvasViewportStyle,
     usableHeightPx: Int,
     modifier: Modifier = Modifier,
-    onMoveTile: (ItemId, LogicalPosition) -> Unit = { _, _ -> },
+    onMoveTile: (ItemId, LogicalPosition, Long) -> Unit = { _, _, _ -> },
     onResizeTile: (ItemId, LogicalSpan) -> Unit = { _, _ -> },
     onRemoveTile: (ItemId) -> Unit = {},
     // B4 edit-menu rows: rank-ordered shortcut entries for the currently
@@ -224,6 +225,12 @@ internal fun HomeCanvasGrid(
     // Defaults to true so callers that do not track pager visibility keep the
     // exact prior behavior. Supplied by the shell; owned here.
     isVisible: Boolean = true,
+    // Softlock ack: commit-result for the last reported MOVE, supplied by the
+    // caller after HomeRouteLoader.commitMove returns. Accepted retains the
+    // pending lease until the projection reflects it; rejected/not-found
+    // clears the lease + frontier. Scroll range stays committed-bounds either
+    // way. Null means no ack has arrived.
+    moveCommitAck: HomeMoveCommitAck? = null,
 ) {
     require(overscanRows >= 0L) { "overscanRows must be non-negative" }
     require(usableHeightPx >= 0) { "usableHeightPx must be non-negative" }
@@ -321,6 +328,12 @@ internal fun HomeCanvasGrid(
             // B3 pending-commit lease: the release-committed move target retained
             // until loaded.tiles shows it. Gates another MOVE while unsatisfied.
             var pendingMove by remember { mutableStateOf<PendingMoveCommit?>(null) }
+            // P1 attempt sequence: each reported MOVE takes the next id so the
+            // pending lease and the caller's commit-result ack name the exact
+            // attempt. Equal item/position retries are distinct acks (each
+            // retriggers the ack effect below) and a stale ack for an older
+            // attempt never clears a newer lease.
+            var moveRequestSeq by remember { mutableStateOf(0L) }
             // B3 edge auto-scroll: latest viewport-local pointer position during
             // a MOVE drag (null when no MOVE drag is active). Both axes are
             // retained so the stationary ticker below can remap the held
@@ -424,13 +437,22 @@ internal fun HomeCanvasGrid(
             }
             val rowStridePx: Long =
                 geometry.cellSizePx.toLong() + geometry.rowGapPx.toLong()
+            // Softlock committed extent: validated against all loaded placements
+            // (invalid falls back to a remeasure with the same grid policy);
+            // tiles are never moved/dropped for scroll recovery.
+            val committedExtent = committedExtentOrRemeasured(
+                loadedExtent = loaded.extent,
+                tiles = loaded.tiles,
+                usableHeightPx = availableHeightPx,
+                rowStridePx = rowStridePx,
+            )
             // A3 normal-mode legality bound: the signed occupied bottom or the usable
             // viewport rows, whichever is larger (never a working margin — the edit
             // frontier that extends below belongs to B3). Existing tiles always stay
             // in-bounds and empty visible rows stay draggable-to; tall content cannot
             // be dragged below its last row until the frontier lands.
             val rows = normalLegalityRows(
-                extent = loaded.extent,
+                extent = committedExtent,
                 usableHeightPx = availableHeightPx,
                 rowStridePx = rowStridePx,
             )
@@ -462,29 +484,37 @@ internal fun HomeCanvasGrid(
             // A3 natural content height: intrinsic signed occupied rows × cell plus
             // inter-row gaps, with no trailing gap after the final cell. Never
             // inflated to the viewport here; the container minimum below does that.
-            // B3: while the transient frontier is retained, the edit-only layout
-            // extent (loaded extent + frontier) sizes the content height, rest,
-            // scroll range and container minimum instead; the signed row origin
-            // above still comes from the real tiles only (no fake tiles).
-            val layoutEditRows = editFrontier?.let { editLayoutRows(loaded.extent, it) }
-            val naturalContentHeightPx = if (layoutEditRows != null) {
-                editContentHeightPx(
-                    layoutRows = layoutEditRows,
-                    cellSizePx = geometry.cellSizePx,
-                    rowGapPx = geometry.rowGapPx,
-                )
-            } else {
-                contentMinHeightPxSigned(
-                    extent = loaded.extent,
-                    cellSizePx = geometry.cellSizePx,
-                    rowGapPx = geometry.rowGapPx,
-                )
-            }
-            val rest = signedRestFor(
+            // Softlock: committed geometry (loaded.extent + usable height) owns
+            // the idle range; the transient frontier sizes the layout only while
+            // a MOVE drag is active (never RESIZE, never idle — a retained valid
+            // pending lease gates entry but must not inflate the idle range).
+            val moveActive = active?.mode == EditMode.MOVE
+            val committedNaturalHeightPx = contentMinHeightPxSigned(
+                extent = committedExtent,
+                cellSizePx = geometry.cellSizePx,
+                rowGapPx = geometry.rowGapPx,
+            )
+            val naturalContentHeightPx = contentHeightForLayout(
+                extent = committedExtent,
+                frontier = editFrontier,
+                moveActive = moveActive,
+                cellSizePx = geometry.cellSizePx,
+                rowGapPx = geometry.rowGapPx,
+            )
+            val committedRest = signedRestFor(
                 viewportHeightPx = availableHeightPx,
-                contentHeightPx = naturalContentHeightPx,
+                contentHeightPx = committedNaturalHeightPx,
                 rowStridePx = rowStridePx,
             )
+            val rest = if (shouldUseEditLayout(moveActive, editFrontier)) {
+                signedRestFor(
+                    viewportHeightPx = availableHeightPx,
+                    contentHeightPx = naturalContentHeightPx,
+                    rowStridePx = rowStridePx,
+                )
+            } else {
+                committedRest
+            }
             // G4: transient viewport state holder, reconciled when the rest
             // changes (resize, column adaptation, or extent update). The
             // viewport tracks the grid origin, scroll offset, and scroll range;
@@ -526,16 +556,37 @@ internal fun HomeCanvasGrid(
                 val retained = retainedPendingLease(loaded.tiles, pending)
                 if (pending != null && retained == null) {
                     pendingMove = null
-                    if (editFrontier != null) {
-                        editFrontier = initEditFrontier(loaded.extent, availableHeightPx, rowStridePx)
+                    // Softlock: a satisfied load drops the transient extra. Only
+                    // re-init while a MOVE is still active; an idle grid stays on
+                    // committed geometry regardless of the (now cleared) lease.
+                    if (editFrontier != null && active?.mode == EditMode.MOVE) {
+                        editFrontier = initEditFrontier(committedExtent, availableHeightPx, rowStridePx)
+                    } else {
+                        editFrontier = null
                     }
                     return@LaunchedEffect
                 }
                 val current = editFrontier ?: return@LaunchedEffect
-                if (pending != null) {
-                    editFrontier = rebaseEditFrontier(current, loaded.extent, availableHeightPx, rowStridePx)
+                // Idle frontier never sizes the range, but an in-flight MOVE keeps
+                // the larger boundary so growth is honored without shrinking.
+                if (active?.mode == EditMode.MOVE) {
+                    editFrontier = rebaseEditFrontier(current, committedExtent, availableHeightPx, rowStridePx)
                 } else {
-                    editFrontier = rebaseEditFrontier(current, loaded.extent, availableHeightPx, rowStridePx)
+                    editFrontier = null
+                }
+            }
+            // Softlock ack: a rejected/not-found commit clears the lease + frontier
+            // for the matching pending attempt id; an accepted ack retains the
+            // lease until the projection reflects it. The ack carries the
+            // per-attempt request id, so equal item/position retries are
+            // distinct keys and each retriggers this effect. Range stays
+            // committed either way.
+            LaunchedEffect(moveCommitAck) {
+                val ack = moveCommitAck ?: return@LaunchedEffect
+                val pending = pendingMove ?: return@LaunchedEffect
+                if (shouldClearLeaseOnAck(pending, ack)) {
+                    pendingMove = null
+                    editFrontier = null
                 }
             }
             // B3 edge auto-scroll continuation for a stationary hold: while a
@@ -549,6 +600,7 @@ internal fun HomeCanvasGrid(
                 HomeEditFrontier.AUTO_SCROLL_EDGE_DP.dp.roundToPx()
             }.coerceAtLeast(1)
             val loadedSnapshot = rememberUpdatedState(loaded)
+            val committedExtentState = rememberUpdatedState(committedExtent)
             val viewportHeightSnapshot = rememberUpdatedState(availableHeightPx)
             val tickSessionState = rememberUpdatedState(editSession)
             // P1/P2: the ticker outlives the composition that launched it, so
@@ -590,14 +642,14 @@ internal fun HomeCanvasGrid(
                                 tickSession.candidateSpan.rows,
                             )
                         } ?: initEditFrontier(
-                            snapshotLoaded.extent,
+                            committedExtentState.value,
                             snapshotHeight,
                             snapshotStride,
                         )
                         editFrontier = grown
                         val snapshotGeometry = tickGeometryState.value
                         val editMax = editScrollMaxPx(
-                            layoutRows = editLayoutRows(snapshotLoaded.extent, grown),
+                            layoutRows = editLayoutRows(committedExtentState.value, grown),
                             cellSizePx = snapshotGeometry.cellSizePx,
                             rowGapPx = snapshotGeometry.rowGapPx,
                             viewportHeightPx = snapshotHeight,
@@ -719,10 +771,17 @@ internal fun HomeCanvasGrid(
             LaunchedEffect(originYPx) {
                 tickOriginYLive = originYPx
             }
-            // A3 container minimum: natural content height or the usable viewport,
+            // A3 container minimum: committed content height or the usable viewport,
             // whichever is larger, so short content fills the viewport (no tail)
-            // and tall content ends exactly at its last cell.
-            val minHeightPx = naturalContentHeightPx.coerceAtLeast(availableHeightPx)
+            // and tall content ends exactly at its last cell. While a MOVE drag
+            // is active the edit height sizes the container instead so the
+            // frontier rows are reachable; idle always uses committed.
+            val layoutHeightPx = if (shouldUseEditLayout(moveActive, editFrontier)) {
+                naturalContentHeightPx
+            } else {
+                committedNaturalHeightPx
+            }
+            val minHeightPx = layoutHeightPx.coerceAtLeast(availableHeightPx)
             val children: List<SpanChild<ItemId>> = loaded.tiles.map { tile ->
                 val iconBitmap = iconsByIdentity[tile.appIdentity]
                 // W3 renderedSpan = preview ?: persisted: while RESIZE-dragging the
@@ -1200,7 +1259,7 @@ internal fun HomeCanvasGrid(
                         // B3/P2: MOVE-only frontier init lives here, after routing
                         // confirms MOVE — never on entry, never for RESIZE.
                         if (shouldInitMoveFrontier(route, editFrontier)) {
-                            editFrontier = initEditFrontier(loaded.extent, availableHeightPx, rowStridePx)
+                            editFrontier = initEditFrontier(committedExtent, availableHeightPx, rowStridePx)
                         }
                     }
                     val isOnHandle = route == DownDragRoute.RESIZE
@@ -1513,7 +1572,7 @@ internal fun HomeCanvasGrid(
                                 val grown = if (liveSession != null && probeResult is MoveCellResult.Valid) {
                                     advanceFrontierForMove(
                                         editFrontier ?: initEditFrontier(
-                                            loaded.extent,
+                                            committedExtent,
                                             availableHeightPx,
                                             rowStridePx,
                                         ),
@@ -1526,7 +1585,7 @@ internal fun HomeCanvasGrid(
                                 if (grown != null) {
                                     editFrontier = grown
                                     val editMax = editScrollMaxPx(
-                                        layoutRows = editLayoutRows(loaded.extent, grown),
+                                        layoutRows = editLayoutRows(committedExtent, grown),
                                         cellSizePx = geometry.cellSizePx,
                                         rowGapPx = geometry.rowGapPx,
                                         viewportHeightPx = availableHeightPx,
@@ -1590,11 +1649,13 @@ internal fun HomeCanvasGrid(
                         val final = moveRelease as? HomeEditSession.Active
                         // W4: skip commit when stolen (zero-write on cancel).
                         // B3: release is the sole commit — auto-scroll steps above
-                        // never call onMoveTile. A commit leases the frontier to
-                        // the pending target until loaded reflects it; a stolen,
-                        // hidden, or cancelled drag discards the frontier; a
-                        // no-move release retains the bounded transient until
-                        // exit/cancel. Only an explicit lift commits.
+                        // never call onMoveTile. A valid commit leases the frontier
+                        // entry gate to the pending target until loaded reflects
+                        // it (idle range stays committed); every no-commit end —
+                        // cancel, steal, hide, stale break, invalid or no-move
+                        // lift — discards the frontier with zero writes and
+                        // clamps back to the committed range. Only an explicit
+                        // lift commits.
                         val commit = if (moveCancelled) {
                             null
                         } else {
@@ -1612,8 +1673,9 @@ internal fun HomeCanvasGrid(
                         // the pending lease with the frontier; a pager-hide or
                         // stale break discards only the frontier/gesture and
                         // retains the lease for the rebase reconcile below
-                        // (hide is not a failure). A no-move lift retains the
-                        // bounded transient until exit/cancel.
+                        // (hide is not a failure). A no-commit lift (invalid or
+                        // no-move) discards the frontier with zero writes; a
+                        // valid pending lease never inflates the idle range.
                         val clearPendingOnExit = shouldClearPendingLeaseOnExit(
                             cancelled = moveCancelled,
                             stolen = moveStolen,
@@ -1622,13 +1684,26 @@ internal fun HomeCanvasGrid(
                             editFrontier = null
                             pendingMove = null
                         } else if (final != null && commit != null) {
-                            onMoveTile(final.itemId, commit)
-                            pendingMove = PendingMoveCommit(final.itemId, commit)
+                            moveRequestSeq += 1
+                            val attemptId = moveRequestSeq
+                            onMoveTile(final.itemId, commit, attemptId)
+                            pendingMove = PendingMoveCommit(final.itemId, commit, attemptId)
                         } else if (moveStolen || !isVisibleState.value || !moveCompletedByUp) {
                             editFrontier = null
                             if (clearPendingOnExit) {
                                 pendingMove = null
                             }
+                        } else if (shouldDiscardFrontierOnMoveEnd(
+                                commit = commit,
+                                cancelled = moveCancelled,
+                                stolen = moveStolen,
+                                isVisible = isVisibleState.value,
+                                completedByUp = moveCompletedByUp,
+                            )
+                        ) {
+                            // No-commit lift (invalid candidate or no-move):
+                            // zero-write discard to the committed range.
+                            editFrontier = null
                         }
                         currentSession = HomeEditSession.Idle
                         editSession = currentSession
@@ -1641,9 +1716,16 @@ internal fun HomeCanvasGrid(
                     }
                 }
             }
-            // A3: vertical scroll only on exact overflow (plus the active-edit and
-            // horizontal-pager guards); short/exact-fit content never scrolls.
-            val canNormalScroll = viewport.scrollRangePx > 0L
+            // A3: vertical scroll only on exact committed overflow (plus the
+            // active-edit and horizontal-pager guards); short/exact-fit content
+            // never scrolls. Idle uses the committed range even with a retained
+            // valid pending lease; only an active MOVE sizes from the frontier.
+            val committedScrollable = (committedRest?.scrollRangePx ?: 0L) > 0L
+            val canNormalScroll = if (moveActive) {
+                viewport.scrollRangePx > 0L
+            } else {
+                committedScrollable
+            }
             Box(
                 modifier = Modifier
                     .verticalScroll(
@@ -2603,4 +2685,192 @@ internal fun cornerControlOffset(
     require(controlSizePx > 0) { "controlSizePx must be positive" }
     val top = if (corner == ControlCorner.TOP_RIGHT) tileBounds.top else tileBounds.bottom
     return IntOffset(tileBounds.right - controlSizePx / 2, top - controlSizePx / 2)
+}
+
+/**
+ * Softlock committed-vs-active layout separation.
+ *
+ * The committed extent owns the idle scroll range; the transient MOVE frontier
+ * sizes the layout only while a MOVE drag is active (never RESIZE, never idle).
+ * A retained valid pending lease gates MOVE entry but never inflates the idle
+ * range. Pure, framework-free; legality stays owned by `core:grid`.
+ */
+internal fun shouldUseEditLayout(
+    moveActive: Boolean?,
+    frontier: GridVerticalLayout.EditBoundary?,
+): Boolean = moveActive == true && frontier != null
+
+/**
+ * Layout content height for the current edit state: the edit-only height
+ * (loaded extent + frontier) while a MOVE drag is active, otherwise the
+ * committed intrinsic height. No viewport inflation here; the caller applies
+ * the container minimum. Pure, framework-free.
+ */
+internal fun contentHeightForLayout(
+    extent: GridVerticalExtent,
+    frontier: GridVerticalLayout.EditBoundary?,
+    moveActive: Boolean?,
+    cellSizePx: Int,
+    rowGapPx: Int,
+): Int {
+    require(cellSizePx > 0) { "cellSizePx must be positive" }
+    require(rowGapPx >= 0) { "rowGapPx must be non-negative" }
+    if (!shouldUseEditLayout(moveActive, frontier)) {
+        return contentMinHeightPxSigned(extent, cellSizePx, rowGapPx)
+    }
+    return editContentHeightPx(
+        layoutRows = editLayoutRows(extent, frontier),
+        cellSizePx = cellSizePx,
+        rowGapPx = rowGapPx,
+    )
+}
+
+/**
+ * Committed scroll maximum in pixels: `max(0, committedHeight - usableHeight)`
+ * using the intrinsic height (`maxExcl - min`), so the final tile bottom lands
+ * at/above the usable bottom with no tail. Saturates to [Int]. Pure,
+ * framework-free.
+ */
+internal fun committedScrollMaxPx(
+    extent: GridVerticalExtent,
+    cellSizePx: Int,
+    rowGapPx: Int,
+    viewportHeightPx: Int,
+): Int {
+    require(cellSizePx > 0) { "cellSizePx must be positive" }
+    require(rowGapPx >= 0) { "rowGapPx must be non-negative" }
+    require(viewportHeightPx >= 0) { "viewportHeightPx must be non-negative" }
+    val committedHeight = contentMinHeightPxSigned(extent, cellSizePx, rowGapPx).toLong()
+    return Math.subtractExact(committedHeight, viewportHeightPx.toLong())
+        .coerceIn(0L, Int.MAX_VALUE.toLong()).toInt()
+}
+
+/**
+ * Clamps a real scroll offset to the committed range (Int capped): preserves
+ * in-range values, clamps on shrink, rests at zero when the range is zero.
+ * Feeds the actual offset, never a shadow. Pure, framework-free.
+ */
+internal fun clampScrollToCommitted(actualPx: Int, committedMaxPx: Int): Int {
+    require(actualPx >= 0) { "actualPx must be non-negative" }
+    require(committedMaxPx >= 0) { "committedMaxPx must be non-negative" }
+    if (committedMaxPx == 0) return 0
+    return actualPx.coerceIn(0, committedMaxPx)
+}
+
+/**
+ * Whether a MOVE end discards the transient frontier: every no-commit end
+ * (cancel, steal, hide, stale break without lift, invalid or no-move lift)
+ * discards with zero writes; only a valid lifted commit retains the frontier
+ * lease. Pure, framework-free.
+ */
+internal fun shouldDiscardFrontierOnMoveEnd(
+    commit: LogicalPosition?,
+    cancelled: Boolean,
+    stolen: Boolean,
+    isVisible: Boolean,
+    completedByUp: Boolean,
+): Boolean {
+    if (cancelled || stolen || !isVisible || !completedByUp) return true
+    return commit == null
+}
+
+/**
+ * Commit-result ack for a reported MOVE, in feature-owned types (no
+ * repository/result types cross into `:feature:home`).
+ *
+ * [accepted] is true when the repository accepted the move (lease retained
+ * until the projection reflects it) and false for rejected/not-found/wrong-home
+ * (lease + frontier clear).
+ *
+ * [requestId] names the exact move attempt this ack answers (assigned by the
+ * grid per attempt and echoed back by `:app`). Equal item/position acks for
+ * different attempts are distinct values so each retriggers ack handling;
+ * only the ack naming the pending attempt's id clears its lease.
+ */
+data class HomeMoveCommitAck(
+    val itemId: ItemId,
+    val position: LogicalPosition,
+    val accepted: Boolean,
+    val requestId: Long = 0L,
+)
+
+/**
+ * Whether a commit-result ack clears the pending MOVE lease: only a
+ * rejected/not-found ack naming the pending attempt's [requestId] (with
+ * matching item and position) clears; an accepted ack retains the lease
+ * until the projection reflects it, and a stale ack for another attempt —
+ * even with an equal item/position — clears nothing. Pure, framework-free.
+ */
+internal fun shouldClearLeaseOnAck(pending: PendingMoveCommit?, ack: HomeMoveCommitAck?): Boolean {
+    if (pending == null || ack == null) return false
+    if (ack.requestId != pending.requestId) return false
+    if (ack.itemId != pending.itemId || ack.position != pending.position) return false
+    return !ack.accepted
+}
+
+/**
+ * Whether the loaded extent is consistent with all loaded tiles (parity with
+ * [GridContentBounds]): the height count equals `maxExcl - min` and matches a
+ * fresh [GridVerticalLayout.measure] over the tiles. Empty tiles require a
+ * zero extent. Pure, framework-free; the remeasure below uses the same grid
+ * policy, never a second one.
+ */
+internal fun isExtentParityOk(extent: GridVerticalExtent, tiles: List<HomeRenderTile>): Boolean {
+    if (tiles.isEmpty()) {
+        return extent.totalScrollableRows == 0L &&
+            extent.occupiedHeightRows == 0L &&
+            extent.occupiedMaxRowExclusive == extent.occupiedMinRow
+    }
+    return try {
+        val placements = tiles.map { tile ->
+            GridPlacement(
+                id = tile.itemId,
+                position = GridPosition(tile.position.column, tile.position.row),
+                span = GridSpan(tile.span.columns, tile.span.rows),
+            )
+        }
+        // Viewport/margin args do not affect normal intrinsic measurement;
+        // any positive viewport with non-negative margin validates the call.
+        val remeasured = GridVerticalLayout.measure(
+            placements = placements,
+            viewportRows = 1L,
+            workingMarginRows = 0L,
+        )
+        remeasured == extent
+    } catch (e: RuntimeException) {
+        false
+    }
+}
+
+/**
+ * Committed extent for scroll/legality math: the loaded extent when it matches
+ * all loaded placements, otherwise a remeasure from those placements with the
+ * same `core:grid` policy. Tiles are never moved, dropped, compacted or reset;
+ * only the measurement used for range math falls back. Pure, framework-free.
+ */
+internal fun committedExtentOrRemeasured(
+    loadedExtent: GridVerticalExtent,
+    tiles: List<HomeRenderTile>,
+    usableHeightPx: Int,
+    rowStridePx: Long,
+): GridVerticalExtent {
+    require(usableHeightPx >= 0) { "usableHeightPx must be non-negative" }
+    require(rowStridePx > 0L) { "rowStridePx must be positive" }
+    if (isExtentParityOk(loadedExtent, tiles)) return loadedExtent
+    val placements = tiles.map { tile ->
+        GridPlacement(
+            id = tile.itemId,
+            position = GridPosition(tile.position.column, tile.position.row),
+            span = GridSpan(tile.span.columns, tile.span.rows),
+        )
+    }
+    return try {
+        GridVerticalLayout.measure(
+            placements = placements,
+            viewportRows = viewportRowsFor(usableHeightPx, rowStridePx),
+            workingMarginRows = 0L,
+        )
+    } catch (e: RuntimeException) {
+        loadedExtent
+    }
 }

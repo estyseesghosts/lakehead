@@ -35,7 +35,8 @@ import me.foxtails.lakehead.core.model.LogicalSpan
  *   rendered here; [onRequestDefaultHome] is retained (currently unused) for a future
  *   settings entry so callers in `:app` keep a stable signature.
  * - Edit mode is transient presentation state owned by [HomeCanvasGrid]: [onMoveTile]
- *   reports a drag-committed [ItemId] and [LogicalPosition] to the caller, [onResizeTile]
+ *   reports a drag-committed [ItemId], [LogicalPosition] and per-attempt request id
+ *   to the caller, [onResizeTile]
  *   reports a resize-committed [ItemId] and [LogicalSpan], and [onRemoveTile] reports a
  *   remove-tap [ItemId]. The caller owns persistence. This composable performs no
  *   writes itself.
@@ -84,7 +85,7 @@ fun HomeCanvas(
     modifier: Modifier = Modifier,
     overscanRows: Long = 1L,
     viewportStyle: HomeCanvasViewportStyle = HomeCanvasViewportStyle(),
-    onMoveTile: (ItemId, LogicalPosition) -> Unit = { _, _ -> },
+    onMoveTile: (ItemId, LogicalPosition, Long) -> Unit = { _, _, _ -> },
     onResizeTile: (ItemId, LogicalSpan) -> Unit = { _, _ -> },
     onRemoveTile: (ItemId) -> Unit = {},
     surfaceEntries: List<ShortcutSurfaceEntry> = emptyList(),
@@ -102,6 +103,13 @@ fun HomeCanvas(
     // pager shows another page (the grid stays composed for adjacent pages),
     // discarding the transient edit with zero writes. Defaults to true.
     isVisible: Boolean = true,
+    // Softlock ack: commit-result for a reported MOVE (feature-owned
+    // [HomeMoveCommitAck]; no repository types cross the boundary). The ack
+    // names the attempt's request id so equal retries retrigger handling.
+    // Accepted retains the pending lease until the projection reflects it;
+    // rejected/not-found clears the lease + frontier. Idle range stays
+    // committed-bounds either way.
+    moveCommitAck: HomeMoveCommitAck? = null,
 ) {
     require(overscanRows >= 0L) { "overscanRows must be non-negative" }
     // P0 stale-hold guard: Loading/NotFound never compose HomeCanvasGrid, so
@@ -175,6 +183,7 @@ fun HomeCanvas(
                     onTransientHoldChange = onTransientHoldChange,
                     onPagerHoldChange = onPagerHoldChange,
                     isVisible = isVisible,
+                    moveCommitAck = moveCommitAck,
                 )
             }
         }

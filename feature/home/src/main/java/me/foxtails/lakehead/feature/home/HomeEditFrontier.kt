@@ -172,10 +172,17 @@ fun editScrollMaxPx(
  * tile set reflects it. While unsatisfied, another MOVE must not start (the
  * frontier stays leased to the in-flight commit); once satisfied, the caller
  * recomputes the frontier and discards the transient extra.
+ *
+ * Each move attempt carries a unique [requestId] (assigned by the grid from a
+ * monotonically increasing sequence) so the commit-result ack can name the
+ * exact attempt it answers: equal item/position acks for different attempts
+ * are distinct values and each retriggers ack handling, while a stale ack
+ * naming an older attempt never clears a newer lease.
  */
 data class PendingMoveCommit(
     val itemId: ItemId,
     val position: LogicalPosition,
+    val requestId: Long = 0L,
 )
 
 /**

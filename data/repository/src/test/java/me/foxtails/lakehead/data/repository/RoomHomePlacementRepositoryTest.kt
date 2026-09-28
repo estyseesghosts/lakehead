@@ -264,8 +264,7 @@ class RoomHomePlacementRepositoryTest {
         assertEquals(beforeCount, dao.homeCount())
     }
 
-    @Test fun ensureHomeThenPlaceSucceedsInsteadOfNotFound() {
-        val homeId = HomeId("fresh")
+    @Test fun ensureHomeThenPlaceSucceedsInsteadOfNotFound() {        val homeId = HomeId("fresh")
         val itemId = ItemId("item")
         val identity = identity()
         assertEquals(
@@ -275,6 +274,29 @@ class RoomHomePlacementRepositoryTest {
         assertTrue(repository.ensureHome(homeId))
         val result = repository.place(homeId, itemId, identity, LogicalPosition(0, 0), LogicalSpan(1, 1), 6, 10)
         assertTrue(result is MutationResult.Accepted)
+    }
+
+    @Test fun loadIsReadOnlyAndReloadDistantValidRemains() {
+        seedHome("home")
+        val near = placement("home", "near", 0)
+        seed(near)
+        val before = snapshot()
+        val first = repository.load(HomeId("home"), 6, 10) as LoadResult.Loaded
+        assertEquals(listOf(near), first.placements)
+        // Load performs zero writes.
+        assertEquals(before, snapshot())
+
+        val far = AppPlacement(
+            HomeId("home"), ItemId("far"), identity(),
+            LogicalPosition(0, 16), LogicalSpan(1, 1), ItemAvailability.AVAILABLE,
+        )
+        seed(far)
+        // Reload (a second load) keeps the distant valid tile with positions
+        // unchanged; no correction or migration runs here.
+        val second = repository.load(HomeId("home"), 6, 10) as LoadResult.Loaded
+        assertEquals(listOf(near.itemId, far.itemId), second.placements.map { it.itemId })
+        assertEquals(LogicalPosition(0, 0), second.placements[0].position)
+        assertEquals(LogicalPosition(0, 16), second.placements[1].position)
     }
 
     private fun seedHome(id: String) = dao.insertHome(HomeEntity(id))

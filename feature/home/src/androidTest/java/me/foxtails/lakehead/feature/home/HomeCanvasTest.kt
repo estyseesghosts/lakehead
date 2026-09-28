@@ -1108,7 +1108,7 @@ class HomeCanvasTest {
                 iconsByIdentity = emptyMap(),
                 onLaunchApp = { launched = it },
                 onRequestDefaultHome = {},
-                onMoveTile = { id, _ -> moved = id },
+                onMoveTile = { id, _, _ -> moved = id },
                 onResizeTile = { id, _ -> resized = id },
                 onRemoveTile = { removed = it },
             )
@@ -1184,7 +1184,7 @@ class HomeCanvasTest {
                 iconsByIdentity = emptyMap(),
                 onLaunchApp = {},
                 onRequestDefaultHome = {},
-                onMoveTile = { id, _ -> moved = id },
+                onMoveTile = { id, _, _ -> moved = id },
                 onRemoveTile = { removed = it },
             )
         }
@@ -1228,7 +1228,7 @@ class HomeCanvasTest {
                 iconsByIdentity = emptyMap(),
                 onLaunchApp = {},
                 onRequestDefaultHome = {},
-                onMoveTile = { id, _ -> moved = id },
+                onMoveTile = { id, _, _ -> moved = id },
                 onResizeTile = { id, _ -> resized = id },
                 onRemoveTile = { removed = it },
             )
@@ -1699,7 +1699,7 @@ class HomeCanvasTest {
     private fun setMoveCanvas(
         tiles: List<HomeRenderTile>,
         onLaunchApp: (AppIdentity) -> Unit = {},
-        onMoveTile: (ItemId, LogicalPosition) -> Unit = { _, _ -> },
+        onMoveTile: (ItemId, LogicalPosition, Long) -> Unit = { _, _, _ -> },
         onResizeTile: (ItemId, LogicalSpan) -> Unit = { _, _ -> },
         pinnedByTile: Map<ItemId, List<PinnedTileShortcut>> = emptyMap(),
         onPinnedShortcutClick: (ItemId, String) -> Unit = { _, _ -> },
@@ -1739,7 +1739,7 @@ class HomeCanvasTest {
         setMoveCanvas(
             tiles,
             onLaunchApp = { launched.add(it) },
-            onMoveTile = { id, pos -> moves.add(id to pos) },
+            onMoveTile = { id, pos, _ -> moves.add(id to pos) },
             onResizeTile = { id, span -> resizes.add(id to span) },
             onSelectedTileChange = { selected.add(it) },
             onPagerHoldChange = { holds.add(it) },
@@ -1800,7 +1800,7 @@ class HomeCanvasTest {
         setMoveCanvas(
             tiles,
             onLaunchApp = { launched.add(it) },
-            onMoveTile = { id, pos -> moves.add(id to pos) },
+            onMoveTile = { id, pos, _ -> moves.add(id to pos) },
             pinnedByTile = mapOf(
                 ItemId("wide") to listOf(
                     PinnedTileShortcut("new-post", "New post"),
@@ -1858,7 +1858,7 @@ class HomeCanvasTest {
         setMoveCanvas(
             tiles,
             onLaunchApp = { launched.add(it) },
-            onMoveTile = { id, pos -> moves.add(id to pos) },
+            onMoveTile = { id, pos, _ -> moves.add(id to pos) },
             onSelectedTileChange = { selected.add(it) },
         )
         composeRule.waitForIdle()
@@ -1881,8 +1881,7 @@ class HomeCanvasTest {
     }
 
     @Test
-    fun pagerHold_tileTouch_trueThenFalse() {
-        // onPagerHoldChange direct: a real tile touch holds the pager for the
+    fun pagerHold_tileTouch_trueThenFalse() {        // onPagerHoldChange direct: a real tile touch holds the pager for the
         // press and clears on release, so a tile-origin gesture never becomes
         // a page swipe and the hold never sticks.
         val holds = mutableListOf<Boolean>()
@@ -1899,6 +1898,73 @@ class HomeCanvasTest {
         composeRule.runOnIdle {
             assertTrue("tile touch must hold the pager: $holds", holds.contains(true))
             assertEquals("hold must clear on release", false, holds.lastOrNull())
+        }
+    }
+
+    @Test
+    fun softlock_populatedGrid_scrollsDownUpDownWithProjectionExtent() {
+        // Softlock regression: the committed extent comes from the projection
+        // (never a manual bottom), so a populated grid scrolls lowest<->top in
+        // both directions and remains recoverable after returning to first.
+        val tiles = listOf(
+            tile("near", personal, "Near App", column = 0, row = 0),
+            tile("far", work, "Distant App", column = 0, row = 16),
+        )
+        val placements = tiles.map {
+            me.foxtails.lakehead.core.model.AppPlacement(
+                homeId, it.itemId, it.appIdentity, it.position, it.span, it.availability,
+            )
+        }
+        val projectedExtent = HomeRenderProjection.measureExtent(placements, 10L, 0L)
+        composeRule.runOnIdle {
+            assertEquals(17L, projectedExtent.occupiedMaxRowExclusive)
+            assertEquals(17L, projectedExtent.totalScrollableRows)
+        }
+        setCanvas(loaded(tiles, extent = projectedExtent))
+        composeRule.waitForIdle()
+
+        fun hasNear() = composeRule.onAllNodesWithContentDescription("Near App")
+            .fetchSemanticsNodes().size == 2
+        fun hasFar() = composeRule.onAllNodesWithContentDescription("Distant App")
+            .fetchSemanticsNodes().size == 2
+
+        // Down: lowest becomes reachable.
+        var downReached = false
+        repeat(10) {
+            if (downReached) return@repeat
+            composeRule.onNodeWithTag(HOME_CANVAS_GRID_TAG, useUnmergedTree = true)
+                .performTouchInput { swipeUp() }
+            composeRule.waitForIdle()
+            downReached = hasFar()
+        }
+        composeRule.runOnIdle {
+            assertTrue("scroll down must reach the lowest tile", downReached)
+        }
+
+        // Back to first: the top stays recoverable (no offscreen softlock).
+        var backToFirst = false
+        repeat(10) {
+            if (backToFirst) return@repeat
+            composeRule.onNodeWithTag(HOME_CANVAS_GRID_TAG, useUnmergedTree = true)
+                .performTouchInput { swipe(Offset(centerX.toFloat(), centerY.toFloat()), Offset(centerX.toFloat(), centerY.toFloat() + 600f), 400) }
+            composeRule.waitForIdle()
+            backToFirst = hasNear()
+        }
+        composeRule.runOnIdle {
+            assertTrue("scroll back must return to the first tile", backToFirst)
+        }
+
+        // Down again: still scrollable both ways after the round trip.
+        var downAgain = false
+        repeat(10) {
+            if (downAgain) return@repeat
+            composeRule.onNodeWithTag(HOME_CANVAS_GRID_TAG, useUnmergedTree = true)
+                .performTouchInput { swipeUp() }
+            composeRule.waitForIdle()
+            downAgain = hasFar()
+        }
+        composeRule.runOnIdle {
+            assertTrue("grid must stay scrollable after returning to top", downAgain)
         }
     }
 }

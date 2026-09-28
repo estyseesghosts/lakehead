@@ -327,4 +327,60 @@ class HomeViewportTest {
         assertEquals(-1000L, result.viewportOffsetY)
         assertEquals(Long.MAX_VALUE, result.scrollRangePx)
     }
+
+    // ── 10. ScrollState-owner clamp (softlock) ──────────────────────────
+
+    @Test
+    fun scrollOwner_inRange_preserved() {
+        assertEquals(500, clampScrollOffsetToRange(500, 1000L))
+        assertEquals(0, clampScrollOffsetToRange(0, 1000L))
+        assertEquals(1000, clampScrollOffsetToRange(1000, 1000L))
+    }
+
+    @Test
+    fun scrollOwner_shrink_clampsToNewCommittedMax() {
+        // Real offset 3000 with a shrunk committed range 2000 bottom-pins.
+        assertEquals(2000, clampScrollOffsetToRange(3000, 2000L))
+    }
+
+    @Test
+    fun scrollOwner_grow_preservesOffset() {
+        // Content growth never jumps: an in-range offset stays put.
+        assertEquals(1000, clampScrollOffsetToRange(1000, 5000L))
+    }
+
+    @Test
+    fun scrollOwner_zeroRange_restsAtZero() {
+        assertEquals(0, clampScrollOffsetToRange(500, 0L))
+        assertEquals(0, clampScrollOffsetToRange(0, 0L))
+    }
+
+    @Test
+    fun scrollOwner_intCapped_hugeRange() {
+        assertEquals(Int.MAX_VALUE, clampScrollOffsetToRange(Int.MAX_VALUE, Long.MAX_VALUE))
+        assertEquals(100, clampScrollOffsetToRange(100, Long.MAX_VALUE))
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun scrollOwner_negativeActual_throws() {
+        clampScrollOffsetToRange(-1, 100L)
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun scrollOwner_negativeRange_throws() {
+        clampScrollOffsetToRange(0, -1L)
+    }
+
+    @Test
+    fun scrollForCommitted_invalidRestZero_recomputesWhenPositive() {
+        // Null rest (invalid/zero viewport) rests at zero; a positive rest
+        // recomputes the clamped actual.
+        assertEquals(0, scrollOffsetForCommitted(500, null))
+        assertEquals(0, scrollOffsetForCommitted(0, null))
+        assertEquals(0L, committedScrollRangePx(null))
+        val rest = GridRest(gridOriginY = 0L, scrollRangePx = 108L, scrollable = true)
+        assertEquals(108L, committedScrollRangePx(rest))
+        assertEquals(50, scrollOffsetForCommitted(50, rest))
+        assertEquals(108, scrollOffsetForCommitted(500, rest))
+    }
 }

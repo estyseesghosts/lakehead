@@ -137,3 +137,34 @@ fun preserveAnchorOnResize(old: Viewport, newRest: GridRest?): Viewport {
     // Short → short or other zero-range transitions.
     return Viewport(gridOriginY = newOrigin, viewportOffsetY = 0L, scrollRangePx = 0L)
 }
+
+/**
+ * Softlock scroll-owner clamp: `ScrollState.value` owns the offset (no second
+ * position). Clamps the real offset to the new committed range (Int capped):
+ * preserves in-range values, clamps on shrink, rests at zero when the range is
+ * zero. Feeds the actual offset, never a shadow. Pure, framework-free.
+ */
+fun clampScrollOffsetToRange(actualPx: Int, rangePx: Long): Int {
+    require(actualPx >= 0) { "actualPx must be non-negative" }
+    require(rangePx >= 0L) { "rangePx must be non-negative" }
+    if (rangePx == 0L) return 0
+    return actualPx.coerceIn(0, rangePx.coerceAtMost(Int.MAX_VALUE.toLong()).toInt())
+}
+
+/**
+ * Committed scroll range in pixels, or zero when the rest is unavailable
+ * (invalid/zero viewport): a zero viewport rests at zero and recomputes when
+ * the viewport turns positive. Pure, framework-free.
+ */
+fun committedScrollRangePx(rest: me.foxtails.lakehead.core.grid.GridRest?): Long =
+    rest?.scrollRangePx ?: 0L
+
+/**
+ * Real scroll offset for a committed reload/viewport change: the actual
+ * `ScrollState.value` clamped to the committed range. Never moves, drops,
+ * compacts or resets tiles. Pure, framework-free.
+ */
+fun scrollOffsetForCommitted(
+    actualPx: Int,
+    committedRest: me.foxtails.lakehead.core.grid.GridRest?,
+): Int = clampScrollOffsetToRange(actualPx, committedScrollRangePx(committedRest))
