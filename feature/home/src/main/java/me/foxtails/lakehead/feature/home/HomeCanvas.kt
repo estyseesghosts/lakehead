@@ -65,8 +65,10 @@ import me.foxtails.lakehead.core.model.LogicalSpan
  * this canvas (no HOME-role overlay is rendered).
  * @param onTransientHoldChange pass-through hold callback forwarded to
  * [HomeCanvasGrid]; invoked with true while held, false when released.
-+ * @param onPagerHoldChange pass-through tile-touch hold callback forwarded to
-+ * [HomeCanvasGrid]; invoked with true from a tile-origin down until release.
+ * @param onPagerHoldChange pass-through tile-touch hold callback forwarded to
+ * [HomeCanvasGrid]; invoked with true from a tile-origin down until release.
+ * @param isVisible pager visibility signal forwarded to [HomeCanvasGrid];
+ * when false the transient edit is discarded with zero writes.
  */
 @Suppress("UNUSED_PARAMETER")
 @Composable
@@ -88,6 +90,10 @@ fun HomeCanvas(
     onSurfaceTogglePin: (ItemId, String) -> Unit = { _, _ -> },
     onTransientHoldChange: (Boolean) -> Unit = {},
     onPagerHoldChange: (Boolean) -> Unit = {},
+    // P2 navigation visibility: forwarded to [HomeCanvasGrid]. False while the
+    // pager shows another page (the grid stays composed for adjacent pages),
+    // discarding the transient edit with zero writes. Defaults to true.
+    isVisible: Boolean = true,
 ) {
     require(overscanRows >= 0L) { "overscanRows must be non-negative" }
     // P0 stale-hold guard: Loading/NotFound never compose HomeCanvasGrid, so
@@ -158,6 +164,7 @@ fun HomeCanvas(
                     onSurfaceTogglePin = onSurfaceTogglePin,
                     onTransientHoldChange = onTransientHoldChange,
                     onPagerHoldChange = onPagerHoldChange,
+                    isVisible = isVisible,
                 )
             }
         }

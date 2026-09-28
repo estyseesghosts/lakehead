@@ -2,6 +2,64 @@ package me.foxtails.lakehead.core.grid
 
 /** Pure vertical extent measurement, independent of placement legality and packing. */
 object GridVerticalLayout {
+    /** Maximum transient edit margin; this is not a normal-layout extent limit. */
+    const val MAX_WORKING_MARGIN_ROWS: Long = 4_096L
+
+    /** The exclusive end of the temporary edit area. */
+    data class EditBoundary(
+        val exclusiveRow: Long,
+        val marginRows: Long,
+    )
+
+    /**
+     * Creates an edit-only boundary from the normal intrinsic extent.
+     *
+     * The margin is capped before it participates in row arithmetic.  In particular, this policy
+     * does not put a 4096-row limit on the logical grid; it only bounds the amount of temporary
+     * space kept ahead of the current frontier.
+     */
+    fun createEditBoundary(
+        extent: GridVerticalExtent,
+        viewportRows: Long,
+        workingMarginRows: Long,
+    ): EditBoundary {
+        require(viewportRows > 0L) { "viewportRows must be positive" }
+        val marginRows = cappedWorkingMarginRows(workingMarginRows)
+        val contentOrViewportEnd = maxOf(extent.occupiedMaxRowExclusive, viewportRows)
+        return EditBoundary(
+            exclusiveRow = Math.addExact(contentOrViewportEnd, marginRows),
+            marginRows = marginRows,
+        )
+    }
+
+    /**
+     * Extends an edit boundary by one bounded margin when a move reaches its trailing margin.
+     * Calling this repeatedly is intentional: each call advances by only one margin, rather than
+     * allowing a distant or malformed move to allocate an unbounded edit area in one step.
+     */
+    fun advanceEditBoundary(
+        boundary: EditBoundary,
+        movedBottomRowExclusive: Long,
+    ): EditBoundary {
+        val marginRows = boundary.marginRows.coerceIn(0L, MAX_WORKING_MARGIN_ROWS)
+        val safeBoundary = if (marginRows == boundary.marginRows) {
+            boundary
+        } else {
+            boundary.copy(marginRows = marginRows)
+        }
+        if (marginRows == 0L) return safeBoundary
+        val trailingEdge = Math.subtractExact(safeBoundary.exclusiveRow, marginRows)
+        if (movedBottomRowExclusive < trailingEdge) return safeBoundary
+        return safeBoundary.copy(
+            exclusiveRow = Math.addExact(safeBoundary.exclusiveRow, marginRows),
+        )
+    }
+
+    private fun cappedWorkingMarginRows(workingMarginRows: Long): Long {
+        require(workingMarginRows >= 0L) { "workingMarginRows must be non-negative" }
+        return minOf(workingMarginRows, MAX_WORKING_MARGIN_ROWS)
+    }
+
     /**
      * Measures the signed intrinsic content bounds and height.
      *

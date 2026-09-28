@@ -3,7 +3,6 @@ package me.foxtails.lakehead.feature.home
 import androidx.compose.animation.core.Animatable
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.border
-import androidx.compose.foundation.gestures.awaitDragOrCancellation
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
@@ -30,6 +29,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.delay
 import me.foxtails.lakehead.core.designsystem.AppTileDefaults
 import me.foxtails.lakehead.core.designsystem.CORNER_CONTROL_TOUCH_SIZE
 import me.foxtails.lakehead.core.designsystem.GestureArbitration
@@ -54,6 +54,7 @@ import me.foxtails.lakehead.core.grid.GridRowWindow
 import me.foxtails.lakehead.core.grid.GridRules
 import me.foxtails.lakehead.core.grid.GridSpan
 import me.foxtails.lakehead.core.grid.GridVerticalExtent
+import me.foxtails.lakehead.core.grid.GridVerticalLayout
 import me.foxtails.lakehead.core.grid.SignedGridPlacement
 import me.foxtails.lakehead.core.model.AppIdentity
 import me.foxtails.lakehead.core.model.ItemId
@@ -136,6 +137,13 @@ data class HomeCanvasViewportStyle(
  *   mid-gesture (gated for W4). Persistence itself stays
  *   with the caller: this grid only reports the committed [ItemId] and [LogicalPosition] or
  *   [LogicalSpan].
+ * - B3: a MOVE drag owns a transient edit frontier (normal boundary plus a
+ *   bounded margin, extended one margin per bottom-edge auto-scroll step via
+ *   `core:grid` policy). Edge proximity auto-scrolls the `ScrollState` (top
+ *   limited by the range) and every MOVE candidate remaps with the current
+ *   scroll offset; auto-scroll-owned scroll never steals the drag, release is
+ *   the sole commit, and the frontier is leased to a pending commit until the
+ *   loaded tiles reflect it, then recomputed. RESIZE never expands.
  * - Corner controls appear for a selected [HomeInteractionController.Editing] tile as
  *   well as [HomeEditSession.Active]. Each uses a 32dp visual circle in a 48dp touch
  *   target: [ResizeHandle] is bottom-right center pinned via [cornerControlOffset],
@@ -195,6 +203,14 @@ internal fun HomeCanvasGrid(
     // swipe; background-origin gestures leave it false. Separate from the A1
     // hold above; the shell ANDs both negations into userScrollEnabled.
     onPagerHoldChange: (Boolean) -> Unit = {},
+    // P2 navigation visibility: true while the home page is the visible pager
+    // destination. The pager keeps adjacent pages composed
+    // (beyondViewportPageCount), so pager navigation away never disposes this
+    // grid and the home-switch clearing below never runs. When false the
+    // transient edit is discarded with zero writes (see the effect below).
+    // Defaults to true so callers that do not track pager visibility keep the
+    // exact prior behavior. Supplied by the shell; owned here.
+    isVisible: Boolean = true,
 ) {
     require(overscanRows >= 0L) { "overscanRows must be non-negative" }
     require(usableHeightPx >= 0) { "usableHeightPx must be non-negative" }
@@ -249,6 +265,14 @@ internal fun HomeCanvasGrid(
         key(loaded.requestedHomeId) {
             val scrollState = rememberScrollState()
             var editSession by remember { mutableStateOf<HomeEditSession>(HomeEditSession.Idle) }
+            // B3 re-review P1: synchronous single source for the ticker<->drag
+            // handoff. The ticker's stationary remap writes here AND to
+            // [editSession] together; the drag loop picks this up per event
+            // and the release path commits from it. A plain holder (never a
+            // second placement engine) so no recomposition round-trip can
+            // leave release holding the pre-scroll cell while the pointer is
+            // held stationary with no move events.
+            val liveSessionRef = remember { LiveEditSessionRef(HomeEditSession.Idle) }
             // W1 recess/select/exit: transient Normal|Editing(selectedId?) owned by
             // HomeInteractionController (pure, never modified in place). Hoisted
             // alongside editSession inside key(requestedHomeId) so a home switch
@@ -272,6 +296,37 @@ internal fun HomeCanvasGrid(
             // isHold above. Set once at down via resolveHomeGesture + holdsPager
             // (snapshot-once, never flipped mid-gesture); cleared on release.
             var pagerHold by remember { mutableStateOf(false) }
+            // B3 transient edit frontier: edit-only working boundary for MOVE
+            // expansion, created from the normal boundary plus a bounded margin
+            // when a MOVE drag becomes active. Reset by key(requestedHomeId) on
+            // home switch; discarded on cancel/exit; leased to a pending commit
+            // until the loaded tiles reflect it (see pendingMove below). Never
+            // a legality bound for RESIZE.
+            var editFrontier by remember {
+                mutableStateOf<GridVerticalLayout.EditBoundary?>(null)
+            }
+            // B3 pending-commit lease: the release-committed move target retained
+            // until loaded.tiles shows it. Gates another MOVE while unsatisfied.
+            var pendingMove by remember { mutableStateOf<PendingMoveCommit?>(null) }
+            // B3 edge auto-scroll: latest viewport-local pointer position during
+            // a MOVE drag (null when no MOVE drag is active). Both axes are
+            // retained so the stationary ticker below can remap the held
+            // pointer with the current scroll after each step; the per-frame
+            // drag loop steps on the same values while the pointer moves.
+            var moveEdgeYPx by remember { mutableStateOf<Float?>(null) }
+            var moveEdgeXPx by remember { mutableStateOf<Float?>(null) }
+            // B3 stationary-remap grab offsets: the content-space point grabbed
+            // inside the tile, snapshotted once at MOVE entry (same values the
+            // drag loop freezes at down). Hoisted so the ticker remaps with
+            // the identical anchor while the pointer is held stationary.
+            var moveGrabOffsetXPx by remember { mutableStateOf(0f) }
+            var moveGrabOffsetYPx by remember { mutableStateOf(0f) }
+            // B3 auto-scroll-owned scroll accounting: last scroll value accounted
+            // for (gesture start or an auto-scroll-owned step). The MOVE steal
+            // check compares against this instead of the frozen start value, so
+            // intentional auto-scroll never cancels the drag while any foreign
+            // scroll delta still does.
+            var moveScrollBaseline by remember { mutableStateOf(0) }
             val columns = loaded.columns.count
             val active = editSession as? HomeEditSession.Active
             val interactionEditing = interaction as? HomeInteractionController.Editing
@@ -308,9 +363,16 @@ internal fun HomeCanvasGrid(
             ) {
                 if (editSession as? HomeEditSession.Active != null) {
                     editSession = editSession.cancel()
+                    liveSessionRef.session = HomeEditSession.Idle
                 } else {
                     interaction = interaction.exitOnBack()
                 }
+                // B3: explicit cancel/exit discards the transient frontier and
+                // any pending lease with zero writes.
+                editFrontier = null
+                pendingMove = null
+                moveEdgeYPx = null
+                moveEdgeXPx = null
             }
             // W1 navigate/Home reset: leaving the tile-grid surface exits
             // wiggle-editing via the pure transition (idempotent from Normal).
@@ -318,6 +380,34 @@ internal fun HomeCanvasGrid(
             // navigate-away reloads of the same home.
             LaunchedEffect(loaded.requestedHomeId) {
                 interaction = interaction.exitOnNavigate()
+                // B3: same-home reload is an exit for the transient frontier.
+                editFrontier = null
+                pendingMove = null
+                moveEdgeYPx = null
+                moveEdgeXPx = null
+            }
+            // P2 pager-navigation exit: navigating to another pager page leaves
+            // this grid composed (adjacent pages stay alive), so neither the
+            // home-switch reset above nor disposal runs. While hidden the
+            // transient MOVE/RESIZE session, selection, frontier, edge hold
+            // and tile-touch hold are discarded with zero writes; the pending
+            // MOVE lease is preserved across hide (never cleared here) so a
+            // leave-before-loaded cannot admit a stale second move on return.
+            // The rebase effect below reconciles the lease vs loaded tiles
+            // (clears once loaded reflects the target); the MOVE entry gate
+            // blocks a new MOVE while the lease is unsatisfied. Explicit
+            // failure paths (Back, empty-tap, steal, removal) clear the lease;
+            // hide is not a failure. The pill navigates back to a gated grid.
+            LaunchedEffect(isVisible) {
+                if (!isVisible) {
+                    editSession = HomeEditSession.Idle
+                    liveSessionRef.session = HomeEditSession.Idle
+                    interaction = interaction.exitOnNavigate()
+                    editFrontier = null
+                    moveEdgeYPx = null
+                    moveEdgeXPx = null
+                    pagerHold = false
+                }
             }
             val rowStridePx: Long =
                 geometry.cellSizePx.toLong() + geometry.rowGapPx.toLong()
@@ -331,6 +421,12 @@ internal fun HomeCanvasGrid(
                 usableHeightPx = availableHeightPx,
                 rowStridePx = rowStridePx,
             )
+            // B3: the transient frontier is a legality bound ONLY for MOVE
+            // (computed live per frame from editFrontier in the drag loop, since
+            // the gesture coroutine holds a frozen composition snapshot).
+            // RESIZE keeps the normal bound (no expansion); entry validity at
+            // the origin uses the normal bound in both routes.
+            val resizeRows = resizeLegalityRows(rows, editFrontier)
             // Signed renderer origin (G3): the logical row the windowed container
             // rebases pixel frames around plus the G2 rest pixel offset computed in
             // rebased coordinates. `rowOrigin` is the signed content `minRow` (may be
@@ -353,11 +449,24 @@ internal fun HomeCanvasGrid(
             // A3 natural content height: intrinsic signed occupied rows × cell plus
             // inter-row gaps, with no trailing gap after the final cell. Never
             // inflated to the viewport here; the container minimum below does that.
-            val naturalContentHeightPx = contentMinHeightPxSigned(
-                extent = loaded.extent,
-                cellSizePx = geometry.cellSizePx,
-                rowGapPx = geometry.rowGapPx,
-            )
+            // B3: while the transient frontier is retained, the edit-only layout
+            // extent (loaded extent + frontier) sizes the content height, rest,
+            // scroll range and container minimum instead; the signed row origin
+            // above still comes from the real tiles only (no fake tiles).
+            val layoutEditRows = editFrontier?.let { editLayoutRows(loaded.extent, it) }
+            val naturalContentHeightPx = if (layoutEditRows != null) {
+                editContentHeightPx(
+                    layoutRows = layoutEditRows,
+                    cellSizePx = geometry.cellSizePx,
+                    rowGapPx = geometry.rowGapPx,
+                )
+            } else {
+                contentMinHeightPxSigned(
+                    extent = loaded.extent,
+                    cellSizePx = geometry.cellSizePx,
+                    rowGapPx = geometry.rowGapPx,
+                )
+            }
             val rest = signedRestFor(
                 viewportHeightPx = availableHeightPx,
                 contentHeightPx = naturalContentHeightPx,
@@ -387,6 +496,189 @@ internal fun HomeCanvasGrid(
                     scrollState.scrollTo(scrollMaxPx)
                 }
             }
+            // B3: rebase the retained frontier when the loaded extent, tile set,
+            // viewport, or geometry/stride changes, without shrinking an active
+            // session unexpectedly. Geometry/stride (cell size, row stride,
+            // viewport width) joins the trigger so width adaptation recomputes
+            // the frontier for MOVE legality/auto-scroll. A satisfied pending
+            // lease recomputes fresh (discards the transient extra); otherwise
+            // the larger boundary is kept. The lease check runs even when the
+            // frontier is null (pager-hide discards the frontier but preserves
+            // the lease), so a load that lands while hidden still satisfies
+            // the lease before return; an unsatisfied lease keeps gating new
+            // MOVEs via the entry gate below until loaded confirms the target
+            // or an explicit failure path clears it.
+            LaunchedEffect(loaded.tiles, loaded.extent, availableHeightPx, rowStridePx, availableWidthPx) {
+                val pending = pendingMove
+                val retained = retainedPendingLease(loaded.tiles, pending)
+                if (pending != null && retained == null) {
+                    pendingMove = null
+                    if (editFrontier != null) {
+                        editFrontier = initEditFrontier(loaded.extent, availableHeightPx, rowStridePx)
+                    }
+                    return@LaunchedEffect
+                }
+                val current = editFrontier ?: return@LaunchedEffect
+                if (pending != null) {
+                    editFrontier = rebaseEditFrontier(current, loaded.extent, availableHeightPx, rowStridePx)
+                } else {
+                    editFrontier = rebaseEditFrontier(current, loaded.extent, availableHeightPx, rowStridePx)
+                }
+            }
+            // B3 edge auto-scroll continuation for a stationary hold: while a
+            // MOVE drag reports its pointer inside an edge band, advance one row
+            // stride per tick (extending the frontier via grid policy before
+            // scrolling down; the top is limited by the range). The per-frame
+            // drag loop below steps on the same edge value while the pointer
+            // moves; this ticker covers a held pointer with no move events.
+            // Scrolling never calls onMoveTile: release stays the sole commit.
+            val autoScrollEdgePx = with(density) {
+                HomeEditFrontier.AUTO_SCROLL_EDGE_DP.dp.roundToPx()
+            }.coerceAtLeast(1)
+            val loadedSnapshot = rememberUpdatedState(loaded)
+            val viewportHeightSnapshot = rememberUpdatedState(availableHeightPx)
+            val tickSessionState = rememberUpdatedState(editSession)
+            // P1/P2: the ticker outlives the composition that launched it, so
+            // every geometry-adjacent value it reads stays fresh via snapshot
+            // holders (width adaptation mid-drag must remap with the live
+            // stride, not the entry stride).
+            val tickGeometryState = rememberUpdatedState(geometry)
+            val tickOriginXState = rememberUpdatedState(originX)
+            val tickRowOriginState = rememberUpdatedState(rowOrigin)
+            // The G5 animated origin is declared below this effect; mirror it
+            // into live state (refreshed per frame below) so the ticker
+            // remaps with the current frame instead of a frozen value.
+            var tickOriginYLive by remember { mutableStateOf(0L) }
+            val tickColumnsState = rememberUpdatedState(columns)
+            val tickRowsState = rememberUpdatedState(rows)
+            val tickStrideState = rememberUpdatedState(rowStridePx)
+            val moveTickItemId = if (active?.mode == EditMode.MOVE) active.itemId else null
+            LaunchedEffect(moveTickItemId) {
+                if (moveTickItemId == null) return@LaunchedEffect
+                while (true) {
+                    delay(HomeEditFrontier.AUTO_SCROLL_TICK_MS)
+                    val pointerY = moveEdgeYPx ?: continue
+                    val pointerX = moveEdgeXPx ?: continue
+                    val tickSession = tickSessionState.value as? HomeEditSession.Active
+                        ?: return@LaunchedEffect
+                    if (tickSession.mode != EditMode.MOVE || tickSession.itemId != moveTickItemId) {
+                        return@LaunchedEffect
+                    }
+                    val snapshotLoaded = loadedSnapshot.value
+                    val snapshotHeight = viewportHeightSnapshot.value
+                    val snapshotStride = tickStrideState.value
+                    val zone = autoScrollZone(pointerY, snapshotHeight, autoScrollEdgePx)
+                    if (zone == AutoScrollZone.NONE) continue
+                    if (zone == AutoScrollZone.BOTTOM) {
+                        val grown = editFrontier?.let { boundary ->
+                            advanceFrontierForMove(
+                                boundary,
+                                tickSession.lastValidPosition,
+                                tickSession.candidateSpan.rows,
+                            )
+                        } ?: initEditFrontier(
+                            snapshotLoaded.extent,
+                            snapshotHeight,
+                            snapshotStride,
+                        )
+                        editFrontier = grown
+                        val snapshotGeometry = tickGeometryState.value
+                        val editMax = editScrollMaxPx(
+                            layoutRows = editLayoutRows(snapshotLoaded.extent, grown),
+                            cellSizePx = snapshotGeometry.cellSizePx,
+                            rowGapPx = snapshotGeometry.rowGapPx,
+                            viewportHeightPx = snapshotHeight,
+                        )
+                        val target = (scrollState.value + autoScrollStepPx(snapshotStride))
+                            .coerceAtMost(editMax)
+                        if (target != scrollState.value) {
+                            scrollState.scrollTo(target)
+                            // P1: re-baseline to the ACTUAL clamped position —
+                            // the live ScrollState still clamps to the older
+                            // (smaller) normal maximum, so baselining the
+                            // requested target would fake a foreign-scroll
+                            // delta and steal-cancel the drag.
+                            moveScrollBaseline = tickerScrollBaseline(
+                                scrollState.value,
+                                target,
+                            )
+                            // P1: remap the retained hold position with the
+                            // current scroll so the candidate follows a
+                            // stationary hold; release then commits the
+                            // post-scroll cell, never the pre-scroll one.
+                            // The base is the synchronous live ref (never the
+                            // recomposition-lagged snapshot) and the result
+                            // writes through to both the ref and Compose
+                            // state, so the pointer handler's release path
+                            // observes it even with no further pointer events.
+                            val liveTick = liveSessionRef.session as? HomeEditSession.Active
+                            if (liveTick != null &&
+                                liveTick.mode == EditMode.MOVE &&
+                                liveTick.itemId == moveTickItemId
+                            ) {
+                                val remapped = remapMoveCandidateAfterScroll(
+                                    session = liveTick,
+                                    pointerXPx = pointerX,
+                                    pointerYPx = pointerY,
+                                    scrollPx = scrollState.value,
+                                    cellSizePx = snapshotGeometry.cellSizePx,
+                                    columnGapPx = snapshotGeometry.columnGapPx,
+                                    rowGapPx = snapshotGeometry.rowGapPx,
+                                    rowOrigin = tickRowOriginState.value,
+                                    originXPx = tickOriginXState.value,
+                                    originYPx = tickOriginYLive,
+                                    grabOffsetXPx = moveGrabOffsetXPx,
+                                    grabOffsetYPx = moveGrabOffsetYPx,
+                                    tiles = snapshotLoaded.tiles,
+                                    columns = tickColumnsState.value,
+                                    moveRows = moveLegalityRows(tickRowsState.value, grown),
+                                )
+                                liveSessionRef.session = remapped
+                                editSession = remapped
+                            }
+                        }
+                    } else {
+                        val target = (scrollState.value - autoScrollStepPx(snapshotStride))
+                            .coerceAtLeast(0)
+                        if (target != scrollState.value) {
+                            scrollState.scrollTo(target)
+                            // P1: same actual-position baseline as above.
+                            moveScrollBaseline = tickerScrollBaseline(
+                                scrollState.value,
+                                target,
+                            )
+                            // P1: same stationary remap as above (live ref base,
+                            // write-through to ref + Compose state).
+                            val liveTick = liveSessionRef.session as? HomeEditSession.Active
+                            if (liveTick != null &&
+                                liveTick.mode == EditMode.MOVE &&
+                                liveTick.itemId == moveTickItemId
+                            ) {
+                                val snapshotGeometry = tickGeometryState.value
+                                val remapped = remapMoveCandidateAfterScroll(
+                                    session = liveTick,
+                                    pointerXPx = pointerX,
+                                    pointerYPx = pointerY,
+                                    scrollPx = scrollState.value,
+                                    cellSizePx = snapshotGeometry.cellSizePx,
+                                    columnGapPx = snapshotGeometry.columnGapPx,
+                                    rowGapPx = snapshotGeometry.rowGapPx,
+                                    rowOrigin = tickRowOriginState.value,
+                                    originXPx = tickOriginXState.value,
+                                    originYPx = tickOriginYLive,
+                                    grabOffsetXPx = moveGrabOffsetXPx,
+                                    grabOffsetYPx = moveGrabOffsetYPx,
+                                    tiles = snapshotLoaded.tiles,
+                                    columns = tickColumnsState.value,
+                                    moveRows = moveLegalityRows(tickRowsState.value, editFrontier),
+                                )
+                                liveSessionRef.session = remapped
+                                editSession = remapped
+                            }
+                        }
+                    }
+                }
+            }
             // G5: single animated grid origin. One Animatable moves the whole
             // field as one object: tiles keep their internal grid positions
             // while the shared origin glides to the new rest target. The target
@@ -410,6 +702,10 @@ internal fun HomeCanvasGrid(
                 Int.MIN_VALUE.toLong(),
                 Int.MAX_VALUE.toLong(),
             ).toInt()
+            // P1 ticker mirror: keep the stationary-remap origin frame fresh.
+            LaunchedEffect(originYPx) {
+                tickOriginYLive = originYPx
+            }
             // A3 container minimum: natural content height or the usable viewport,
             // whichever is larger, so short content fills the viewport (no tail)
             // and tall content ends exactly at its last cell.
@@ -462,6 +758,12 @@ internal fun HomeCanvasGrid(
             // recomposition and resets on home switch.
             val sessionState = rememberUpdatedState(editSession)
             val interactionSnapshot = rememberUpdatedState(interaction)
+            // P2 hide-abort read: the drag release path suppresses commits
+            // when the page is no longer visible. Hoisted latest value so the
+            // Unit/home-keyed gesture scope observes hides without restart
+            // races; the drag scope itself is also keyed on isVisible below so
+            // a hide cancels the in-flight await.
+            val isVisibleState = rememberUpdatedState(isVisible)
             // Snapshot holder for the Unit-keyed idle gesture observer below: tiles,
             // geometry and origins stay fresh without restarting in-flight gestures.
             // B1: the flick-to-show detector is removed, but the down hit-test is
@@ -489,7 +791,14 @@ internal fun HomeCanvasGrid(
                 detectTapGestures(
                     onTap = {
                         editSession = sessionState.value.cancel()
+                        liveSessionRef.session = HomeEditSession.Idle
                         interaction = interactionSnapshot.value.exitOnEmptyTap()
+                        // B3: empty-tap cancel discards the transient frontier
+                        // and any pending lease with zero writes.
+                        editFrontier = null
+                        pendingMove = null
+                        moveEdgeYPx = null
+                        moveEdgeXPx = null
                     },
                 )
             }
@@ -603,7 +912,12 @@ internal fun HomeCanvasGrid(
             // (which waits for a fresh down that never arrives). Instead the first
             // awaitPointerEvent() observes the already-pressed pointer and tracks it
             // past touch slop for a continuous press-hold-drag.
-            val dragModifier = Modifier.pointerInput(loaded.requestedHomeId) {
+            // P2 hide-abort: keyed on isVisible as well as the home id so a
+            // pager navigation away cancels the in-flight await (zero-write);
+            // the LaunchedEffect(isVisible) above already discards Compose
+            // session/frontier/lease/edge/hold state. Release commits below
+            // additionally suppress onResize/onMove when !isVisible.
+            val dragModifier = Modifier.pointerInput(loaded.requestedHomeId, isVisible) {
                 awaitEachGesture {
                     // Pointer is already down from the long-press that entered edit mode.
                     // Observe the current pressed pointer instead of waiting for a new down.
@@ -678,6 +992,13 @@ internal fun HomeCanvasGrid(
                     var currentSession: HomeEditSession = sessionState.value
                     var sessionAtDown = currentSession as? HomeEditSession.Active
                     if (sessionAtDown == null && !selectedDrag) return@awaitEachGesture
+                    // B3: gate another MOVE while a commit is still in flight.
+                    // The frontier stays leased to the pending target until the
+                    // loaded tiles reflect it (rebase effect above clears it).
+                    if (!isPendingCommitSatisfied(loaded.tiles, pendingMove)) {
+                        if (selectedDrag) pagerHold = false
+                        return@awaitEachGesture
+                    }
                     if (selectedDrag) pagerHold = true
                     // Wait until the already-pressed pointer moves past touch slop.
                     // Release before slop means no drag (a tap; tapCancel handles it).
@@ -726,6 +1047,7 @@ internal fun HomeCanvasGrid(
                         )
                         currentSession = entered
                         editSession = entered
+                        liveSessionRef.session = entered
                         sessionAtDown = entered as? HomeEditSession.Active
                             ?: run {
                                 pagerHold = false
@@ -733,6 +1055,11 @@ internal fun HomeCanvasGrid(
                             }
                     }
                     var activeAtDown = sessionAtDown ?: return@awaitEachGesture
+                    // P2 re-review: the transient MOVE frontier initializes only
+                    // after routing confirms MOVE (see the MOVE branch below).
+                    // Initializing here — before the route is known — created a
+                    // MOVE frontier (and its expanded layout) for armed RESIZE
+                    // drags too. RESIZE never creates or grows it.
                     // W3 single-BR-only: the origin corner is snapshotted ONCE at
                     // drag start from the ORIGIN span (top-left fixed anchor).
                     val originBounds = TileBounds.signedBounds(
@@ -776,6 +1103,7 @@ internal fun HomeCanvasGrid(
                         // tile-touch hold ends with the gesture.
                         currentSession = currentSession.cancel()
                         editSession = currentSession
+                        liveSessionRef.session = currentSession
                         pagerHold = false
                         return@awaitEachGesture
                     }
@@ -783,6 +1111,11 @@ internal fun HomeCanvasGrid(
                         // Body-drag while armed stays move and clears the arm, so a
                         // later arrow-drag needs a fresh arrow-tap.
                         interaction = interaction.disarmResize()
+                        // B3/P2: MOVE-only frontier init lives here, after routing
+                        // confirms MOVE — never on entry, never for RESIZE.
+                        if (shouldInitMoveFrontier(route, editFrontier)) {
+                            editFrontier = initEditFrontier(loaded.extent, availableHeightPx, rowStridePx)
+                        }
                     }
                     val isOnHandle = route == DownDragRoute.RESIZE
                     // A2 single arbitration for the active drag: route the
@@ -804,13 +1137,21 @@ internal fun HomeCanvasGrid(
                         // resize and a plain drag never changes span.
                         currentSession = activeAtDown.beginResize()
                         editSession = currentSession
+                        liveSessionRef.session = currentSession
                         activeAtDown = currentSession as? HomeEditSession.Active
                             ?: return@awaitEachGesture
                         // W4: track initial scroll and pager lock for steal detection.
                         val resizeStartScroll = scrollState.value
                         val resizeStartPagerLock = pagerAxisLock
                         var resizeStolen = false
-                        var currentChange: PointerInputChange = slopChange
+                        // B3 re-review P1: explicit pointer-up vs cancellation.
+                        // Only an observed lift (non-null change with pressed
+                        // false) completes the gesture toward commit. A null
+                        // await (lost pointer id), a consumed change, or scope
+                        // cancellation takes the zero-write cancel path below
+                        // and never reaches the release commit helpers.
+                        var resizeCancelled = false
+                        var resizeCompletedByUp = false
                         while (true) {
                             // W4: break on pager flip or scroll delta (steal attempt).
                             // Steal fails: keeps last-valid, zero-write on cancel.
@@ -820,12 +1161,24 @@ internal fun HomeCanvasGrid(
                                 resizeStolen = true
                                 break
                             }
-                            val next = awaitDragOrCancellation(currentChange.id) ?: break
-                            next.consume()
-                            currentChange = next
+                            val resizeEvent = awaitPointerEvent()
+                            val next = resizeEvent.changes.find { it.id == downId }
+                            when (classifyPointerEnd(next == null, next?.pressed == true, next?.isConsumed == true)) {
+                                PointerEndDecision.CANCEL -> {
+                                    resizeCancelled = true
+                                    break
+                                }
+                                PointerEndDecision.LIFT -> {
+                                    resizeCompletedByUp = true
+                                    break
+                                }
+                                PointerEndDecision.CONTINUE -> Unit
+                            }
+                            val change = next ?: break
+                            change.consume()
                             if (currentSession !is HomeEditSession.Active) break
-                            val pointerXPx = next.position.x
-                            val pointerYPx = next.position.y
+                            val pointerXPx = change.position.x
+                            val pointerYPx = change.position.y
                             val rawSpan = ResizeDragMath.rawSpan(
                                 pointerXPx = pointerXPx,
                                 pointerYPx = pointerYPx,
@@ -843,61 +1196,126 @@ internal fun HomeCanvasGrid(
                                 quantized,
                                 loaded.tiles,
                                 columns,
-                                rows,
+                                resizeRows,
                             )
                             editSession = currentSession
+                            liveSessionRef.session = currentSession
                         }
-                        val final = currentSession as? HomeEditSession.Active
-                        // W3 release: commit the held last-valid span iff it differs
-                        // from origin; otherwise snap back. Either way the session
-                        // stays in edit mode (stays-editing, never exits on resize).
-                        // W4: skip commit when stolen (zero-write on cancel).
-                        val commitSpan = if (resizeStolen) null else currentSession.resizeCommitSpan()
-                        if (final != null && commitSpan != null) {
-                            onResizeTile(final.itemId, commitSpan)
-                            // Keep session active in MOVE with the committed span as origin.
-                            currentSession = HomeEditSession.Active(
-                                itemId = final.itemId,
-                                origin = final.origin,
-                                originSpan = commitSpan,
-                                candidatePosition = final.origin,
-                                candidateSpan = commitSpan,
-                                lastValidSpan = commitSpan,
-                                // Position resets to origin alongside the span commit
-                                // (W2 owns lastValidPosition semantics).
-                                lastValidPosition = final.origin,
-                                candidateValidity = CandidateValidity.VALID,
-                                mode = EditMode.MOVE,
-                            )
-                            editSession = currentSession
-                        } else if (final != null) {
-                            // No change or blocked-only — snap back, stay in MOVE with original origin.
-                            currentSession = HomeEditSession.Active(
-                                itemId = final.itemId,
-                                origin = final.origin,
-                                originSpan = final.originSpan,
-                                candidatePosition = final.origin,
-                                candidateSpan = final.originSpan,
-                                lastValidSpan = final.originSpan,
-                                lastValidPosition = final.origin,
-                                candidateValidity = CandidateValidity.VALID,
-                                mode = EditMode.MOVE,
-                            )
-                            editSession = currentSession
-                        } else {
+                        if (resizeCancelled) {
+                            // Zero-write cancel: a cancelled (never lifted)
+                            // gesture commits nothing and never calls the
+                            // release helpers — even with an Active live
+                            // session while still visible. RESIZE never owns
+                            // the MOVE frontier, so it is left untouched.
+                            // B3 P2 steal cleanup: the explicit cancel still
+                            // releases a retained pending MOVE lease (hide is
+                            // not a failure and never reaches this branch).
+                            if (shouldClearPendingLeaseOnExit(
+                                    cancelled = resizeCancelled,
+                                    stolen = resizeStolen,
+                                )
+                            ) {
+                                pendingMove = null
+                            }
                             currentSession = HomeEditSession.Idle
                             editSession = currentSession
+                            liveSessionRef.session = currentSession
+                            pagerAxisLock = LockedAxis.UNDECIDED
+                            pagerHold = false
+                        } else {
+                            // P1/P2 release: commit from the synchronous live ref
+                            // (ticker write-through keeps it fresh) and suppress
+                            // when stolen, hidden, or not completed by an
+                            // explicit lift — a pager-hide mid-gesture is
+                            // zero-write even if the cancelled await still unwinds
+                            // to this path.
+                            val resizeRelease = liveSessionRef.session
+                            val final = resizeRelease as? HomeEditSession.Active
+                            // W3 release: commit the held last-valid span iff it differs
+                            // from origin; otherwise snap back. Either way the session
+                            // stays in edit mode (stays-editing, never exits on resize).
+                            // W4: skip commit when stolen (zero-write on cancel).
+                            val commitSpan = releaseResizeCommit(
+                                handlerSession = currentSession,
+                                liveSession = resizeRelease,
+                                stolen = resizeStolen,
+                                isVisible = isVisibleState.value,
+                                completedByUp = resizeCompletedByUp,
+                            )
+                            if (final != null && commitSpan != null) {
+                                onResizeTile(final.itemId, commitSpan)
+                                // Keep session active in MOVE with the committed span as origin.
+                                currentSession = HomeEditSession.Active(
+                                    itemId = final.itemId,
+                                    origin = final.origin,
+                                    originSpan = commitSpan,
+                                    candidatePosition = final.origin,
+                                    candidateSpan = commitSpan,
+                                    lastValidSpan = commitSpan,
+                                    // Position resets to origin alongside the span commit
+                                    // (W2 owns lastValidPosition semantics).
+                                    lastValidPosition = final.origin,
+                                    candidateValidity = CandidateValidity.VALID,
+                                    mode = EditMode.MOVE,
+                                )
+                                editSession = currentSession
+                                liveSessionRef.session = currentSession
+                            } else if (final != null && !resizeCompletedByUp) {
+                                // Loop broke without an explicit lift and without
+                                // cancellation (stale local, hidden page): drop
+                                // the transient session with zero writes rather
+                                // than snapping back into edit. B3 P2 steal
+                                // cleanup: a steal releases a retained pending
+                                // MOVE lease; a hide or stale break maps to
+                                // (false, false) and retains it for the rebase
+                                // reconcile. The frontier stays untouched:
+                                // RESIZE never owns it.
+                                if (shouldClearPendingLeaseOnExit(
+                                        cancelled = false,
+                                        stolen = resizeStolen,
+                                    )
+                                ) {
+                                    pendingMove = null
+                                }
+                                currentSession = HomeEditSession.Idle
+                                editSession = currentSession
+                                liveSessionRef.session = currentSession
+                            } else if (final != null) {
+                                // No change or blocked-only — snap back, stay in MOVE with original origin.
+                                currentSession = HomeEditSession.Active(
+                                    itemId = final.itemId,
+                                    origin = final.origin,
+                                    originSpan = final.originSpan,
+                                    candidatePosition = final.origin,
+                                    candidateSpan = final.originSpan,
+                                    lastValidSpan = final.originSpan,
+                                    lastValidPosition = final.origin,
+                                    candidateValidity = CandidateValidity.VALID,
+                                    mode = EditMode.MOVE,
+                                )
+                                editSession = currentSession
+                                liveSessionRef.session = currentSession
+                            } else {
+                                currentSession = HomeEditSession.Idle
+                                editSession = currentSession
+                                liveSessionRef.session = currentSession
+                            }
+                            // W4: reset pager axis lock once after resize release/cancel.
+                            // A2: tile-touch hold ends with the drag; the session stays
+                            // in edit so the A1 isHold signal keeps holding the pager.
+                            pagerAxisLock = LockedAxis.UNDECIDED
+                            pagerHold = false
                         }
-                        // W4: reset pager axis lock once after resize release/cancel.
-                        // A2: tile-touch hold ends with the drag; the session stays
-                        // in edit so the A1 isHold signal keeps holding the pager.
-                        pagerAxisLock = LockedAxis.UNDECIDED
-                        pagerHold = false
                     } else {
                         // MOVE mode: pointer position maps to a candidate cell.
                         // W3 single-gesture rule (W4 owns arbitration): routing was
                         // decided at drag start above, so this branch stays MOVE
                         // until release — it never promotes into the handle corner.
+                        // B3: every MOVE candidate maps with the CURRENT scroll
+                        // offset (stationary remap during auto-scroll); only the
+                        // down hit-test and grab offsets stay frozen at
+                        // gestureScrollYPx. Legality uses the transient frontier
+                        // bound (moveRows), never the normal bound.
                         val slopCell = MoveDragMath.cellForPixel(
                             xPx = slopChange.position.x,
                             yPx = slopChange.position.y,
@@ -907,7 +1325,7 @@ internal fun HomeCanvasGrid(
                             windowFirstRow = rowOrigin,
                             originXPx = originX.toFloat(),
                             originYPxPx = originYPx.toFloat(),
-                            scrollYPx = gestureScrollYPx,
+                            scrollYPx = scrollState.value.toFloat(),
                             grabOffsetXPx = grabOffsetXPx,
                             grabOffsetYPx = grabOffsetYPx,
                         )
@@ -915,37 +1333,143 @@ internal fun HomeCanvasGrid(
                             slopCell,
                             loaded.tiles,
                             columns,
-                            rows,
+                            moveLegalityRows(rows, editFrontier),
                         )
                         editSession = currentSession
+                        liveSessionRef.session = currentSession
+                        // P1: hoist the MOVE anchor for the stationary ticker:
+                        // the grab offsets frozen at down plus the latest
+                        // pointer position, refreshed per pointer event below.
+                        moveGrabOffsetXPx = grabOffsetXPx
+                        moveGrabOffsetYPx = grabOffsetYPx
+                        moveEdgeXPx = slopChange.position.x
+                        moveEdgeYPx = slopChange.position.y
                         // W4: track initial scroll and pager lock for steal detection.
-                        val moveStartScroll = scrollState.value
+                        // B3: the baseline below absorbs auto-scroll-owned steps
+                        // (each intentional step re-baselines), so only foreign
+                        // scroll deltas and pager flips steal.
+                        moveScrollBaseline = scrollState.value
                         val moveStartPagerLock = pagerAxisLock
                         var moveStolen = false
-                        var currentChange: PointerInputChange = slopChange
+                        // B3 re-review P1: explicit pointer-up vs cancellation —
+                        // same contract as the RESIZE loop above. Only an
+                        // observed lift completes toward commit; null/consumed
+                        // takes the zero-write cancel path with frontier
+                        // cleanup and the live ref reset to Idle, never calling
+                        // the release commit helpers.
+                        var moveCancelled = false
+                        var moveCompletedByUp = false
                         while (true) {
-                            // W4: break on pager flip or scroll delta (steal attempt).
-                            // Steal fails: keeps last-valid, zero-write on cancel.
+                            // W4: break on pager flip or foreign scroll delta
+                            // (steal attempt). Steal fails: keeps last-valid,
+                            // zero-write on cancel.
                             if (pagerAxisLock != moveStartPagerLock ||
-                                scrollState.value != moveStartScroll
+                                scrollState.value != moveScrollBaseline
                             ) {
                                 moveStolen = true
                                 break
                             }
-                            val next = awaitDragOrCancellation(currentChange.id) ?: break
-                            next.consume()
-                            currentChange = next
+                            val moveEvent = awaitPointerEvent()
+                            val next = moveEvent.changes.find { it.id == downId }
+                            when (classifyPointerEnd(next == null, next?.pressed == true, next?.isConsumed == true)) {
+                                PointerEndDecision.CANCEL -> {
+                                    moveCancelled = true
+                                    break
+                                }
+                                PointerEndDecision.LIFT -> {
+                                    moveCompletedByUp = true
+                                    break
+                                }
+                                PointerEndDecision.CONTINUE -> Unit
+                            }
+                            val moveChange = next ?: break
+                            moveChange.consume()
+                            // P1: pick up the ticker's stationary remap before
+                            // folding in this event, so a held pointer's scroll
+                            // progress is never overwritten by a stale local.
+                            currentSession = liveSessionRef.session
                             if (currentSession !is HomeEditSession.Active) break
+                            // B3 edge auto-scroll (MOVE only): extend the frontier
+                            // via grid policy before scrolling down; the top is
+                            // limited by the range. Steps scroll the ScrollState
+                            // directly and re-baseline as auto-scroll-owned.
+                            moveEdgeXPx = moveChange.position.x
+                            moveEdgeYPx = moveChange.position.y
+                            var scrollForMap = scrollState.value
+                            val edgeZone = autoScrollZone(
+                                moveChange.position.y,
+                                availableHeightPx,
+                                autoScrollEdgePx,
+                            )
+                            if (edgeZone == AutoScrollZone.BOTTOM) {
+                                val probeCell = MoveDragMath.cellForPixel(
+                                    xPx = moveChange.position.x,
+                                    yPx = moveChange.position.y,
+                                    cellSizePx = geometry.cellSizePx.toFloat(),
+                                    columnGapPx = geometry.columnGapPx.toFloat(),
+                                    rowGapPx = geometry.rowGapPx.toFloat(),
+                                    windowFirstRow = rowOrigin,
+                                    originXPx = originX.toFloat(),
+                                    originYPxPx = originYPx.toFloat(),
+                                    scrollYPx = scrollForMap.toFloat(),
+                                    grabOffsetXPx = grabOffsetXPx,
+                                    grabOffsetYPx = grabOffsetYPx,
+                                )
+                                val liveSession = currentSession as? HomeEditSession.Active
+                                val grown = if (liveSession != null) {
+                                    advanceFrontierForMove(
+                                        editFrontier ?: initEditFrontier(
+                                            loaded.extent,
+                                            availableHeightPx,
+                                            rowStridePx,
+                                        ),
+                                        probeCell,
+                                        liveSession.candidateSpan.rows,
+                                    )
+                                } else {
+                                    editFrontier
+                                }
+                                if (grown != null) {
+                                    editFrontier = grown
+                                    val editMax = editScrollMaxPx(
+                                        layoutRows = editLayoutRows(loaded.extent, grown),
+                                        cellSizePx = geometry.cellSizePx,
+                                        rowGapPx = geometry.rowGapPx,
+                                        viewportHeightPx = availableHeightPx,
+                                    )
+                                    val target = (scrollForMap + autoScrollStepPx(rowStridePx))
+                                        .coerceAtMost(editMax)
+                                    // Synchronous raw dispatch: scrollTo is
+                                    // unavailable in the restricted
+                                    // pointer-input scope, and the immediate
+                                    // mutation keeps the steal baseline exact.
+                                    val delta = (target - scrollForMap).toFloat()
+                                    if (delta != 0f) {
+                                        scrollState.dispatchRawDelta(delta)
+                                        moveScrollBaseline = scrollState.value
+                                        scrollForMap = scrollState.value
+                                    }
+                                }
+                            } else if (edgeZone == AutoScrollZone.TOP) {
+                                val target = (scrollForMap - autoScrollStepPx(rowStridePx))
+                                    .coerceAtLeast(0)
+                                val delta = (target - scrollForMap).toFloat()
+                                if (delta != 0f) {
+                                    scrollState.dispatchRawDelta(delta)
+                                    moveScrollBaseline = scrollState.value
+                                    scrollForMap = scrollState.value
+                                }
+                            }
                             val cell = MoveDragMath.cellForPixel(
-                                xPx = next.position.x,
-                                yPx = next.position.y,
+                                xPx = moveChange.position.x,
+                                yPx = moveChange.position.y,
                                 cellSizePx = geometry.cellSizePx.toFloat(),
                                 columnGapPx = geometry.columnGapPx.toFloat(),
                                 rowGapPx = geometry.rowGapPx.toFloat(),
                                 windowFirstRow = rowOrigin,
                                 originXPx = originX.toFloat(),
                                 originYPxPx = originYPx.toFloat(),
-                                scrollYPx = gestureScrollYPx,
+                                scrollYPx = scrollForMap.toFloat(),
                                 grabOffsetXPx = grabOffsetXPx,
                                 grabOffsetYPx = grabOffsetYPx,
                             )
@@ -953,18 +1477,64 @@ internal fun HomeCanvasGrid(
                                 cell,
                                 loaded.tiles,
                                 columns,
-                                rows,
+                                moveLegalityRows(rows, editFrontier),
                             )
                             editSession = currentSession
+                            liveSessionRef.session = currentSession
                         }
-                        val final = currentSession as? HomeEditSession.Active
+                        // P1/P2 release: commit from the synchronous live ref —
+                        // the ticker's stationary remap writes through to it, so
+                        // a hold-scrolled-then-released drag commits the
+                        // post-scroll cell even with no further pointer events.
+                        // Stolen, hidden, or cancelled (never lifted) gestures
+                        // are zero-write and never call the commit helpers.
+                        val moveRelease = liveSessionRef.session
+                        val final = moveRelease as? HomeEditSession.Active
                         // W4: skip commit when stolen (zero-write on cancel).
-                        val commit = if (moveStolen) null else currentSession.moveCommitPosition()
-                        if (final != null && commit != null) {
+                        // B3: release is the sole commit — auto-scroll steps above
+                        // never call onMoveTile. A commit leases the frontier to
+                        // the pending target until loaded reflects it; a stolen,
+                        // hidden, or cancelled drag discards the frontier; a
+                        // no-move release retains the bounded transient until
+                        // exit/cancel. Only an explicit lift commits.
+                        val commit = if (moveCancelled) {
+                            null
+                        } else {
+                            releaseMoveCommit(
+                                handlerSession = currentSession,
+                                liveSession = moveRelease,
+                                stolen = moveStolen,
+                                isVisible = isVisibleState.value,
+                                completedByUp = moveCompletedByUp,
+                            )
+                        }
+                        moveEdgeYPx = null
+                        moveEdgeXPx = null
+                        // B3 P2 steal cleanup: explicit cancel/steal exits release
+                        // the pending lease with the frontier; a pager-hide or
+                        // stale break discards only the frontier/gesture and
+                        // retains the lease for the rebase reconcile below
+                        // (hide is not a failure). A no-move lift retains the
+                        // bounded transient until exit/cancel.
+                        val clearPendingOnExit = shouldClearPendingLeaseOnExit(
+                            cancelled = moveCancelled,
+                            stolen = moveStolen,
+                        )
+                        if (moveCancelled) {
+                            editFrontier = null
+                            pendingMove = null
+                        } else if (final != null && commit != null) {
                             onMoveTile(final.itemId, commit)
+                            pendingMove = PendingMoveCommit(final.itemId, commit)
+                        } else if (moveStolen || !isVisibleState.value || !moveCompletedByUp) {
+                            editFrontier = null
+                            if (clearPendingOnExit) {
+                                pendingMove = null
+                            }
                         }
                         currentSession = HomeEditSession.Idle
                         editSession = currentSession
+                        liveSessionRef.session = currentSession
                         // W4: reset pager axis lock once after move release/cancel.
                         // A2: tile-touch hold ends with the drag; the session is
                         // Idle so neither hold keeps the pager.
@@ -1129,6 +1699,12 @@ internal fun HomeCanvasGrid(
                                     // Active → Idle; stays in wiggle-edit.
                                     interaction = interaction.unpinIfSelected(controlItemId)
                                     editSession = editSession.cancel()
+                                    liveSessionRef.session = HomeEditSession.Idle
+                                    // B3: removal ends the transient edit too.
+                                    editFrontier = null
+                                    pendingMove = null
+                                    moveEdgeYPx = null
+                                    moveEdgeXPx = null
                                 },
                             )
                         }
@@ -1219,6 +1795,115 @@ internal fun routeDownDrag(
     hasTile -> DownDragRoute.MOVE
     else -> DownDragRoute.NONE
 }
+
+/**
+ * Synchronous single source for the ticker<->drag session handoff (B3 P1).
+ *
+ * The stationary auto-scroll ticker and the pointer drag loop both write
+ * through to this holder alongside the Compose `editSession` state. The
+ * release path commits from [session] rather than the drag loop's event-only
+ * local, so a stationary-hold-then-release (scroll via ticker with no further
+ * pointer events) commits the post-scroll cell, never the pre-scroll one.
+ * Plain holder, never a second placement engine; reset per home via
+ * `key(requestedHomeId)` and cleared on every cancel/hide path.
+ */
+internal class LiveEditSessionRef(var session: HomeEditSession)
+
+/**
+ * Pointer-loop end decision for the MOVE/RESIZE drag loops (B3 P2).
+ *
+ * Pure, framework-free classification of a loop-exit observation so the
+ * null/consumed branches are unit-testable without a gesture scope:
+ * - a lost pointer id (null await) is always [CANCEL], never a lift;
+ * - an observed lift (non-null, not consumed, no longer pressed) is [LIFT];
+ * - a consumed change is [CANCEL], never a lift;
+ * - an unconsumed pressed change is [CONTINUE] (keep looping).
+ * Lift takes precedence over consumed (matches the loop order: the pressed
+ * check runs before the consumed check), so a lifted-but-consumed change
+ * still completes toward commit gating instead of cancelling.
+ */
+internal enum class PointerEndDecision { CONTINUE, LIFT, CANCEL }
+
+internal fun classifyPointerEnd(
+    changeNull: Boolean,
+    pressed: Boolean,
+    consumed: Boolean,
+): PointerEndDecision = when {
+    changeNull -> PointerEndDecision.CANCEL
+    !pressed -> PointerEndDecision.LIFT
+    consumed -> PointerEndDecision.CANCEL
+    else -> PointerEndDecision.CONTINUE
+}
+
+/**
+ * B3 P2 steal cleanup: whether a gesture exit clears the pending MOVE lease.
+ *
+ * Explicit failure exits — a cancelled (never lifted) gesture or a
+ * pager/scroll steal — release the lease alongside the transient frontier
+ * with zero writes. Every other exit maps to `(cancelled = false,
+ * stolen = false)` at the call site and retains the lease: a pager-hide
+ * mid-gesture (hide is not a failure — the rebase effect reconciles the
+ * retained lease against loaded tiles), a stale loop break with no lift, and
+ * a no-move lift that retains the bounded transient. The satisfied-load
+ * clear lives in [retainedPendingLease], not here. Shared single source for
+ * the MOVE and RESIZE exit sites; pure, framework-free.
+ */
+internal fun shouldClearPendingLeaseOnExit(cancelled: Boolean, stolen: Boolean): Boolean =
+    cancelled || stolen
+
+/**
+ * MOVE release commit from the pointer loop's single source (B3 P1/P2).
+ *
+ * Returns the live session's [HomeEditSession.moveCommitPosition] unless the
+ * gesture was stolen, the page hid mid-gesture ([isVisible] false), or the
+ * loop exited without an explicit pointer-up ([completedByUp] false — null
+ * await, coroutine cancellation, or a consumed change), in which case null
+ * (zero-write). The [handlerSession] parameter documents the stale event-only
+ * local it replaces; it is never read, so a stationary ticker remap cannot be
+ * lost. Pure, framework-free.
+ */
+internal fun releaseMoveCommit(
+    @Suppress("UNUSED_PARAMETER") handlerSession: HomeEditSession,
+    liveSession: HomeEditSession,
+    stolen: Boolean,
+    isVisible: Boolean,
+    completedByUp: Boolean = true,
+): LogicalPosition? {
+    if (stolen || !isVisible || !completedByUp) return null
+    return liveSession.moveCommitPosition()
+}
+
+/**
+ * RESIZE release commit from the pointer loop's single source (B3 P2).
+ *
+ * Same stolen/hidden/cancelled zero-write contract as [releaseMoveCommit] for
+ * the resize path: a pager-hide mid-gesture or a cancelled (non-pointer-up)
+ * loop exit suppresses `onResizeTile` even if the await still unwinds to
+ * release with an Active live session. Pure, framework-free.
+ */
+internal fun releaseResizeCommit(
+    @Suppress("UNUSED_PARAMETER") handlerSession: HomeEditSession,
+    liveSession: HomeEditSession,
+    stolen: Boolean,
+    isVisible: Boolean,
+    completedByUp: Boolean = true,
+): LogicalSpan? {
+    if (stolen || !isVisible || !completedByUp) return null
+    return liveSession.resizeCommitSpan()
+}
+
+/**
+ * MOVE-only frontier init gate (B3 P2).
+ *
+ * The transient edit frontier initializes only after routing confirms MOVE
+ * with no retained frontier yet. RESIZE (and NONE) never create it, so an
+ * armed resize drag keeps the normal bound and never expands the layout.
+ * Pure, framework-free.
+ */
+internal fun shouldInitMoveFrontier(
+    route: DownDragRoute,
+    existing: GridVerticalLayout.EditBoundary?,
+): Boolean = route == DownDragRoute.MOVE && existing == null
 
 /**
  * Snapshots whether resize is armed for the down-hit tile.

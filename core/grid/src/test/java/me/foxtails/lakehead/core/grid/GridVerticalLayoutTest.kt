@@ -159,6 +159,83 @@ class GridVerticalLayoutTest {
         assertEquals(3L, result.occupiedHeightRows)
     }
 
+    @Test
+    fun editMarginIsCappedBeforeItExtendsTheBoundary() {
+        val boundary = GridVerticalLayout.createEditBoundary(
+            extent = GridVerticalExtent(10_000L, 10_000L),
+            viewportRows = 8L,
+            workingMarginRows = Long.MAX_VALUE,
+        )
+
+        assertEquals(GridVerticalLayout.MAX_WORKING_MARGIN_ROWS, boundary.marginRows)
+        assertEquals(14_096L, boundary.exclusiveRow)
+    }
+
+    @Test
+    fun editBoundaryAdvancesOnlyAtTheTrailingMargin() {
+        val boundary = GridVerticalLayout.createEditBoundary(
+            extent = GridVerticalExtent(20L, 20L),
+            viewportRows = 4L,
+            workingMarginRows = 4L,
+        )
+
+        assertEquals(boundary, GridVerticalLayout.advanceEditBoundary(boundary, 19L))
+        assertEquals(
+            GridVerticalLayout.EditBoundary(28L, 4L),
+            GridVerticalLayout.advanceEditBoundary(boundary, 24L),
+        )
+    }
+
+    @Test
+    fun repeatedAdvancesAreBoundedOneMarginAtATime() {
+        var boundary = GridVerticalLayout.createEditBoundary(
+            extent = GridVerticalExtent(1L, 1L),
+            viewportRows = 1L,
+            workingMarginRows = 2L,
+        )
+
+        boundary = GridVerticalLayout.advanceEditBoundary(boundary, 3L)
+        assertEquals(5L, boundary.exclusiveRow)
+        boundary = GridVerticalLayout.advanceEditBoundary(boundary, 5L)
+        assertEquals(7L, boundary.exclusiveRow)
+        boundary = GridVerticalLayout.advanceEditBoundary(boundary, 5L)
+        assertEquals(9L, boundary.exclusiveRow)
+    }
+
+    @Test
+    fun advancingDirectlyConstructedBoundaryClampsMalformedMargin() {
+        val oversized = GridVerticalLayout.advanceEditBoundary(
+            GridVerticalLayout.EditBoundary(exclusiveRow = 10L, marginRows = 99_999L),
+            movedBottomRowExclusive = 10L,
+        )
+        assertEquals(GridVerticalLayout.MAX_WORKING_MARGIN_ROWS, oversized.marginRows)
+        assertEquals(10L + GridVerticalLayout.MAX_WORKING_MARGIN_ROWS, oversized.exclusiveRow)
+
+        val negative = GridVerticalLayout.advanceEditBoundary(
+            GridVerticalLayout.EditBoundary(exclusiveRow = 10L, marginRows = -5L),
+            movedBottomRowExclusive = Long.MAX_VALUE,
+        )
+        assertEquals(0L, negative.marginRows)
+        assertEquals(10L, negative.exclusiveRow)
+    }
+
+    @Test
+    fun editBoundaryUsesExactArithmeticAtLongOverflow() {
+        assertArithmeticException {
+            GridVerticalLayout.createEditBoundary(
+                extent = GridVerticalExtent(Long.MAX_VALUE, Long.MAX_VALUE),
+                viewportRows = 1L,
+                workingMarginRows = 1L,
+            )
+        }
+        assertArithmeticException {
+            GridVerticalLayout.advanceEditBoundary(
+                GridVerticalLayout.EditBoundary(Long.MAX_VALUE, 1L),
+                movedBottomRowExclusive = Long.MAX_VALUE - 1L,
+            )
+        }
+    }
+
     private fun placement(id: String, row: Int, spanRows: Int = 1) =
         GridPlacement(id, GridPosition(column = 0, row = row), GridSpan(columns = 1, rows = spanRows))
 

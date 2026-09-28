@@ -289,6 +289,14 @@ internal fun LauncherShell(
     )
     LaunchedEffect(feedProgress) { onFeedProgress(feedProgress) }
     LaunchedEffect(feedVisible) { onFeedVisible(feedVisible) }
+    // B3 P1: settled home visibility for the canvas hide-abort. Mirrors the
+    // feed settled predicate so a swipe away discards the transient edit with
+    // zero writes; settled on home keeps the exact prior behavior.
+    val homeVisible = isHomeCanvasVisible(
+        pagerState.currentPage,
+        pagerState.isScrollInProgress,
+        pagerState.currentPageOffsetFraction,
+    )
 
     Box(
         modifier = modifier
@@ -392,6 +400,7 @@ internal fun LauncherShell(
                     onSurfaceTogglePin = onSurfaceTogglePin,
                     onTransientHoldChange = { homeHold = it },
                     onPagerHoldChange = { pagerHold = it },
+                    isVisible = homeVisible,
                 )
             }
         }
@@ -492,3 +501,20 @@ internal fun isFeedOverlayVisible(
     pageOffsetFraction: Float = 0f,
 ): Boolean =
     currentPage == LAUNCHER_PAGE_FEED && !isScrollInProgress && pageOffsetFraction == 0f
+
+/**
+ * B3 P1 settled home visibility for the canvas hide-abort.
+ *
+ * True only while settled on the home tile page ([LAUNCHER_PAGE_TILE]): no
+ * scroll in progress and zero peek offset, mirroring [isFeedOverlayVisible].
+ * The shell passes this as `HomeCanvas(isVisible = ...)` so a pager
+ * navigation away discards the transient edit with zero writes. Defaults
+ * preserve the settled-page check for callers that do not track scroll state
+ * (previews). Pure, framework-free and unit-testable.
+ */
+internal fun isHomeCanvasVisible(
+    currentPage: Int,
+    isScrollInProgress: Boolean = false,
+    pageOffsetFraction: Float = 0f,
+): Boolean =
+    currentPage == LAUNCHER_PAGE_TILE && !isScrollInProgress && pageOffsetFraction == 0f
