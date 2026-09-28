@@ -2,6 +2,7 @@ package me.foxtails.lakehead.feature.home
 
 import androidx.activity.ComponentActivity
 import androidx.compose.runtime.Composable
+import androidx.compose.foundation.layout.size
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.geometry.Offset
@@ -983,6 +984,110 @@ class HomeCanvasTest {
         composeRule.onNodeWithTag(PINNED_OVERFLOW_TAG, useUnmergedTree = true).assertDoesNotExist()
         composeRule.onNodeWithTag(HOME_TILE_ICON_TAG, useUnmergedTree = true).assertExists()
         composeRule.onAllNodesWithContentDescription("Square App").assertCountEquals(2)
+    }
+
+    @Test
+    fun homeCanvasTile_lastPinClear_duringPreviewSpanChange_restoresCenteredBounds() {
+        // C-B P2: last-pin removal combined with a resize preview span change.
+        // The preview span arrives with a changed modifier while pins remain;
+        // the modifier also carries the preview size (square 80dp cells, as the
+        // grid's resize preview supplies both together), so the tile bounds
+        // genuinely shrink 4x2->2x2 instead of only retagging. Clearing the
+        // final pin at the preview span must restore the pin-free centered
+        // treatment with measured centered bounds/extent vs the NEW bounds.
+        val span = androidx.compose.runtime.mutableStateOf(LogicalSpan(4, 2))
+        val pins = androidx.compose.runtime.mutableStateOf(
+            listOf(PinnedTileShortcut("new-post", "New post")),
+        )
+        setThemedContent {
+            HomeCanvasTile(
+                tile = tile(
+                    "wide",
+                    personal,
+                    "Preview App",
+                    column = 0,
+                    row = 0,
+                    spanColumns = span.value.columns,
+                    spanRows = span.value.rows,
+                ),
+                iconBitmap = ImageBitmap(32, 32),
+                onLaunchApp = {},
+                // The preview span arrives with a changed modifier, as the
+                // grid's resize preview supplies both together: tag plus the
+                // preview size at the square-cell pitch (80dp per cell).
+                modifier = Modifier
+                    .testTag("preview-tile-${span.value.columns}x${span.value.rows}")
+                    .size(80.dp * span.value.columns, 80.dp * span.value.rows),
+                pinnedShortcuts = pins.value,
+                onShortcutClick = {},
+            )
+        }
+        composeRule.waitForIdle()
+
+        // 4x2 with one pin: compact strip (app glyph + shortcut) with the icon slot.
+        composeRule.onNodeWithTag("preview-tile-4x2", useUnmergedTree = true).assertExists()
+        composeRule.onNodeWithTag(APP_STRIP_GLYPH_TAG, useUnmergedTree = true).assertExists()
+        composeRule.onNodeWithContentDescription("New post, shortcut").assertExists()
+        composeRule.onNodeWithTag(HOME_TILE_ICON_TAG, useUnmergedTree = true).assertExists()
+        // Baseline size evidence: 4x2 at the 80dp pitch is 320x160dp.
+        val baselineTileBounds = composeRule.onAllNodesWithContentDescription("Preview App")[0]
+            .fetchSemanticsNode().boundsInRoot
+        val baselineW = with(composeRule.density) { 320.dp.toPx() }
+        val baselineH = with(composeRule.density) { 160.dp.toPx() }
+        composeRule.runOnIdle {
+            assertEquals(baselineW, baselineTileBounds.width, 2f)
+            assertEquals(baselineH, baselineTileBounds.height, 2f)
+        }
+
+        // Preview shrink to 2x2 while the pin remains: the strip survives
+        // (2x2 capacity is 1), the binding retains the pin, nothing deleted.
+        composeRule.runOnIdle { span.value = LogicalSpan(2, 2) }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("preview-tile-2x2", useUnmergedTree = true).assertExists()
+        composeRule.onNodeWithTag("preview-tile-4x2", useUnmergedTree = true).assertDoesNotExist()
+        composeRule.onNodeWithTag(APP_STRIP_GLYPH_TAG, useUnmergedTree = true).assertExists()
+        composeRule.onNodeWithContentDescription("New post, shortcut").assertExists()
+        composeRule.onNodeWithTag(PINNED_OVERFLOW_TAG, useUnmergedTree = true).assertDoesNotExist()
+        // Preview size evidence: the tile itself shrank to 160x160dp, not
+        // just retagged, so later centered assertions bind to NEW bounds.
+        val previewTileBounds = composeRule.onAllNodesWithContentDescription("Preview App")[0]
+            .fetchSemanticsNode().boundsInRoot
+        val previewSize = with(composeRule.density) { 160.dp.toPx() }
+        composeRule.runOnIdle {
+            assertEquals(previewSize, previewTileBounds.width, 2f)
+            assertEquals(previewSize, previewTileBounds.height, 2f)
+        }
+
+        // Clear the last pin at the preview span: strip gone, centered icon
+        // slot stays, the two app regions share the label.
+        composeRule.runOnIdle { pins.value = emptyList() }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag(APP_STRIP_GLYPH_TAG, useUnmergedTree = true).assertDoesNotExist()
+        composeRule.onNodeWithContentDescription("New post, shortcut").assertDoesNotExist()
+        composeRule.onNodeWithTag(PINNED_OVERFLOW_TAG, useUnmergedTree = true).assertDoesNotExist()
+        composeRule.onNodeWithTag(HOME_TILE_ICON_TAG, useUnmergedTree = true).assertExists()
+        composeRule.onAllNodesWithContentDescription("Preview App").assertCountEquals(2)
+
+        // Measured centered bounds/extent vs the NEW (2x2 preview) bounds:
+        // the tile kept its 160x160dp preview size through the pin clear, and
+        // the pin-free large tile centers the icon at min(availW, availH)
+        // after tile padding (centeredIconExtent), so the icon rect is square
+        // at that extent sharing the NEW tile center.
+        val tileBounds = composeRule.onAllNodesWithContentDescription("Preview App")[0]
+            .fetchSemanticsNode().boundsInRoot
+        val iconBounds = composeRule.onNodeWithTag(HOME_TILE_ICON_TAG, useUnmergedTree = true)
+            .fetchSemanticsNode().boundsInRoot
+        val paddingPx = with(composeRule.density) { 8.dp.toPx() }
+        val expectedExtent = minOf(tileBounds.width, tileBounds.height) - 2 * paddingPx
+        composeRule.runOnIdle {
+            assertEquals(previewSize, tileBounds.width, 2f)
+            assertEquals(previewSize, tileBounds.height, 2f)
+            assertEquals(iconBounds.width, iconBounds.height, 1.5f)
+            assertEquals(expectedExtent, iconBounds.width, 2f)
+            assertEquals(expectedExtent, iconBounds.height, 2f)
+            assertEquals(tileBounds.center.x, iconBounds.center.x, 1.5f)
+            assertEquals(tileBounds.center.y, iconBounds.center.y, 1.5f)
+        }
     }
 
     // ---- Remove affordance (delete X) ----

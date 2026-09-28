@@ -401,6 +401,51 @@ class ShortcutStripGeometryTest {
         assertIllegalArgument { ShortcutStripGeometry.centeredGroupStartPx(320L, -1L) }
     }
 
+    // ── C-B cross-contract: grid-unit pitch + centered group on real geometry ──
+
+    @Test
+    fun stripGroup_crossContract_realisticPhoneGeometry() {
+        // Normal-phone grid: cell 56 + gap 8 = pitch 64 (the Long form of the
+        // designsystem grid-unit pitch); glyph extent 40.
+        assertEquals(64L, ShortcutStripGeometry.slotPitchPx(56L, 8L))
+
+        // App + 1 (2 slots): 40 + 1 * 64 = 104; centered in the 120 edge of a
+        // realistic 2x2 tile (120 - 2 * 8 padding) the group starts at 8.
+        assertEquals(104L, ShortcutStripGeometry.stripGroupExtentPx(40L, 64L, 2))
+        assertEquals(8L, ShortcutStripGeometry.centeredGroupStartPx(120L, 104L))
+
+        // App + 3 (4 slots): 40 + 3 * 64 = 232; centered in the 248 edge of a
+        // realistic 4x2 tile (248 - 2 * 8 padding) the group starts at 8.
+        assertEquals(232L, ShortcutStripGeometry.stripGroupExtentPx(40L, 64L, 4))
+        assertEquals(8L, ShortcutStripGeometry.centeredGroupStartPx(248L, 232L))
+    }
+
+    @Test
+    fun stripGroup_crossContract_orientationAndDirection() {
+        // Horizontal spans grow leftward (index 0 nearest the rightmost app).
+        for (span in listOf(GridSpan(2, 2), GridSpan(4, 2))) {
+            assertEquals(
+                ShortcutStripGeometry.PinnedStripOrientation.HORIZONTAL,
+                ShortcutStripGeometry.orientationFor(span),
+            )
+            assertEquals(
+                ShortcutStripGeometry.StripDirection.LEFTWARD,
+                ShortcutStripGeometry.directionFor(span),
+            )
+        }
+        // Narrow spans grow upward (index 0 nearest the bottommost app).
+        for (span in listOf(GridSpan(1, 2), GridSpan(1, 3))) {
+            assertEquals(
+                ShortcutStripGeometry.PinnedStripOrientation.VERTICAL,
+                ShortcutStripGeometry.orientationFor(span),
+            )
+            assertEquals(
+                ShortcutStripGeometry.StripDirection.UPWARD,
+                ShortcutStripGeometry.directionFor(span),
+            )
+        }
+    }
+
     // ── helpers ───────────────────────────────────────────────────────────
 
     private fun assertIllegalArgument(block: () -> Unit) {

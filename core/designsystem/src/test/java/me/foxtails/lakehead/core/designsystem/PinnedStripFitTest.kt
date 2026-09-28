@@ -193,4 +193,44 @@ class PinnedStripFitTest {
         assertFalse(fit.showOverflowNode)
         assertEquals(5, fit.hiddenCount)
     }
+
+    // ── C-B cross-contract: visible prefix + overflow node + edit insets ──
+
+    @Test
+    fun fourWide_fullPrefix_yieldsNode_announcesRemainder() {
+        // Pre-clamped app + 3 plus one caller-retained overflow on 248x120:
+        // app + 3 (40 + 3 * 64 = 232) exactly fills the padded edge
+        // (248 - 2 * 8), so the fit keeps the full visible prefix nearest
+        // the app instead of trading a tappable pin for the node; the
+        // retained remainder is announced through the tile body.
+        val fit = fit(248, 120, GridSpan(4, 2), pinnedCount = 3, overflowCount = 1)
+        assertEquals(3, fit.visibleShortcutCount)
+        assertTrue(fit.showAppGlyph)
+        assertFalse(fit.showOverflowNode)
+        assertEquals(1, fit.hiddenCount)
+        assertEquals(64.dp, fit.pitch)
+    }
+
+    @Test
+    fun overflowNode_groupMath_matchesStripGroupExtent() {
+        // Two visibles plus the node beside the app is 4 slots: the Dp group
+        // (40 + 3 * 64 = 232) equals the core:grid Long contract for the
+        // same slot count, and exactly fills the padded 248 edge.
+        val group = ShortcutStripGeometry.stripGroupExtentPx(40L, 64L, 4)
+        assertEquals(232L, group)
+        val fit = fit(248, 120, GridSpan(4, 2), pinnedCount = 2, overflowCount = 1)
+        assertTrue(fit.showOverflowNode)
+        assertEquals(1, fit.hiddenCount)
+    }
+
+    @Test
+    fun editReserves_widenEndInset_keepPitch() {
+        // The 48.dp edit touch square reserves its in-tile half (24.dp) on
+        // the strip side; pitch still derives from the measured edge.
+        val idle = fit(120, 120, GridSpan(2, 2), pinnedCount = 1)
+        val edit = fit(120, 120, GridSpan(2, 2), pinnedCount = 1, isEditSelected = true)
+        assertEquals(8.dp, idle.endInset)
+        assertEquals(32.dp, edit.endInset)
+        assertEquals(idle.pitch, edit.pitch)
+    }
 }
