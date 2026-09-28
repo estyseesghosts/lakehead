@@ -2,6 +2,8 @@ package me.foxtails.lakehead.feature.home
 
 import androidx.activity.ComponentActivity
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.semantics.Role
@@ -26,10 +28,12 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.swipe
 import androidx.compose.ui.test.swipeUp
 import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import me.foxtails.lakehead.core.designsystem.LauncherTheme
+import me.foxtails.lakehead.core.designsystem.APP_STRIP_GLYPH_TAG
 import me.foxtails.lakehead.core.designsystem.PINNED_OVERFLOW_TAG
 import me.foxtails.lakehead.core.designsystem.PinnedTileShortcut
 import me.foxtails.lakehead.core.designsystem.SquareCellGeometry
@@ -877,6 +881,110 @@ class HomeCanvasTest {
         composeRule.onAllNodesWithContentDescription("Square App").assertCountEquals(2)
     }
 
+    @Test
+    fun homeCanvasTile_previewSpanChange_recomputesStrip() {
+        // Direct HomeCanvasTile preview: the tile arranges visible + overflow
+        // from its live span on every recomposition (resize preview included),
+        // owning no pin or capacity logic itself.
+        val span = androidx.compose.runtime.mutableStateOf(LogicalSpan(4, 2))
+        val pins = androidx.compose.runtime.mutableStateOf(
+            listOf(
+                PinnedTileShortcut("new-post", "New post"),
+                PinnedTileShortcut("camera", "Camera"),
+                PinnedTileShortcut("search", "Search"),
+            ),
+        )
+        setThemedContent {
+            HomeCanvasTile(
+                tile = tile(
+                    "wide",
+                    personal,
+                    "Preview App",
+                    column = 0,
+                    row = 0,
+                    spanColumns = span.value.columns,
+                    spanRows = span.value.rows,
+                ),
+                iconBitmap = null,
+                onLaunchApp = {},
+                // The preview span arrives with a changed modifier, as the
+                // grid's resize preview supplies both together.
+                modifier = Modifier.testTag("preview-tile-${span.value.columns}x${span.value.rows}"),
+                pinnedShortcuts = pins.value,
+                onShortcutClick = {},
+            )
+        }
+        composeRule.waitForIdle()
+
+        // 4x2 capacity is 3: every pin visible, no overflow.
+        composeRule.onNodeWithTag("preview-tile-4x2", useUnmergedTree = true).assertExists()
+        composeRule.onNodeWithContentDescription("New post, shortcut").assertExists()
+        composeRule.onNodeWithContentDescription("Camera, shortcut").assertExists()
+        composeRule.onNodeWithContentDescription("Search, shortcut").assertExists()
+
+        // Preview shrink to 2x2 (capacity 1): only index 0 stays visible; the
+        // binding retains the rest, announced as overflow, nothing deleted.
+        composeRule.runOnIdle { span.value = LogicalSpan(2, 2) }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("preview-tile-2x2", useUnmergedTree = true).assertExists()
+        composeRule.onNodeWithTag("preview-tile-4x2", useUnmergedTree = true).assertDoesNotExist()
+        composeRule.onNodeWithContentDescription("New post, shortcut").assertExists()
+        composeRule.onNodeWithContentDescription("Camera, shortcut").assertDoesNotExist()
+        composeRule.onNodeWithContentDescription("Search, shortcut").assertDoesNotExist()
+        composeRule.onNode(hasStateDescription("2 more shortcuts")).assertExists()
+
+        // Preview grow restores from the same retained list.
+        composeRule.runOnIdle { span.value = LogicalSpan(4, 2) }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("preview-tile-4x2", useUnmergedTree = true).assertExists()
+        composeRule.onNodeWithContentDescription("Camera, shortcut").assertExists()
+        composeRule.onNodeWithContentDescription("Search, shortcut").assertExists()
+        composeRule.onNodeWithTag(PINNED_OVERFLOW_TAG, useUnmergedTree = true).assertDoesNotExist()
+    }
+
+    @Test
+    fun homeCanvasTile_lastPinClear_restoresCentered() {
+        // Clearing the last pin recomputes to the pin-free treatment: no
+        // strip glyphs, the centered icon slot remains, body + symbol share
+        // the label. The tile owns no pin state; it only reflects the list.
+        val pins = androidx.compose.runtime.mutableStateOf(
+            listOf(PinnedTileShortcut("new-post", "New post")),
+        )
+        setThemedContent {
+            HomeCanvasTile(
+                tile = tile(
+                    "square",
+                    personal,
+                    "Square App",
+                    column = 0,
+                    row = 0,
+                    spanColumns = 2,
+                    spanRows = 2,
+                ),
+                iconBitmap = ImageBitmap(32, 32),
+                onLaunchApp = {},
+                pinnedShortcuts = pins.value,
+                onShortcutClick = {},
+            )
+        }
+        composeRule.waitForIdle()
+
+        // Pinned: compact strip (app glyph + shortcut) with the icon slot.
+        composeRule.onNodeWithTag(APP_STRIP_GLYPH_TAG, useUnmergedTree = true).assertExists()
+        composeRule.onNodeWithContentDescription("New post, shortcut").assertExists()
+        composeRule.onNodeWithTag(HOME_TILE_ICON_TAG, useUnmergedTree = true).assertExists()
+
+        // Last pin cleared: strip gone, centered icon slot stays, the two app
+        // regions share the label with no strip glyphs left behind.
+        composeRule.runOnIdle { pins.value = emptyList() }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag(APP_STRIP_GLYPH_TAG, useUnmergedTree = true).assertDoesNotExist()
+        composeRule.onNodeWithContentDescription("New post, shortcut").assertDoesNotExist()
+        composeRule.onNodeWithTag(PINNED_OVERFLOW_TAG, useUnmergedTree = true).assertDoesNotExist()
+        composeRule.onNodeWithTag(HOME_TILE_ICON_TAG, useUnmergedTree = true).assertExists()
+        composeRule.onAllNodesWithContentDescription("Square App").assertCountEquals(2)
+    }
+
     // ---- Remove affordance (delete X) ----
 
     @Test
@@ -1479,5 +1587,213 @@ class HomeCanvasTest {
         assertTrue(window.firstRow >= 0L)
         assertTrue(window.lastRowExclusive >= window.firstRow)
         assertEquals(Long.MAX_VALUE, GridRowWindow(Long.MAX_VALUE - 5, Long.MAX_VALUE).withOverscan(10L).lastRowExclusive)
+    }
+
+    // ---- A3 unified edit-drag + page-swipe arbitration (real pointer) ----
+
+    private fun setMoveCanvas(
+        tiles: List<HomeRenderTile>,
+        onLaunchApp: (AppIdentity) -> Unit = {},
+        onMoveTile: (ItemId, LogicalPosition) -> Unit = { _, _ -> },
+        onResizeTile: (ItemId, LogicalSpan) -> Unit = { _, _ -> },
+        pinnedByTile: Map<ItemId, List<PinnedTileShortcut>> = emptyMap(),
+        onPinnedShortcutClick: (ItemId, String) -> Unit = { _, _ -> },
+        onSelectedTileChange: (ItemId?) -> Unit = {},
+        onPagerHoldChange: (Boolean) -> Unit = {},
+    ) {
+        setThemedContent {
+            HomeCanvas(
+                state = loaded(tiles),
+                iconsByIdentity = emptyMap(),
+                onLaunchApp = onLaunchApp,
+                onRequestDefaultHome = {},
+                onMoveTile = onMoveTile,
+                onResizeTile = onResizeTile,
+                pinnedByTile = pinnedByTile,
+                onPinnedShortcutClick = onPinnedShortcutClick,
+                onSelectedTileChange = onSelectedTileChange,
+                onPagerHoldChange = onPagerHoldChange,
+            )
+        }
+    }
+
+    @Test
+    fun editDrag_unselectedAppOrigin_movesAndTransfers_noChildCallbacks() {
+        // Tile A selected, tile B pinned unselected: a past-slop drag from B's
+        // app symbol moves the whole tile, transfers selection to B, and fires
+        // no child callbacks. Real pointer input, not semantics.
+        val launched = mutableListOf<AppIdentity>()
+        val moves = mutableListOf<Pair<ItemId, LogicalPosition>>()
+        val resizes = mutableListOf<Pair<ItemId, LogicalSpan>>()
+        val selected = mutableListOf<ItemId?>()
+        val holds = mutableListOf<Boolean>()
+        val tiles = listOf(
+            tile("a", personal, "Alpha App", column = 0, row = 0),
+            tile("b", work, "Beta App", column = 1, row = 0),
+        )
+        setMoveCanvas(
+            tiles,
+            onLaunchApp = { launched.add(it) },
+            onMoveTile = { id, pos -> moves.add(id to pos) },
+            onResizeTile = { id, span -> resizes.add(id to span) },
+            onSelectedTileChange = { selected.add(it) },
+            onPagerHoldChange = { holds.add(it) },
+        )
+        composeRule.waitForIdle()
+
+        // Enter wiggle-editing with a physical long-press on Alpha.
+        composeRule.onAllNodesWithContentDescription("Alpha App")[0]
+            .performTouchInput { longClick() }
+        composeRule.waitForIdle()
+        composeRule.onNode(hasStateDescription("Editing Alpha App, row 0 column 0"))
+            .assertIsDisplayed()
+
+        // Past-slop drag from Beta's app symbol (index 1): whole-tile MOVE.
+        // Swipe on the grid from Beta's center down two-plus rows so the
+        // candidate leaves the origin cell and release commits a new cell.
+        val gridNode = composeRule.onNodeWithTag(HOME_CANVAS_GRID_TAG, useUnmergedTree = true)
+        val betaBounds = composeRule.onAllNodesWithContentDescription("Beta App")[0]
+            .fetchSemanticsNode().boundsInRoot
+        val gridBounds = gridNode.fetchSemanticsNode().boundsInRoot
+        val dragStart = Offset(
+            betaBounds.center.x - gridBounds.left,
+            betaBounds.center.y - gridBounds.top,
+        )
+        val dragEnd = dragStart + Offset(0f, 600f)
+        gridNode.performTouchInput { swipe(dragStart, dragEnd, 500) }
+        composeRule.waitForIdle()
+
+        composeRule.runOnIdle {
+            assertEquals("one move for the dragged tile", 1, moves.size)
+            assertEquals(ItemId("b"), moves[0].first)
+            assertTrue(
+                "drag must commit a new cell, got ${moves[0].second}",
+                moves[0].second != LogicalPosition(1, 0),
+            )
+            assertEquals("selection must transfer to the dragged tile", ItemId("b"), selected.lastOrNull())
+            assertTrue("drag must never launch: $launched", launched.isEmpty())
+            assertTrue("transfer drag must never resize: $resizes", resizes.isEmpty())
+            assertTrue("tile-origin drag must hold the pager: $holds", holds.contains(true))
+            assertEquals("hold must clear at release, no stuck hold", false, holds.lastOrNull())
+        }
+        composeRule.onNode(hasStateDescription("Editing Beta App, row 0 column 1"))
+            .assertIsDisplayed()
+    }
+
+    @Test
+    fun editDrag_unselectedShortcutOrigin_movesWholeTile_noShortcutFire() {
+        // Same transfer contract from a shortcut glyph: the whole tile moves,
+        // the shortcut itself never fires, and selection transfers.
+        val launched = mutableListOf<AppIdentity>()
+        val moves = mutableListOf<Pair<ItemId, LogicalPosition>>()
+        val shortcutClicks = mutableListOf<Pair<ItemId, String>>()
+        val selected = mutableListOf<ItemId?>()
+        val tiles = listOf(
+            tile("a", personal, "Alpha App", column = 0, row = 0),
+            tile("wide", work, "Wide App", column = 1, row = 0, spanColumns = 4, spanRows = 2),
+        )
+        setMoveCanvas(
+            tiles,
+            onLaunchApp = { launched.add(it) },
+            onMoveTile = { id, pos -> moves.add(id to pos) },
+            pinnedByTile = mapOf(
+                ItemId("wide") to listOf(
+                    PinnedTileShortcut("new-post", "New post"),
+                    PinnedTileShortcut("camera", "Camera"),
+                ),
+            ),
+            onPinnedShortcutClick = { owner, id -> shortcutClicks.add(owner to id) },
+            onSelectedTileChange = { selected.add(it) },
+        )
+        composeRule.waitForIdle()
+
+        composeRule.onAllNodesWithContentDescription("Alpha App")[0]
+            .performTouchInput { longClick() }
+        composeRule.waitForIdle()
+        composeRule.onNode(hasStateDescription("Editing Alpha App, row 0 column 0"))
+            .assertIsDisplayed()
+
+        // Past-slop drag starting exactly on the shortcut glyph: swipe on the
+        // grid from the glyph's center down two-plus rows.
+        val gridNode = composeRule.onNodeWithTag(HOME_CANVAS_GRID_TAG, useUnmergedTree = true)
+        val pinBounds = composeRule.onNodeWithContentDescription("Camera, shortcut")
+            .fetchSemanticsNode().boundsInRoot
+        val gridBounds = gridNode.fetchSemanticsNode().boundsInRoot
+        val dragStart = Offset(
+            pinBounds.center.x - gridBounds.left,
+            pinBounds.center.y - gridBounds.top,
+        )
+        val dragEnd = dragStart + Offset(0f, 600f)
+        gridNode.performTouchInput { swipe(dragStart, dragEnd, 500) }
+        composeRule.waitForIdle()
+
+        composeRule.runOnIdle {
+            assertEquals("one move for the dragged tile", 1, moves.size)
+            assertEquals(ItemId("wide"), moves[0].first)
+            assertEquals("selection must transfer to the dragged tile", ItemId("wide"), selected.lastOrNull())
+            assertTrue("drag must never launch: $launched", launched.isEmpty())
+            assertTrue(
+                "shortcut drag must not invoke the shortcut: $shortcutClicks",
+                shortcutClicks.isEmpty(),
+            )
+        }
+    }
+
+    @Test
+    fun editDrag_belowSlopTap_selectsWithoutMove() {
+        // Below slop the selection/child-tap path owns the gesture: a tap on
+        // the unselected tile transfers selection with no move and no launch.
+        val launched = mutableListOf<AppIdentity>()
+        val moves = mutableListOf<Pair<ItemId, LogicalPosition>>()
+        val selected = mutableListOf<ItemId?>()
+        val tiles = listOf(
+            tile("a", personal, "Alpha App", column = 0, row = 0),
+            tile("b", work, "Beta App", column = 1, row = 0),
+        )
+        setMoveCanvas(
+            tiles,
+            onLaunchApp = { launched.add(it) },
+            onMoveTile = { id, pos -> moves.add(id to pos) },
+            onSelectedTileChange = { selected.add(it) },
+        )
+        composeRule.waitForIdle()
+
+        composeRule.onAllNodesWithContentDescription("Alpha App")[0]
+            .performTouchInput { longClick() }
+        composeRule.waitForIdle()
+
+        composeRule.onAllNodesWithContentDescription("Beta App")[0]
+            .performTouchInput { click() }
+        composeRule.waitForIdle()
+
+        composeRule.onNode(hasStateDescription("Editing Beta App, row 0 column 1"))
+            .assertIsDisplayed()
+        composeRule.runOnIdle {
+            assertEquals("below-slop tap selects only", ItemId("b"), selected.lastOrNull())
+            assertTrue("below-slop tap must not move: $moves", moves.isEmpty())
+            assertTrue("tap must never launch: $launched", launched.isEmpty())
+        }
+    }
+
+    @Test
+    fun pagerHold_tileTouch_trueThenFalse() {
+        // onPagerHoldChange direct: a real tile touch holds the pager for the
+        // press and clears on release, so a tile-origin gesture never becomes
+        // a page swipe and the hold never sticks.
+        val holds = mutableListOf<Boolean>()
+        val tiles = listOf(tile("a", personal, "Hold App", column = 0, row = 0))
+        setMoveCanvas(tiles, onPagerHoldChange = { holds.add(it) })
+        composeRule.waitForIdle()
+
+        composeRule.onAllNodesWithContentDescription("Hold App")[0]
+            .performTouchInput { longClick() }
+        composeRule.waitForIdle()
+
+        composeRule.onNode(hasStateDescription("Editing Hold App, row 0 column 0"))
+            .assertIsDisplayed()
+        composeRule.runOnIdle {
+            assertTrue("tile touch must hold the pager: $holds", holds.contains(true))
+            assertEquals("hold must clear on release", false, holds.lastOrNull())
+        }
     }
 }

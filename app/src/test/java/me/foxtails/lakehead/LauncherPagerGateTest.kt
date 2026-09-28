@@ -232,4 +232,28 @@ class LauncherPagerGateTest {
             ),
         )
     }
+
+    // A3 tile-touch hold: blocks swipe while held, restores on release.
+
+    @Test
+    fun pagerHold_blocksSwipe_restoresOnRelease() {
+        assertFalse(
+            isPagerSwipeEnabled(
+                pickerBlocksPager = false,
+                pagerWinner = ArbWinner.UNDECIDED,
+                homeHold = false,
+                pagerHold = true,
+                pagerRegionAllowed = true,
+            ),
+        )
+        assertTrue(
+            isPagerSwipeEnabled(
+                pickerBlocksPager = false,
+                pagerWinner = ArbWinner.UNDECIDED,
+                homeHold = false,
+                pagerHold = false,
+                pagerRegionAllowed = true,
+            ),
+        )
+    }
 }

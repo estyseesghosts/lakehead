@@ -115,7 +115,8 @@ data class HomeCanvasViewportStyle(
  * - Tiles map to [SpanChild] in persisted order; icons come only from [iconsByIdentity]
  *   via [Map.get] on the exact [AppIdentity]. No decode, catalogue/platform lookup, or
  *   database access occurs in any composable.
- * - Transient editing is hoisted here: long-press on a launchable tile enters a
+ * - Transient editing is hoisted here: long-press on any tile (independent of
+ *   launchability) enters W1 wiggle-editing selection; a selected-tile drag enters a
  *   [HomeEditSession.Active] session in MOVE mode, vertical scroll is disabled while active
  *   (and while idle a confident horizontal axis lock yields to the pager, so a
  *   horizontal swipe pages instead of scrolling), pointer drags update the
@@ -764,7 +765,6 @@ internal fun HomeCanvasGrid(
                             onEnterWiggle = { entered ->
                                 interaction = interaction.enterOnLongPress(
                                     entered.itemId,
-                                    entered.isLaunchable,
                                 )
                             },
                         )
@@ -855,11 +855,15 @@ internal fun HomeCanvasGrid(
                         downCell.row in tile.position.row until
                             tile.position.row + tile.span.rows
                     }
-                    // Selected-drag is the sole owner of this gesture. Do not
-                    // set/reset pager state here or flip it before slop.
+                    // Edit-drag owns any tile-origin gesture while Editing. Yield to
+                    // the drag handler below for the whole tile surface (geometric
+                    // downTile hit, not subregions). Do not set/reset pager state
+                    // here or flip it before slop. Normal tile/background downs
+                    // stay observed here for axis arbitration; background
+                    // horizontal swipes remain pager-eligible.
                     val idleInteraction = interactionSnapshot.value
                     if (idleInteraction is HomeInteractionController.Editing &&
-                        downTile?.itemId == idleInteraction.selectedId
+                        downTile != null
                     ) {
                         return@awaitEachGesture
                     }
@@ -981,6 +985,17 @@ internal fun HomeCanvasGrid(
                             originYPx = originYPx,
                         )
                     }
+                    val downTileBounds = downTile?.let { tile ->
+                        TileBounds.signedBounds(
+                            column = tile.position.column,
+                            row = tile.position.row.toLong(),
+                            span = GridSpan(tile.span.columns, tile.span.rows),
+                            geometry = geometry,
+                            originX = originX,
+                            originRow = rowOrigin,
+                            originYPx = originYPx,
+                        )
+                    }
                     val selectedResize = selectedBounds?.let {
                         isInHandle(
                             startPos.x,
@@ -989,16 +1004,26 @@ internal fun HomeCanvasGrid(
                             with(density) { RESIZE_TOUCH_DP.dp.roundToPx() },
                         )
                     } == true
-                    // Preserve the point grabbed inside the selected tile. This is
+                    // A3 unified edit-drag: while Editing any tile-origin down
+                    // (whole tile surface via the geometric downTile hit above,
+                    // never subregions) is a MOVE candidate. The selected tile
+                    // keeps its resize-arm snapshot/route below; a non-selected
+                    // tile transfers selection past slop into a direct MOVE
+                    // with no resize interpretation.
+                    val editingAtDown = interactionAtDown as? HomeInteractionController.Editing
+                    val isTransferDrag = isEditTransferDrag(interactionAtDown, downTile?.itemId)
+                    // Preserve the point grabbed inside the dragged tile. This is
                     // content-space state, while startPos remains viewport-space.
-                    val grabOffsetXPx = selectedBounds?.let {
+                    // Transfer drags anchor on the down tile; selected drags keep
+                    // the selected bounds (identical when down hits selected).
+                    val anchorBounds = downTileBounds ?: selectedBounds
+                    val grabOffsetXPx = anchorBounds?.let {
                         startPos.x - it.left.toFloat()
                     } ?: 0f
-                    val grabOffsetYPx = selectedBounds?.let {
+                    val grabOffsetYPx = anchorBounds?.let {
                         startPos.y + gestureScrollYPx - it.top.toFloat()
                     } ?: 0f
-                    val selectedDrag = interactionAtDown is HomeInteractionController.Editing &&
-                        interactionAtDown.selectedId == (downTile?.itemId ?: selectedTile?.itemId) &&
+                    val selectedDrag = editingAtDown != null &&
                         (downTile != null || selectedResize)
                     val dragTile = downTile ?: selectedTile?.takeIf { selectedResize }
                     // A2-S1 armed snapshot: resize is armed only for the down-selected
@@ -1055,9 +1080,40 @@ internal fun HomeCanvasGrid(
                         }
                     }
                     val slopChange = slop ?: return@awaitEachGesture
-                    if (sessionAtDown == null) {
+                    // A3 transfer: a past-slop drag on a non-selected edit tile
+                    // moves that tile and transfers selection to it. Below slop
+                    // this block never runs, so taps keep the child-tap path
+                    // (select without move). The slop consume above already
+                    // claimed the gesture so child launch/shortcut taps cannot
+                    // fire once this transfer runs.
+                    var effectiveInteraction = interactionAtDown
+                    if (isTransferDrag && dragTile != null) {
+                        effectiveInteraction = (effectiveInteraction as HomeInteractionController.Editing)
+                            .selectOnTap(dragTile.itemId)
+                        interaction = effectiveInteraction
+                        // A3 P1 retarget: a transfer drag always starts a fresh
+                        // MOVE session for the dragged tile, discarding any
+                        // prior Active (e.g. the post-resize MOVE leftover for
+                        // the resized tile). Driving the stale session would
+                        // commit a move for the wrong tile.
+                        val retargeted = retargetTransferSession(
+                            interaction = effectiveInteraction,
+                            tile = dragTile,
+                            placements = loaded.tiles,
+                            columns = columns,
+                            rows = rows,
+                        )
+                        currentSession = retargeted
+                        editSession = retargeted
+                        liveSessionRef.session = retargeted
+                        sessionAtDown = retargeted as? HomeEditSession.Active
+                            ?: run {
+                                pagerHold = false
+                                return@awaitEachGesture
+                            }
+                    } else if (sessionAtDown == null) {
                         val entered = currentSession.enterSelectedDrag(
-                            interaction = interactionAtDown,
+                            interaction = effectiveInteraction,
                             tile = dragTile,
                             placements = loaded.tiles,
                             columns = columns,
@@ -1108,7 +1164,11 @@ internal fun HomeCanvasGrid(
                     // the handle corner). A body-origin press never upgrades to
                     // RESIZE via the slop position; MOVE stays authoritative
                     // with snapshot-once routing and no mid-gesture promotion.
-                    val route = routeDownDrag(
+                    // A3: a transfer drag (non-selected edit tile) routes direct
+                    // MOVE with no resize interpretation — the selected-tile
+                    // resize-arm snapshot/route above is unchanged.
+                    val route = transferDragRoute(
+                        isTransfer = isTransferDrag,
                         arrowHit = startInHandle,
                         armed = armedAtDown,
                         hasTile = true,
@@ -1813,6 +1873,69 @@ internal fun routeDownDrag(
     hasTile -> DownDragRoute.MOVE
     else -> DownDragRoute.NONE
 }
+
+/**
+ * A3 transfer-drag predicate: true when [interaction] is
+ * [HomeInteractionController.Editing] and the geometric down hit names a tile
+ * other than the current selection (including a null selection — any
+ * edit-mode tile down transfers).
+ *
+ * Whole-tile surface only: callers pass the geometric downTile id (or null
+ * for background), never a subregion. Pure, framework-free and unit-testable.
+ */
+internal fun isEditTransferDrag(
+    interaction: HomeInteractionController,
+    downTileId: ItemId?,
+): Boolean {
+    val editing = interaction as? HomeInteractionController.Editing ?: return false
+    if (downTileId == null) return false
+    return downTileId != editing.selectedId
+}
+
+/**
+ * A3 transfer-aware past-slop route: a transfer drag routes direct
+ * [DownDragRoute.MOVE] with no resize interpretation (the selected-tile
+ * resize-arm snapshot never authorizes another tile); otherwise delegates to
+ * [routeDownDrag]. Pure, framework-free and unit-testable.
+ */
+internal fun transferDragRoute(
+    isTransfer: Boolean,
+    arrowHit: Boolean,
+    armed: Boolean,
+    hasTile: Boolean,
+): DownDragRoute = if (isTransfer) {
+    DownDragRoute.MOVE
+} else {
+    routeDownDrag(arrowHit = arrowHit, armed = armed, hasTile = hasTile)
+}
+
+/**
+ * A3 P1 retarget: starts a fresh MOVE session for a past-slop transfer drag,
+ * discarding any prior session.
+ *
+ * A successful resize leaves an Active MOVE leftover for the resized tile
+ * (post-commit snap-back state); without a retarget, a subsequent transfer
+ * drag for another tile would keep driving the stale session and commit a
+ * move for the wrong tile. The transfer path therefore always enters from
+ * [HomeEditSession.Idle] with the post-transfer [interaction] (selection
+ * already moved to [tile] via `selectOnTap`, disarmed), never from the prior
+ * session. The selected-tile (non-transfer) RESIZE route is unaffected: it
+ * keeps driving its own session. Pure, framework-free and unit-testable;
+ * legality stays owned by `core:grid`.
+ */
+internal fun retargetTransferSession(
+    interaction: HomeInteractionController,
+    tile: HomeRenderTile?,
+    placements: List<HomeRenderTile>,
+    columns: Int,
+    rows: Int,
+): HomeEditSession = HomeEditSession.Idle.enterSelectedDrag(
+    interaction = interaction,
+    tile = tile,
+    placements = placements,
+    columns = columns,
+    rows = rows,
+)
 
 /**
  * Synchronous single source for the ticker<->drag session handoff (B3 P1).

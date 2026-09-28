@@ -334,4 +334,27 @@ class HomeGestureArbitrationTest {
             resolveHomeGesture(isUnpin = true, isActiveResize = true, isActiveMove = true),
         )
     }
+
+    // ---- A3 unified edit-drag: tile-origin holds, background stays free ----
+
+    @Test
+    fun a3_editTileDrag_holdsPager() {
+        // Any edit-mode tile down (selected or transfer target) arbitrates as
+        // SELECT_DRAG and holds the pager, so a tile-origin press/drag never
+        // becomes a page swipe. TAP co-occurs below slop; priority keeps the
+        // drag winner while the hold stays true either way.
+        val winner = resolveHomeGesture(isSelectDrag = true, isTap = true)
+        assertEquals(HomeGestureWinner.SELECT_DRAG, winner)
+        assertTrue(winner.holdsPager())
+        assertTrue(resolveHomeGesture(isTap = true).holdsPager())
+    }
+
+    @Test
+    fun a3_backgroundDown_leavesPagerFree() {
+        // Empty-background downs arbitrate as BACKGROUND and never hold, so a
+        // horizontal swipe from empty space remains pager-eligible.
+        val winner = resolveHomeGesture(isBackground = true)
+        assertEquals(HomeGestureWinner.BACKGROUND, winner)
+        assertFalse(winner.holdsPager())
+    }
 }
