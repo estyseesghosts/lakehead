@@ -15,8 +15,10 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import me.foxtails.lakehead.core.designsystem.PIN_TOGGLE_TAG
+import me.foxtails.lakehead.core.designsystem.LauncherTheme
 import me.foxtails.lakehead.core.designsystem.ROW_LAUNCH_ZONE_TAG
 import me.foxtails.lakehead.core.designsystem.SHORTCUT_SURFACE_ROW_TAG
 import me.foxtails.lakehead.core.designsystem.ShortcutSurfaceEntry
@@ -107,15 +109,20 @@ class EditShortcutMenuComposeTest {
         executed.clear()
         pinned.clear()
         composeRule.setContent {
-            HomeCanvas(
-                state = state,
-                iconsByIdentity = emptyMap(),
-                onLaunchApp = {},
-                onRequestDefaultHome = {},
-                surfaceEntries = entries,
-                onSurfaceExecute = { itemId, entryId -> executed.add(itemId to entryId) },
-                onSurfaceTogglePin = { itemId, entryId -> pinned.add(itemId to entryId) },
-            )
+            // LauncherTheme is colour-only (no typography/shapes) and supplies
+            // the LocalLauncherDimensions production now requires; it does not
+            // affect the menu's content-hugging measurements below.
+            LauncherTheme {
+                HomeCanvas(
+                    state = state,
+                    iconsByIdentity = emptyMap(),
+                    onLaunchApp = {},
+                    onRequestDefaultHome = {},
+                    surfaceEntries = entries,
+                    onSurfaceExecute = { itemId, entryId -> executed.add(itemId to entryId) },
+                    onSurfaceTogglePin = { itemId, entryId -> pinned.add(itemId to entryId) },
+                )
+            }
         }
     }
 
@@ -123,6 +130,106 @@ class EditShortcutMenuComposeTest {
         composeRule.onAllNodesWithContentDescription(label)[0]
             .performSemanticsAction(SemanticsActions.OnLongClick) { it() }
         composeRule.waitForIdle()
+    }
+
+    private fun menuSizePx() =
+        composeRule.onNodeWithTag(EDIT_SHORTCUT_MENU_TAG, useUnmergedTree = true)
+            .assertIsDisplayed()
+            .fetchSemanticsNode().size
+
+    @Test
+    fun singleShortShortcut_isNarrowShortBox() {
+        val narrow = ShortcutSurfaceEntry(id = "s1", label = "Go", isPinned = false)
+        setMenuCanvas(loaded(listOf(tile("a", personal, "Deep App"))), listOf(narrow))
+        composeRule.waitForIdle()
+        longPressBody("Deep App")
+
+        val size = menuSizePx()
+        val capPx = with(composeRule.density) { 320.dp.roundToPx() }
+        val minPx = with(composeRule.density) { 96.dp.roundToPx() }
+        val wellBelowPx = with(composeRule.density) { 32.dp.roundToPx() }
+        val shortHeightPx = with(composeRule.density) { 120.dp.roundToPx() }
+        composeRule.runOnIdle {
+            assertTrue(
+                "single short width ${size.width} must hug content well below 320dp cap $capPx",
+                size.width in minPx - 2 until capPx - wellBelowPx,
+            )
+            assertTrue(
+                "single short height ${size.height} must stay short (< 120dp = $shortHeightPx)",
+                size.height < shortHeightPx,
+            )
+        }
+    }
+
+    @Test
+    fun threeShortShortcuts_keepNarrowWidthButGrowTaller() {
+        fun shortEntries(count: Int) = List(count) { index ->
+            ShortcutSurfaceEntry(id = "s${index + 1}", label = "Go", isPinned = false)
+        }
+        setMenuCanvas(loaded(listOf(tile("a", personal, "Deep App"))), shortEntries(1))
+        composeRule.waitForIdle()
+        longPressBody("Deep App")
+        val one = menuSizePx()
+
+        setMenuCanvas(loaded(listOf(tile("a", personal, "Deep App"))), shortEntries(3))
+        composeRule.waitForIdle()
+        longPressBody("Deep App")
+        val three = menuSizePx()
+
+        val oneRowPx = with(composeRule.density) { 48.dp.roundToPx() }
+        composeRule.runOnIdle {
+            assertTrue(
+                "3-row width ${three.width} must match 1-row width ${one.width} (same short text)",
+                kotlin.math.abs(three.width - one.width) <= 2,
+            )
+            assertTrue(
+                "3-row height ${three.height} must grow with count vs 1-row ${one.height}",
+                three.height > one.height + oneRowPx,
+            )
+        }
+    }
+
+    @Test
+    fun longLabel_capsAtFrameNotWider() {
+        val narrow = ShortcutSurfaceEntry(id = "s1", label = "Go", isPinned = false)
+        setMenuCanvas(loaded(listOf(tile("a", personal, "Deep App"))), listOf(narrow))
+        composeRule.waitForIdle()
+        longPressBody("Deep App")
+        val narrowWidth = menuSizePx().width
+
+        val long = ShortcutSurfaceEntry(id = "s1", label = "L".repeat(160), isPinned = false)
+        setMenuCanvas(loaded(listOf(tile("a", personal, "Deep App"))), listOf(long))
+        composeRule.waitForIdle()
+        longPressBody("Deep App")
+        val capped = menuSizePx()
+        val gridWidth = composeRule.onNodeWithTag(HOME_CANVAS_GRID_TAG, useUnmergedTree = true)
+            .assertIsDisplayed()
+            .fetchSemanticsNode().size.width
+        val edgePx = with(composeRule.density) { 16.dp.roundToPx() }
+        val frameCapPx = minOf(
+            with(composeRule.density) { 320.dp.roundToPx() },
+            gridWidth - 2 * edgePx,
+        )
+        val tolerancePx = with(composeRule.density) { 8.dp.roundToPx() }
+        composeRule.runOnIdle {
+            assertTrue(
+                "long label width ${capped.width} must exceed narrow $narrowWidth (follows text)",
+                capped.width > narrowWidth,
+            )
+            assertTrue(
+                "long label width ${capped.width} must not exceed frame cap $frameCapPx",
+                capped.width <= frameCapPx + 2,
+            )
+            assertTrue(
+                "long label width ${capped.width} must reach frame cap $frameCapPx " +
+                    "(ellipsis in ShortcutSurfaceRow maxLines=1 handles overflow)",
+                capped.width >= frameCapPx - tolerancePx,
+            )
+        }
+        // The capped row still renders (single-line ellipsis path) instead of
+        // widening the box or dropping the node.
+        composeRule.onAllNodesWithTag(SHORTCUT_SURFACE_ROW_TAG, useUnmergedTree = true)
+            .assertCountEquals(1)
     }
 
     @Test
@@ -296,15 +403,17 @@ class EditShortcutMenuComposeTest {
         executed.clear()
         pinned.clear()
         composeRule.setContent {
-            HomeCanvas(
-                state = loaded(holder.value),
-                iconsByIdentity = emptyMap(),
-                onLaunchApp = {},
-                onRequestDefaultHome = {},
-                surfaceEntries = listOf(entry("s1")),
-                onSurfaceExecute = { itemId, entryId -> executed.add(itemId to entryId) },
-                onSurfaceTogglePin = { itemId, entryId -> pinned.add(itemId to entryId) },
-            )
+            LauncherTheme {
+                HomeCanvas(
+                    state = loaded(holder.value),
+                    iconsByIdentity = emptyMap(),
+                    onLaunchApp = {},
+                    onRequestDefaultHome = {},
+                    surfaceEntries = listOf(entry("s1")),
+                    onSurfaceExecute = { itemId, entryId -> executed.add(itemId to entryId) },
+                    onSurfaceTogglePin = { itemId, entryId -> pinned.add(itemId to entryId) },
+                )
+            }
         }
         composeRule.waitForIdle()
         longPressBody("Deep App")

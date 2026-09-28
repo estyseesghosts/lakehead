@@ -4,11 +4,15 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
-import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
@@ -51,7 +55,11 @@ import me.foxtails.lakehead.core.model.ItemId
  * - Geometry is overlay-only: [editShortcutMenuFrame] measures a sibling frame
  *   above the tile (try above, flip below, clamp) through
  *   [FloatingOverlayFrame.measure], so neighbours are overlaid and the grid
- *   never reflows, repacks or re-checks legality.
+ *   never reflows, repacks or re-checks legality. The frame is the capped
+ *   maximum (320dp / available-width-minus-margins, rows plus padding); the
+ *   rendered box hugs content up to that maximum ([IntrinsicSize.Max] column
+ *   with wrap + min/max width) so one short shortcut is a very small box and
+ *   long labels cap and ellipsize in the row.
  */
 @Composable
 internal fun EditShortcutMenu(
@@ -104,17 +112,19 @@ internal fun EditShortcutMenu(
         ),
         gapPx = with(density) { 8.dp.roundToPx() },
     )
-    val widthDp = with(density) { frame.width.toDp() }
-    val heightDp = with(density) { frame.height.toDp() }
+    val maxWidthDp = with(density) { frame.width.toDp() }
+    val maxHeightDp = with(density) { frame.height.toDp() }
     Box(
         modifier = modifier
             .offset { IntOffset(frame.left, frame.top) }
-            .size(widthDp, heightDp)
+            .wrapContentSize(align = Alignment.TopStart, unbounded = false)
+            .widthIn(min = EDIT_SHORTCUT_MENU_MIN_WIDTH, max = maxWidthDp)
+            .heightIn(max = maxHeightDp)
             .background(scheme.surfaceContainer)
             .border(1.dp, scheme.outline)
             .testTag(EDIT_SHORTCUT_MENU_TAG),
     ) {
-        Column(modifier = Modifier.fillMaxSize()) {
+        Column(modifier = Modifier.width(IntrinsicSize.Max)) {
             entries.forEach { entry ->
                 ShortcutSurfaceRow(
                     entry = entry,
@@ -128,6 +138,13 @@ internal fun EditShortcutMenu(
 
 /** Test tag on the edit-mode shortcut menu overlay (testing hook only; no behavior change). */
 internal const val EDIT_SHORTCUT_MENU_TAG: String = "edit-shortcut-menu"
+
+/**
+ * Minimum menu width so a single short label never collapses toward zero.
+ * The box otherwise hugs the widest row ([IntrinsicSize.Max]) up to the
+ * capped frame width; long labels cap at the frame and ellipsize in the row.
+ */
+private val EDIT_SHORTCUT_MENU_MIN_WIDTH = 96.dp
 
 /**
  * Resolves the shortcut rows to show for the current selection.
