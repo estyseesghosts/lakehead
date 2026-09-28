@@ -29,6 +29,7 @@ import me.foxtails.lakehead.data.repository.HomePlacementRepository
 import me.foxtails.lakehead.data.repository.RemoveResult
 import me.foxtails.lakehead.data.repository.RoomHomePlacementRepository
 import me.foxtails.lakehead.feature.home.HomeCanvasViewportStyle
+import me.foxtails.lakehead.feature.home.HomeRenderState
 import me.foxtails.lakehead.feature.home.HomeViewportInputs
 import me.foxtails.lakehead.platform.feed.FeedOverlayGateway
 import me.foxtails.lakehead.platform.feed.FeedOverlayGatewayImpl
@@ -58,14 +59,23 @@ class MainActivity : ComponentActivity() {
     // Shortcut gateway: application context only, never the activity. The gateway
     // owns per-app shortcut queries, the bounded snapshot cache and shortcut /
     // package invalidation; the surface loader joins its rank-ordered rows with
-    // persisted tile bindings for the existing edit-menu seam (B1 wires the
-    // surface entries and execution; this slice only starts the gateway).
+    // persisted tile bindings for the live edit-menu seam (discovery and menu
+    // execution are wired; tile shortcut rendering remains deferred to C1).
     internal val shortcutGateway: ShortcutGateway by lazy(LazyThreadSafetyMode.NONE) {
         LauncherAppsShortcutGateway(applicationContext)
     }
 
     internal val shortcutSurfaceLoader: ShortcutSurfaceLoader by lazy(LazyThreadSafetyMode.NONE) {
         ShortcutSurfaceLoader(shortcutGateway, placementRepository)
+    }
+
+    // B1 selected-tile menu: joins the gateway's rank-ordered shortcuts for
+    // the grid-reported selection with the tile's persisted binding into
+    // selection-scoped surface rows, resolves row taps to profile-exact gateway
+    // launches, and persists pin toggles. Feed + shortcut gateway lifecycle
+    // remains unchanged; tile shortcut rendering is deferred to C1.
+    internal val shortcutMenuCoordinator: ShortcutMenuCoordinator by lazy(LazyThreadSafetyMode.NONE) {
+        ShortcutMenuCoordinator(shortcutGateway, shortcutSurfaceLoader)
     }
 
     private val placementDatabase: PlacementDatabase by lazy(LazyThreadSafetyMode.NONE) {
@@ -224,6 +234,15 @@ class MainActivity : ComponentActivity() {
             val allAppsState by allAppsLoader.state.collectAsState()
             val allAppsIconsMap by allAppsLoader.icons.collectAsState()
             val feedAvailability by feed.state.collectAsState()
+            val shortcutMenu by shortcutMenuCoordinator.menu.collectAsState()
+            val pinnedByTile by shortcutMenuCoordinator.pinnedByTile.collectAsState()
+            // B1: forward loaded tiles so the coordinator can project the
+            // selection to its AppIdentity and clear menus of removed tiles.
+            androidx.compose.runtime.LaunchedEffect(homeState) {
+                shortcutMenuCoordinator.onHomeTilesChanged(
+                    (homeState as? HomeRenderState.Loaded)?.tiles.orEmpty(),
+                )
+            }
             LauncherShell(
                 homeState = homeState,
                 homeIcons = homeIcons,
@@ -278,6 +297,26 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                 },
+                // B1 shortcut menu wiring: selection-scoped rows from the
+                // coordinator; row taps execute under the exact profile
+                // off-main.
+                surfaceEntries = shortcutMenu?.entries.orEmpty(),
+                surfaceEntriesTileId = shortcutMenu?.tileId,
+                onSelectedTileChange = shortcutMenuCoordinator::onSelectionChanged,
+                onSurfaceExecute = { itemId, entryId ->
+                    lifecycleScope.launch {
+                        shortcutMenuCoordinator.execute(itemId, entryId)
+                    }
+                },
+                // B2: pin toggles mutate only the selected tile binding and
+                // never invoke shortcut execution.
+                onSurfaceTogglePin = shortcutMenuCoordinator::togglePin,
+                pinnedByTile = pinnedByTile,
+                onPinnedShortcutClick = { itemId, entryId ->
+                    lifecycleScope.launch {
+                        shortcutMenuCoordinator.execute(itemId, entryId)
+                    }
+                },
                 viewportStyle = routeViewportStyle,
             )
             }
@@ -288,6 +327,7 @@ class MainActivity : ComponentActivity() {
         super.onStart()
         appCatalogue.start()
         shortcutGateway.start(lifecycleScope)
+        shortcutMenuCoordinator.start(lifecycleScope)
         homeRouteLoader.start(lifecycleScope)
         allAppsRouteLoader.start(lifecycleScope)
         feedGateway.start(lifecycleScope)
@@ -297,6 +337,7 @@ class MainActivity : ComponentActivity() {
         feedGateway.stop()
         allAppsRouteLoader.stop()
         homeRouteLoader.stop()
+        shortcutMenuCoordinator.stop()
         shortcutGateway.stop()
         appCatalogue.stop()
         super.onStop()
