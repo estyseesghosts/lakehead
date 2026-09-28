@@ -109,7 +109,7 @@ object GridRules {
         rows: Int,
         ignoredIndex: Int,
     ): Rejection? {
-        if (!isWithinBounds(candidate, columns, rows)) return Rejection.OUT_OF_BOUNDS
+        if (!isWithinBounds(candidate.position, candidate.span, columns, rows)) return Rejection.OUT_OF_BOUNDS
         if (placements.indices.any { index ->
                 index != ignoredIndex && overlaps(candidate, placements[index])
             }
@@ -119,13 +119,35 @@ object GridRules {
         return null
     }
 
-    private fun isWithinBounds(
-        placement: GridPlacement<*>,
+    /** Returns whether a signed position and its complete span fit the grid. */
+    fun isWithinBounds(
+        position: GridPosition,
+        span: GridSpan,
         columns: Int,
         rows: Int,
     ): Boolean =
-        placement.position.column.toLong() + placement.span.columns <= columns &&
-            placement.position.row.toLong() + placement.span.rows <= rows
+        isWithinBounds(
+            column = position.column.toLong(),
+            row = position.row.toLong(),
+            spanColumns = span.columns,
+            spanRows = span.rows,
+            columns = columns,
+            rows = rows.toLong(),
+        )
+
+    /** Signed, overflow-safe rectangle bounds predicate shared by grid callers. */
+    fun isWithinBounds(
+        column: Long,
+        row: Long,
+        spanColumns: Int,
+        spanRows: Int,
+        columns: Int,
+        rows: Long,
+    ): Boolean =
+        column >= 0L && row >= 0L &&
+            spanColumns > 0 && spanRows > 0 && columns > 0 && rows > 0L &&
+            column <= columns.toLong() - spanColumns.toLong() &&
+            row <= rows - spanRows.toLong()
 
     private fun overlaps(first: GridPlacement<*>, second: GridPlacement<*>): Boolean {
         val firstRight = first.position.column.toLong() + first.span.columns

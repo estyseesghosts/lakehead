@@ -367,6 +367,8 @@ class HomeEditFrontierTest {
             columnGapPx = 0f,
             rowGapPx = 8f,
             windowFirstRow = 0L,
+            columns = 6,
+            rows = 20L,
             scrollYPx = 0f,
         )
         val scrolled = MoveDragMath.cellForPixel(
@@ -376,10 +378,12 @@ class HomeEditFrontierTest {
             columnGapPx = 0f,
             rowGapPx = 8f,
             windowFirstRow = 0L,
+            columns = 6,
+            rows = 20L,
             scrollYPx = 108f,
         )
-        assertEquals(LogicalPosition(0, 0), atRest)
-        assertEquals(LogicalPosition(0, 1), scrolled)
+        assertEquals(MoveCellResult.Valid(MoveCellCandidate(0, 0), LogicalPosition(0, 0)), atRest)
+        assertEquals(MoveCellResult.Valid(MoveCellCandidate(0, 1), LogicalPosition(0, 1)), scrolled)
     }
 
     @Test
@@ -393,6 +397,8 @@ class HomeEditFrontierTest {
             columnGapPx = 0f,
             rowGapPx = 8f,
             windowFirstRow = 0L,
+            columns = 6,
+            rows = 20L,
             scrollYPx = 0f,
         )
         val second = MoveDragMath.cellForPixel(
@@ -402,6 +408,8 @@ class HomeEditFrontierTest {
             columnGapPx = 0f,
             rowGapPx = 8f,
             windowFirstRow = 0L,
+            columns = 6,
+            rows = 20L,
             scrollYPx = 0f,
         )
         assertEquals(first, second)
@@ -510,6 +518,52 @@ class HomeEditFrontierTest {
             (atRest as HomeEditSession.Active).lastValidPosition,
             scrolledActive.lastValidPosition,
         )
+    }
+
+    @Test
+    fun tickerRemap_rejectedOutOfBounds_holdsLastValidAndCannotCommit() {
+        val tiles = listOf(tile("a", 0, 0))
+        val entered = HomeEditSession.Idle
+            .enterIfLaunchable(tiles[0], tiles, columns = 6, rows = 30)
+        val atRest = remapMoveCandidateAfterScroll(
+            session = entered,
+            pointerXPx = 150f,
+            pointerYPx = 50f,
+            scrollPx = 0,
+            cellSizePx = 100,
+            columnGapPx = 0,
+            rowGapPx = 8,
+            rowOrigin = 0L,
+            originXPx = 0,
+            originYPx = 0L,
+            grabOffsetXPx = 0f,
+            grabOffsetYPx = 0f,
+            tiles = tiles,
+            columns = 6,
+            moveRows = 30,
+        )
+        val rejected = remapMoveCandidateAfterScroll(
+            session = atRest,
+            pointerXPx = 650f,
+            pointerYPx = 50f,
+            scrollPx = 0,
+            cellSizePx = 100,
+            columnGapPx = 0,
+            rowGapPx = 8,
+            rowOrigin = 0L,
+            originXPx = 0,
+            originYPx = 0L,
+            grabOffsetXPx = 0f,
+            grabOffsetYPx = 0f,
+            tiles = tiles,
+            columns = 6,
+            moveRows = 30,
+        ) as HomeEditSession.Active
+
+        assertEquals(LogicalPosition(1, 0), rejected.lastValidPosition)
+        assertEquals(LogicalPosition(1, 0), rejected.candidatePosition)
+        assertEquals(CandidateValidity.OUT_OF_BOUNDS, rejected.candidateValidity)
+        assertNull(rejected.moveCommitPosition())
     }
 
     @Test

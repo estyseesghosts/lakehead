@@ -259,7 +259,7 @@ fun remapMoveCandidateAfterScroll(
     moveRows: Int,
 ): HomeEditSession {
     require(scrollPx >= 0) { "scrollPx must be non-negative" }
-    val cell = MoveDragMath.cellForPixel(
+    val result = MoveDragMath.cellForPixel(
         xPx = pointerXPx,
         yPx = pointerYPx,
         cellSizePx = cellSizePx.toFloat(),
@@ -271,8 +271,12 @@ fun remapMoveCandidateAfterScroll(
         scrollYPx = scrollPx.toFloat(),
         grabOffsetXPx = grabOffsetXPx,
         grabOffsetYPx = grabOffsetYPx,
+        columns = columns,
+        rows = moveRows.toLong(),
+        spanColumns = (session as? HomeEditSession.Active)?.candidateSpan?.columns ?: 1,
+        spanRows = (session as? HomeEditSession.Active)?.candidateSpan?.rows ?: 1,
     )
-    return session.updateMoveCandidate(cell, tiles, columns, moveRows)
+    return session.updateMoveCandidate(result, tiles, columns, moveRows)
 }
 
 /**

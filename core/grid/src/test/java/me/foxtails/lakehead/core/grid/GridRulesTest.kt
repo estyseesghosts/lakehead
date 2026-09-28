@@ -7,6 +7,15 @@ import org.junit.Test
 
 class GridRulesTest {
     @Test
+    fun signedBoundsRejectNegativeAndPartialSpanButAcceptEdges() {
+        assertTrue(GridRules.isWithinBounds(0L, 0L, 1, 1, 4, 4))
+        assertTrue(GridRules.isWithinBounds(2L, 2L, 2, 2, 4, 4))
+        assertTrue(!GridRules.isWithinBounds(-1L, 0L, 1, 1, 4, 4))
+        assertTrue(!GridRules.isWithinBounds(3L, 0L, 2, 1, 4, 4))
+        assertTrue(!GridRules.isWithinBounds(0L, 3L, 1, 2, 4, 4))
+    }
+
+    @Test
     fun coordinatesAndDimensionsRejectInvalidValues() {
         assertIllegalArgument { GridPosition(-1, 0) }
         assertIllegalArgument { GridPosition(0, -1) }

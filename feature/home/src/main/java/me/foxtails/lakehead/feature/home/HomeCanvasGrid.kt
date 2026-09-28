@@ -794,6 +794,8 @@ internal fun HomeCanvasGrid(
                     rowOrigin = rowOrigin,
                     originYPx = originYPx,
                     scrollYPx = scrollState.value.toFloat(),
+                    columns = columns,
+                    rows = rows.toLong(),
                 ),
             )
             // Tap on the grid background (outside any tile) cancels an active edit
@@ -838,7 +840,7 @@ internal fun HomeCanvasGrid(
                     val startPos = down.position
                     val slopPx = viewConfiguration.touchSlop.toFloat()
                     val snapshot = idleHitInputs.value
-                    val downCell = MoveDragMath.cellForPixel(
+                    val downResult = MoveDragMath.cellForPixel(
                         xPx = startPos.x,
                         yPx = startPos.y,
                         cellSizePx = snapshot.geometry.cellSizePx.toFloat(),
@@ -848,13 +850,16 @@ internal fun HomeCanvasGrid(
                         originXPx = snapshot.originX.toFloat(),
                         originYPxPx = snapshot.originYPx.toFloat(),
                         scrollYPx = snapshot.scrollYPx,
+                        columns = snapshot.columns,
+                        rows = snapshot.rows,
                     )
-                    val downTile = snapshot.tiles.firstOrNull { tile ->
-                        downCell.column in tile.position.column until
+                    val downCell = (downResult as? MoveCellResult.Valid)?.position
+                    val downTile = downCell?.let { cell -> snapshot.tiles.firstOrNull { tile ->
+                        cell.column in tile.position.column until
                             tile.position.column + tile.span.columns &&
-                        downCell.row in tile.position.row until
+                        cell.row in tile.position.row until
                             tile.position.row + tile.span.rows
-                    }
+                    } }
                     // Edit-drag owns any tile-origin gesture while Editing. Yield to
                     // the drag handler below for the whole tile surface (geometric
                     // downTile hit, not subregions). Do not set/reset pager state
@@ -954,7 +959,7 @@ internal fun HomeCanvasGrid(
                     val gestureScrollYPx = scrollState.value.toFloat()
                     val interactionAtDown = interactionSnapshot.value
                     val hitSnapshot = idleHitInputs.value
-                    val downCell = MoveDragMath.cellForPixel(
+                    val downResult = MoveDragMath.cellForPixel(
                         xPx = startPos.x,
                         yPx = startPos.y,
                         cellSizePx = hitSnapshot.geometry.cellSizePx.toFloat(),
@@ -964,13 +969,16 @@ internal fun HomeCanvasGrid(
                         originXPx = hitSnapshot.originX.toFloat(),
                         originYPxPx = hitSnapshot.originYPx.toFloat(),
                         scrollYPx = gestureScrollYPx,
+                        columns = hitSnapshot.columns,
+                        rows = hitSnapshot.rows,
                     )
-                    val downTile = hitSnapshot.tiles.firstOrNull { tile ->
-                        downCell.column in tile.position.column until
+                    val downCell = (downResult as? MoveCellResult.Valid)?.position
+                    val downTile = downCell?.let { cell -> hitSnapshot.tiles.firstOrNull { tile ->
+                        cell.column in tile.position.column until
                             tile.position.column + tile.span.columns &&
-                            downCell.row in tile.position.row until
+                            cell.row in tile.position.row until
                             tile.position.row + tile.span.rows
-                    }
+                    } }
                     val selectedTile = (interactionAtDown as? HomeInteractionController.Editing)
                         ?.selectedId
                         ?.let { selectedId -> hitSnapshot.tiles.firstOrNull { it.itemId == selectedId } }
@@ -1394,7 +1402,7 @@ internal fun HomeCanvasGrid(
                         // down hit-test and grab offsets stay frozen at
                         // gestureScrollYPx. Legality uses the transient frontier
                         // bound (moveRows), never the normal bound.
-                        val slopCell = MoveDragMath.cellForPixel(
+                        val slopResult = MoveDragMath.cellForPixel(
                             xPx = slopChange.position.x,
                             yPx = slopChange.position.y,
                             cellSizePx = geometry.cellSizePx.toFloat(),
@@ -1406,9 +1414,13 @@ internal fun HomeCanvasGrid(
                             scrollYPx = scrollState.value.toFloat(),
                             grabOffsetXPx = grabOffsetXPx,
                             grabOffsetYPx = grabOffsetYPx,
+                            columns = columns,
+                            rows = moveLegalityRows(rows, editFrontier).toLong(),
+                            spanColumns = (currentSession as? HomeEditSession.Active)?.candidateSpan?.columns ?: 1,
+                            spanRows = (currentSession as? HomeEditSession.Active)?.candidateSpan?.rows ?: 1,
                         )
                         currentSession = currentSession.updateMoveCandidate(
-                            slopCell,
+                            slopResult,
                             loaded.tiles,
                             columns,
                             moveLegalityRows(rows, editFrontier),
@@ -1480,7 +1492,7 @@ internal fun HomeCanvasGrid(
                                 autoScrollEdgePx,
                             )
                             if (edgeZone == AutoScrollZone.BOTTOM) {
-                                val probeCell = MoveDragMath.cellForPixel(
+                                val probeResult = MoveDragMath.cellForPixel(
                                     xPx = moveChange.position.x,
                                     yPx = moveChange.position.y,
                                     cellSizePx = geometry.cellSizePx.toFloat(),
@@ -1492,16 +1504,20 @@ internal fun HomeCanvasGrid(
                                     scrollYPx = scrollForMap.toFloat(),
                                     grabOffsetXPx = grabOffsetXPx,
                                     grabOffsetYPx = grabOffsetYPx,
+                                    columns = columns,
+                                    rows = moveLegalityRows(rows, editFrontier).toLong(),
+                                    spanColumns = (currentSession as? HomeEditSession.Active)?.candidateSpan?.columns ?: 1,
+                                    spanRows = (currentSession as? HomeEditSession.Active)?.candidateSpan?.rows ?: 1,
                                 )
                                 val liveSession = currentSession as? HomeEditSession.Active
-                                val grown = if (liveSession != null) {
+                                val grown = if (liveSession != null && probeResult is MoveCellResult.Valid) {
                                     advanceFrontierForMove(
                                         editFrontier ?: initEditFrontier(
                                             loaded.extent,
                                             availableHeightPx,
                                             rowStridePx,
                                         ),
-                                        probeCell,
+                                        probeResult.position,
                                         liveSession.candidateSpan.rows,
                                     )
                                 } else {
@@ -1538,7 +1554,7 @@ internal fun HomeCanvasGrid(
                                     scrollForMap = scrollState.value
                                 }
                             }
-                            val cell = MoveDragMath.cellForPixel(
+                            val result = MoveDragMath.cellForPixel(
                                 xPx = moveChange.position.x,
                                 yPx = moveChange.position.y,
                                 cellSizePx = geometry.cellSizePx.toFloat(),
@@ -1550,9 +1566,13 @@ internal fun HomeCanvasGrid(
                                 scrollYPx = scrollForMap.toFloat(),
                                 grabOffsetXPx = grabOffsetXPx,
                                 grabOffsetYPx = grabOffsetYPx,
+                                columns = columns,
+                                rows = moveLegalityRows(rows, editFrontier).toLong(),
+                                spanColumns = (currentSession as? HomeEditSession.Active)?.candidateSpan?.columns ?: 1,
+                                spanRows = (currentSession as? HomeEditSession.Active)?.candidateSpan?.rows ?: 1,
                             )
                             currentSession = currentSession.updateMoveCandidate(
-                                cell,
+                                result,
                                 loaded.tiles,
                                 columns,
                                 moveLegalityRows(rows, editFrontier),
@@ -2344,6 +2364,8 @@ private data class IdleHitSnapshot(
     val rowOrigin: Long,
     val originYPx: Long,
     val scrollYPx: Float,
+    val columns: Int,
+    val rows: Long,
 )
 
 /**

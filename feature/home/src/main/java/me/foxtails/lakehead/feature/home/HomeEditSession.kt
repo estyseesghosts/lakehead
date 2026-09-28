@@ -136,10 +136,10 @@ fun HomeEditSession.beginResize(): HomeEditSession = beginResize(armedAtDown = t
  * W2 last-valid hold: when the candidate evaluates to VALID, both
  * [HomeEditSession.Active.candidatePosition] and
  * [HomeEditSession.Active.lastValidPosition] update. A colliding or out-of-bounds
- * proposal updates [HomeEditSession.Active.candidatePosition] and
- * [HomeEditSession.Active.candidateValidity] only — [lastValidPosition] stays at
- * the last valid cell so the render ghost can snap back. UNKNOWN_ITEM exits
- * to Idle (the item no longer exists in the placement list).
+ * proposal leaves [HomeEditSession.Active.candidatePosition] and
+ * [HomeEditSession.Active.lastValidPosition] at the last valid cell, updating
+ * only [HomeEditSession.Active.candidateValidity]. UNKNOWN_ITEM exits to Idle
+ * (the item no longer exists in the placement list).
  */
 fun HomeEditSession.updateMoveCandidate(
     candidate: LogicalPosition,
@@ -156,6 +156,34 @@ fun HomeEditSession.updateMoveCandidate(
     } else {
         // Blocked: hold the last valid position, report the error.
         active.copy(candidatePosition = active.lastValidPosition, candidateValidity = validity)
+    }
+}
+
+/**
+ * Apply a pixel-mapping result without allowing an invalid candidate to become a position.
+ * A [MoveCellResult.Valid] delegates position validation to the GridRules move validation.
+ * A [MoveCellResult.Rejected] retains the last-valid position and span, sets
+ * [CandidateValidity.OUT_OF_BOUNDS], and ignores `reason` (all rejections are treated as
+ * out-of-bounds). Because [moveCommitPosition] is null for non-VALID candidates, the Grid
+ * commit path does not call `onMoveTile` for a rejection.
+ */
+fun HomeEditSession.updateMoveCandidate(
+    result: MoveCellResult,
+    placements: List<HomeRenderTile>,
+    columns: Int,
+    rows: Int,
+): HomeEditSession = when (result) {
+    is MoveCellResult.Valid -> updateMoveCandidate(result.position, placements, columns, rows)
+    is MoveCellResult.Rejected -> {
+        val active = this as? HomeEditSession.Active
+        if (active == null || active.mode != EditMode.MOVE) {
+            this
+        } else {
+            active.copy(
+                candidatePosition = active.lastValidPosition,
+                candidateValidity = CandidateValidity.OUT_OF_BOUNDS,
+            )
+        }
     }
 }
 
@@ -238,6 +266,7 @@ fun HomeEditSession.renderedPosition(itemId: ItemId, persisted: LogicalPosition)
 fun HomeEditSession.moveCommitPosition(): LogicalPosition? {
     val active = this as? HomeEditSession.Active ?: return null
     if (active.mode != EditMode.MOVE) return null
+    if (active.candidateValidity != CandidateValidity.VALID) return null
     if (active.lastValidPosition == active.origin) return null
     return active.lastValidPosition
 }

@@ -1,5 +1,6 @@
 package me.foxtails.lakehead.feature.home
 
+import me.foxtails.lakehead.core.grid.GridRules
 import me.foxtails.lakehead.core.model.AppIdentity
 import me.foxtails.lakehead.core.model.ComponentIdentity
 import me.foxtails.lakehead.core.model.ItemAvailability
@@ -10,6 +11,7 @@ import me.foxtails.lakehead.core.model.ProfileId
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -160,6 +162,32 @@ class HomeEditSessionTest {
         assertEquals(CandidateValidity.VALID, active.candidateValidity)
         // W2: VALID candidate updates lastValidPosition.
         assertEquals(LogicalPosition(4, 0), active.lastValidPosition)
+    }
+
+    @Test
+    fun updateMoveCandidate_rejectedOutOfBounds_retainsLastValidAndCannotCommit() {
+        val moving = tile("app-a", column = 0, row = 0)
+        val placements = listOf(moving)
+        val atValid = HomeEditSession.Idle
+            .enterIfLaunchable(moving, placements, columns = 6, rows = 10)
+            .updateMoveCandidate(
+                MoveCellResult.Valid(MoveCellCandidate(3, 0), LogicalPosition(3, 0)),
+                placements,
+                columns = 6,
+                rows = 10,
+            )
+
+        val rejected = atValid.updateMoveCandidate(
+            MoveCellResult.Rejected(GridRules.Rejection.OUT_OF_BOUNDS),
+            placements,
+            columns = 6,
+            rows = 10,
+        ) as HomeEditSession.Active
+
+        assertEquals(LogicalPosition(3, 0), rejected.lastValidPosition)
+        assertEquals(LogicalPosition(3, 0), rejected.candidatePosition)
+        assertEquals(CandidateValidity.OUT_OF_BOUNDS, rejected.candidateValidity)
+        assertNull(rejected.moveCommitPosition())
     }
 
     @Test
@@ -720,7 +748,7 @@ class HomeEditSessionTest {
     }
 
     @Test
-    fun moveCommitPosition_validThenBlocked_returnsLastValid() {
+    fun moveCommitPosition_validThenBlocked_returnsNull() {
         val moving = tile("app-a", column = 0, row = 0)
         val obstacle = tile("app-b", column = 3, row = 0)
         val placements = listOf(moving, obstacle)
@@ -734,7 +762,7 @@ class HomeEditSessionTest {
             LogicalPosition(3, 0), placements, columns = 6, rows = 10,
         )
 
-        assertEquals(LogicalPosition(2, 0), blocked.moveCommitPosition())
+        assertEquals(null, blocked.moveCommitPosition())
     }
 
     @Test
