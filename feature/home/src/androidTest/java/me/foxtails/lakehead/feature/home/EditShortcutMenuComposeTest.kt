@@ -1,6 +1,9 @@
 package me.foxtails.lakehead.feature.home
 
 import androidx.activity.ComponentActivity
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.width
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
@@ -13,6 +16,7 @@ import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.unit.dp
@@ -22,6 +26,7 @@ import me.foxtails.lakehead.core.designsystem.LauncherTheme
 import me.foxtails.lakehead.core.designsystem.ROW_LAUNCH_ZONE_TAG
 import me.foxtails.lakehead.core.designsystem.SHORTCUT_SURFACE_ROW_TAG
 import me.foxtails.lakehead.core.designsystem.ShortcutSurfaceEntry
+import me.foxtails.lakehead.core.designsystem.SquareCellGeometry
 import me.foxtails.lakehead.core.grid.GridColumns
 import me.foxtails.lakehead.core.grid.GridRowWindow
 import me.foxtails.lakehead.core.grid.GridVerticalExtent
@@ -396,6 +401,132 @@ class EditShortcutMenuComposeTest {
     }
 
     @Test
+    fun rows_keepFixedHeightNeverStretch() {
+        setMenuCanvas(loaded(listOf(tile("a", personal, "Deep App"))), listOf(entry("s1")))
+        composeRule.waitForIdle()
+        longPressBody("Deep App")
+
+        val rowPx = with(composeRule.density) { 56.dp.roundToPx() }
+        val rows = composeRule.onAllNodesWithTag(SHORTCUT_SURFACE_ROW_TAG, useUnmergedTree = true)
+        rows.assertCountEquals(1)
+        val height = rows[0].fetchSemanticsNode().size.height
+        composeRule.runOnIdle {
+            assertTrue(
+                "single row height $height must equal the fixed 56dp row $rowPx (no stretch)",
+                kotlin.math.abs(height - rowPx) <= 2,
+            )
+        }
+    }
+
+    @Test
+    fun manyRows_capAtViewportAndLastRowReachableByScroll() {
+        val many = List(20) { index -> entry("s$index") }
+        setMenuCanvas(loaded(listOf(tile("a", personal, "Deep App"))), many)
+        composeRule.waitForIdle()
+        longPressBody("Deep App")
+
+        val menu = composeRule.onNodeWithTag(EDIT_SHORTCUT_MENU_TAG, useUnmergedTree = true)
+            .assertIsDisplayed()
+            .fetchSemanticsNode()
+        val gridHeight = composeRule.onNodeWithTag(HOME_CANVAS_GRID_TAG, useUnmergedTree = true)
+            .assertIsDisplayed()
+            .fetchSemanticsNode().size.height
+        composeRule.runOnIdle {
+            assertTrue(
+                "20-row menu height ${menu.size.height} must respect the viewport cap $gridHeight",
+                menu.size.height <= gridHeight + 2,
+            )
+        }
+        composeRule.onAllNodesWithTag(SHORTCUT_SURFACE_ROW_TAG, useUnmergedTree = true)
+            .assertCountEquals(20)
+
+        // The last row scrolls into view inside the capped menu.
+        val zones = composeRule.onAllNodesWithTag(ROW_LAUNCH_ZONE_TAG, useUnmergedTree = true)
+        zones[19].performScrollTo()
+        composeRule.waitForIdle()
+        val labels = zones.fetchSemanticsNodes().map { node ->
+            node.config.getOrElse(SemanticsProperties.ContentDescription) { emptyList() }
+                .firstOrNull()
+        }
+        composeRule.runOnIdle {
+            assertEquals("Shortcut s19", labels[19])
+        }
+        zones[19].assertIsDisplayed()
+    }
+
+    @Test
+    fun updates_remeasureGrowAndShrink() {
+        val holder = androidx.compose.runtime.mutableStateOf(listOf(entry("s1")))
+        executed.clear()
+        pinned.clear()
+        composeRule.setContent {
+            LauncherTheme {
+                HomeCanvas(
+                    state = loaded(listOf(tile("a", personal, "Deep App"))),
+                    iconsByIdentity = emptyMap(),
+                    onLaunchApp = {},
+                    onRequestDefaultHome = {},
+                    surfaceEntries = holder.value,
+                    onSurfaceExecute = { itemId, entryId -> executed.add(itemId to entryId) },
+                    onSurfaceTogglePin = { itemId, entryId -> pinned.add(itemId to entryId) },
+                )
+            }
+        }
+        composeRule.waitForIdle()
+        longPressBody("Deep App")
+        val one = menuSizePx()
+
+        composeRule.runOnIdle {
+            holder.value = listOf(entry("s1"), entry("s2"), entry("s3"))
+        }
+        composeRule.waitForIdle()
+        val three = menuSizePx()
+        val oneRowPx = with(composeRule.density) { 48.dp.roundToPx() }
+        composeRule.runOnIdle {
+            assertTrue(
+                "3-row height ${three.height} must grow vs 1-row ${one.height}",
+                three.height > one.height + oneRowPx,
+            )
+        }
+
+        composeRule.runOnIdle { holder.value = listOf(entry("s1")) }
+        composeRule.waitForIdle()
+        val backToOne = menuSizePx()
+        composeRule.runOnIdle {
+            assertTrue(
+                "shrunk height ${backToOne.height} must return to 1-row ${one.height}",
+                kotlin.math.abs(backToOne.height - one.height) <= 2,
+            )
+        }
+    }
+
+    @Test
+    fun pinnedAndUnpinned_sameLabelSameHeight() {
+        val label = "Shared label"
+        setMenuCanvas(
+            loaded(listOf(tile("a", personal, "Deep App"))),
+            listOf(ShortcutSurfaceEntry(id = "s1", label = label, isPinned = false)),
+        )
+        composeRule.waitForIdle()
+        longPressBody("Deep App")
+        val unpinned = composeRule.onAllNodesWithTag(SHORTCUT_SURFACE_ROW_TAG, useUnmergedTree = true)[0]
+            .fetchSemanticsNode().size.height
+
+        setMenuCanvas(
+            loaded(listOf(tile("a", personal, "Deep App"))),
+            listOf(ShortcutSurfaceEntry(id = "s1", label = label, isPinned = true)),
+        )
+        composeRule.waitForIdle()
+        longPressBody("Deep App")
+        val pinnedHeight = composeRule.onAllNodesWithTag(SHORTCUT_SURFACE_ROW_TAG, useUnmergedTree = true)[0]
+            .fetchSemanticsNode().size.height
+
+        composeRule.runOnIdle {
+            assertEquals(unpinned, pinnedHeight)
+        }
+    }
+
+    @Test
     fun removedTile_dismissesMenuWithZeroActivation() {
         val holder = androidx.compose.runtime.mutableStateOf(
             listOf(tile("a", personal, "Deep App"), tile("b", work, "Beta App")),
@@ -429,6 +560,73 @@ class EditShortcutMenuComposeTest {
         composeRule.runOnIdle {
             assertEquals(emptyList<Pair<ItemId, String>>(), executed)
             assertEquals(emptyList<Pair<ItemId, String>>(), pinned)
+        }
+    }
+
+    @Test
+    fun narrowViewport_menuNeverWiderThanFrame() {
+        // P2: avail < 128dp leaves a capped frame under the 96dp floor
+        // (100 - 2*16 = 68dp). The effective minimum follows the frame, so the
+        // box measures inside it instead of crashing or overflowing.
+        val availDp = 100.dp
+        val availPx = with(composeRule.density) { availDp.roundToPx() }
+        val cellPx = (availPx / 6).coerceAtLeast(1)
+        val geometry = SquareCellGeometry(
+            columnCount = 6,
+            cellSizePx = cellPx,
+            columnGapPx = 0,
+            rowGapPx = 0,
+        )
+        val menuTile = tile("a", personal, "Deep App")
+        val narrow = ShortcutSurfaceEntry(id = "s1", label = "Go", isPinned = false)
+        val visibleBottomPx = with(composeRule.density) { 800.dp.roundToPx() }
+        composeRule.setContent {
+            LauncherTheme {
+                Box(modifier = Modifier.width(availDp)) {
+                    EditShortcutMenu(
+                        tile = menuTile,
+                        entries = listOf(narrow),
+                        geometry = geometry,
+                        originX = 0,
+                        rowOrigin = 0L,
+                        originYPx = 0L,
+                        availableWidthPx = availPx,
+                        visibleTopPx = 0,
+                        visibleBottomPx = visibleBottomPx,
+                        onSurfaceExecute = { _, _ -> },
+                        onSurfaceTogglePin = { _, _ -> },
+                    )
+                }
+            }
+        }
+        composeRule.waitForIdle()
+
+        // No crash reaching here; the menu renders inside the narrow frame.
+        val menu = composeRule.onNodeWithTag(EDIT_SHORTCUT_MENU_TAG, useUnmergedTree = true)
+            .assertIsDisplayed()
+            .fetchSemanticsNode()
+        val edgePx = with(composeRule.density) { 16.dp.roundToPx() }
+        val maxPx = with(composeRule.density) { 320.dp.roundToPx() }
+        val rowPx = with(composeRule.density) { 56.dp.roundToPx() }
+        val paddingPx = with(composeRule.density) { 8.dp.roundToPx() }
+        val frameWidthPx = editShortcutMenuSizePx(
+            availableWidthPx = availPx,
+            edgeMarginPx = edgePx,
+            maxWidthPx = maxPx,
+            rowPx = rowPx,
+            paddingPx = paddingPx,
+            entryCount = 1,
+        ).widthPx
+        composeRule.runOnIdle {
+            assertTrue(
+                "narrow avail $availPx leaves frame $frameWidthPx under 96dp; " +
+                    "menu width ${menu.size.width} must stay inside the frame",
+                menu.size.width <= frameWidthPx + 2,
+            )
+            assertTrue(
+                "menu width ${menu.size.width} must stay inside narrow avail $availPx",
+                menu.size.width <= availPx + 2,
+            )
         }
     }
 }

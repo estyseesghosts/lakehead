@@ -152,6 +152,18 @@ class EditShortcutMenuTest {
     // ---- size policy ----
 
     @Test
+    fun size_oneRowNaturalIsSingleRowPlusPadding() {
+        assertEquals(56 + 8, editShortcutMenuSizePx(800, 16, 320, 56, 8, 1).heightPx)
+    }
+
+    @Test
+    fun size_multiRowGrowsByWholeRows() {
+        val one = editShortcutMenuSizePx(800, 16, 320, 56, 8, 1).heightPx
+        val three = editShortcutMenuSizePx(800, 16, 320, 56, 8, 3).heightPx
+        assertEquals(one + 2 * 56, three)
+    }
+
+    @Test
     fun size_widthIsMinOfAvailMinusMarginsAndMax() {
         assertEquals(
             FrameSize(320, 120),
@@ -168,6 +180,72 @@ class EditShortcutMenuTest {
         assertEquals(56 * 3 + 8, editShortcutMenuSizePx(800, 16, 320, 56, 8, 3).heightPx)
         // Empty floors at one row (callers still render no menu when empty).
         assertEquals(56 + 8, editShortcutMenuSizePx(800, 16, 320, 56, 8, 0).heightPx)
+    }
+
+    // ---- visible safe viewport + capped height ----
+
+    @Test
+    fun capped_fittingNaturalWrapsUnchanged() {
+        assertEquals(120, editShortcutMenuCappedHeightPx(120, 800))
+    }
+
+    @Test
+    fun capped_manyRowClampsToViewportMax() {
+        assertEquals(800, editShortcutMenuCappedHeightPx(56 * 20 + 8, 800))
+    }
+
+    @Test
+    fun viewport_scrolledTopIsNonzeroWindow() {
+        assertEquals(
+            PixelRect(left = 0, top = 500, right = 400, bottom = 1300),
+            editShortcutMenuVisibleViewport(400, 500, 1300),
+        )
+    }
+
+    @Test
+    fun viewport_scrolledPlacementStaysInside() {
+        val scrolled = editShortcutMenuVisibleViewport(400, 500, 1300)
+        val tiles = listOf(
+            SignedPixelFrame(left = 0, top = 500, widthPx = 80, heightPx = 80),
+            SignedPixelFrame(left = 320, top = 500, widthPx = 80, heightPx = 80),
+            SignedPixelFrame(left = 0, top = 1220, widthPx = 80, heightPx = 80),
+            SignedPixelFrame(left = 320, top = 1220, widthPx = 80, heightPx = 80),
+            SignedPixelFrame(left = 160, top = 900, widthPx = 80, heightPx = 80),
+        )
+        for (tile in tiles) {
+            val frame = editShortcutMenuFrame(scrolled, tile, overlay, gapPx = 8)
+            assertTrue(
+                "menu $frame for tile $tile must stay inside $scrolled",
+                frame.left >= scrolled.left && frame.top >= scrolled.top &&
+                    frame.right <= scrolled.right && frame.bottom <= scrolled.bottom,
+            )
+        }
+    }
+
+    @Test
+    fun viewport_edgeTilesStayInside() {
+        val tiles = listOf(
+            SignedPixelFrame(left = 0, top = 400, widthPx = 80, heightPx = 80),
+            SignedPixelFrame(left = 320, top = 400, widthPx = 80, heightPx = 80),
+        )
+        for (tile in tiles) {
+            val frame = editShortcutMenuFrame(viewport, tile, overlay, gapPx = 8)
+            assertTrue(
+                "menu $frame for edge tile $tile must stay inside $viewport",
+                frame.left >= viewport.left && frame.top >= viewport.top &&
+                    frame.right <= viewport.right && frame.bottom <= viewport.bottom,
+            )
+        }
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun viewport_collapsedWindowIsRejected() {
+        editShortcutMenuVisibleViewport(400, 500, 500)
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun capped_nonPositiveViewportIsRejected() {
+        editShortcutMenuCappedHeightPx(120, 0)
     }
 
     // ---- above-anchor frame ----

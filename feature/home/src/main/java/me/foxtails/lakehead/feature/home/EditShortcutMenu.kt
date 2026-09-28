@@ -2,16 +2,20 @@ package me.foxtails.lakehead.feature.home
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.wrapContentSize
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
@@ -23,6 +27,7 @@ import me.foxtails.lakehead.core.designsystem.FrameAnchor
 import me.foxtails.lakehead.core.designsystem.FrameSize
 import me.foxtails.lakehead.core.designsystem.HorizontalFrameAnchor
 import me.foxtails.lakehead.core.designsystem.PixelRect
+import me.foxtails.lakehead.core.designsystem.SHORTCUT_SURFACE_ROW_HEIGHT
 import me.foxtails.lakehead.core.designsystem.ShortcutSurfaceEntry
 import me.foxtails.lakehead.core.designsystem.ShortcutSurfaceRow
 import me.foxtails.lakehead.core.designsystem.SignedPixelFrame
@@ -55,11 +60,32 @@ import me.foxtails.lakehead.core.model.ItemId
  * - Geometry is overlay-only: [editShortcutMenuFrame] measures a sibling frame
  *   above the tile (try above, flip below, clamp) through
  *   [FloatingOverlayFrame.measure], so neighbours are overlaid and the grid
- *   never reflows, repacks or re-checks legality. The frame is the capped
- *   maximum (320dp / available-width-minus-margins, rows plus padding); the
- *   rendered box hugs content up to that maximum ([IntrinsicSize.Max] column
- *   with wrap + min/max width) so one short shortcut is a very small box and
- *   long labels cap and ellipsize in the row.
+ *   never reflows, repacks or re-checks legality.
+ * - One measured content size plus a safe viewport: the natural height is
+ *   `entries.size * [SHORTCUT_SURFACE_ROW_HEIGHT]` plus the explicit Column
+ *   vertical padding below ([EDIT_SHORTCUT_MENU_HALF_PADDING] top + bottom,
+ *   zero inter-row spacing), so a one-shortcut menu hugs exactly one fixed
+ *   row and taller menus grow by whole rows — rows never stretch to fill.
+ *   The width cap (`min(availableWidth - 2 * edge, 320dp)`) and the 96dp
+ *   minimum are constraints, not measured dimensions: the rendered box hugs
+ *   the widest row ([IntrinsicSize.Max]) up to the capped frame width, and
+ *   the frame is placed with the capped width so a narrower render still
+ *   fits. On narrow viewports where the capped frame itself is under 96dp
+ *   (avail < 128dp after the edge reserve), the effective minimum follows the
+ *   frame (`minOf(96dp, frameWidth)`) so the box never measures wider than
+ *   its frame. Long labels cap and ellipsize in the row.
+ * - Visible safe viewport: the frame is measured against
+ *   [editShortcutMenuVisibleViewport] — the caller-visible window in
+ *   grid-content coordinates (`visibleTopPx..visibleBottomPx`, the grid's
+ *   scroll offset plus its app-safe usable height, which already excludes
+ *   the floating-pill/system-gesture reserve) — never against the whole
+ *   content minimum. The overlay height is the natural height clamped to
+ *   that viewport ([editShortcutMenuCappedHeightPx]); when the natural
+ *   height fits, the box wraps it with no scrolling, and only when it
+ *   exceeds the cap does the box pin to the cap with an internal
+ *   `verticalScroll` (edge tiles and many-row menus stay reachable). This
+ *   menu reads no `WindowInsets` and re-subtracts no pill reserve: the
+ *   usable height it receives is already safe.
  */
 @Composable
 internal fun EditShortcutMenu(
@@ -70,7 +96,8 @@ internal fun EditShortcutMenu(
     rowOrigin: Long,
     originYPx: Long,
     availableWidthPx: Int,
-    minHeightPx: Int,
+    visibleTopPx: Int,
+    visibleBottomPx: Int,
     onSurfaceExecute: (ItemId, String) -> Unit,
     onSurfaceTogglePin: (ItemId, String) -> Unit,
     modifier: Modifier = Modifier,
@@ -89,42 +116,67 @@ internal fun EditShortcutMenu(
         originRow = rowOrigin,
         originYPx = originYPx,
     )
+    // Single measured content size: the width cap and the natural height are
+    // derived once from the shared row height plus the exact vertical padding
+    // rendered below (two half-pads, one computation, so math and render
+    // agree to the pixel). Both stay constraints for placement; the render
+    // hugs content up to them.
+    val halfPadPx = with(density) { EDIT_SHORTCUT_MENU_HALF_PADDING.roundToPx() }
     val menuSize = editShortcutMenuSizePx(
         availableWidthPx = availableWidthPx,
         edgeMarginPx = with(density) { 16.dp.roundToPx() },
         maxWidthPx = with(density) { 320.dp.roundToPx() },
-        rowPx = with(density) { 56.dp.roundToPx() },
-        paddingPx = with(density) { 8.dp.roundToPx() },
+        rowPx = with(density) { SHORTCUT_SURFACE_ROW_HEIGHT.dp.roundToPx() },
+        paddingPx = halfPadPx * 2,
         entryCount = entries.size,
     )
-    val viewport = PixelRect(
-        left = 0,
-        top = 0,
-        right = availableWidthPx,
-        bottom = maxOf(minHeightPx, menuSize.heightPx),
+    // Safe viewport in grid-content coordinates: the caller passes the
+    // visible window (grid scroll offset .. offset + app-safe usable height).
+    // The overlay height clamps to it; the menu never sizes against the whole
+    // content minimum.
+    val viewport = editShortcutMenuVisibleViewport(
+        availableWidthPx = availableWidthPx,
+        visibleTopPx = visibleTopPx,
+        visibleBottomPx = visibleBottomPx,
+    )
+    val cappedHeightPx = editShortcutMenuCappedHeightPx(
+        naturalHeightPx = menuSize.heightPx,
+        viewportHeightPx = viewport.height,
     )
     val frame = editShortcutMenuFrame(
         viewport = viewport,
         tileBounds = tileFrame,
-        overlaySize = FrameSize(
-            menuSize.widthPx,
-            menuSize.heightPx.coerceAtMost(viewport.height),
-        ),
+        overlaySize = FrameSize(menuSize.widthPx, cappedHeightPx),
         gapPx = with(density) { 8.dp.roundToPx() },
     )
+    // Internal scroll only when the natural height exceeds the safe cap:
+    // fitting menus wrap their rows exactly, overflowing menus pin to the
+    // frame and scroll inside it. Rows keep their fixed height either way.
+    val needsScroll = menuSize.heightPx > viewport.height
+    val menuScroll = remember(tile.itemId) { ScrollState(0) }
     val maxWidthDp = with(density) { frame.width.toDp() }
+    // P2 narrow-viewport guard: the 96dp floor is a content-hug minimum, never a
+    // widening constraint. When the capped frame itself is narrower (avail < 128dp
+    // after the 2x16dp edge reserve), the effective minimum follows the frame so
+    // widthIn(min, max) never demands a box wider than its frame.
+    val effectiveMinWidthDp = minOf(EDIT_SHORTCUT_MENU_MIN_WIDTH, maxWidthDp)
     val maxHeightDp = with(density) { frame.height.toDp() }
     Box(
         modifier = modifier
             .offset { IntOffset(frame.left, frame.top) }
             .wrapContentSize(align = Alignment.TopStart, unbounded = false)
-            .widthIn(min = EDIT_SHORTCUT_MENU_MIN_WIDTH, max = maxWidthDp)
+            .widthIn(min = effectiveMinWidthDp, max = maxWidthDp)
             .heightIn(max = maxHeightDp)
             .background(scheme.surfaceContainer)
             .border(1.dp, scheme.outline)
             .testTag(EDIT_SHORTCUT_MENU_TAG),
     ) {
-        Column(modifier = Modifier.width(IntrinsicSize.Max)) {
+        Column(
+            modifier = Modifier
+                .width(IntrinsicSize.Max)
+                .padding(vertical = EDIT_SHORTCUT_MENU_HALF_PADDING)
+                .verticalScroll(menuScroll, enabled = needsScroll),
+        ) {
             entries.forEach { entry ->
                 ShortcutSurfaceRow(
                     entry = entry,
@@ -145,6 +197,17 @@ internal const val EDIT_SHORTCUT_MENU_TAG: String = "edit-shortcut-menu"
  * capped frame width; long labels cap at the frame and ellipsize in the row.
  */
 private val EDIT_SHORTCUT_MENU_MIN_WIDTH = 96.dp
+
+/**
+ * Half of the menu's explicit vertical padding, applied top and bottom.
+ *
+ * The Column renders `padding(vertical = this)` with zero inter-row spacing,
+ * so the rendered padding totals `2 * round(4dp)` — exactly the `paddingPx`
+ * the caller passes to [editShortcutMenuSizePx] (`halfPadPx * 2`, one
+ * rounding shared by math and render). Rows keep the shared fixed
+ * [SHORTCUT_SURFACE_ROW_HEIGHT]; nothing stretches.
+ */
+private val EDIT_SHORTCUT_MENU_HALF_PADDING = 4.dp
 
 /**
  * Resolves the shortcut rows to show for the current selection.
@@ -206,11 +269,18 @@ internal fun isEditShortcutMenuVisible(
  * Size policy for the edit-mode shortcut menu, in pixels.
  *
  * Width is `min(availableWidthPx - 2 * edgeMarginPx, maxWidthPx)` coerced into
- * `1..availableWidthPx`; height is `rowPx * max(entryCount, 1) + paddingPx`
- * coerced to at least 1px. Callers pass the B4 constants (16dp edge margin,
- * 320dp max width, 56dp rows, 8dp padding); the `max(entryCount, 1)` floor
- * keeps the formula total even though empty lists never reach composition
- * (they render no menu). Pure math, framework-free.
+ * `1..availableWidthPx`: a placement cap and render `max` constraint, never a
+ * measured width (the box hugs the widest row up to it). Height is the single
+ * measured natural content size, `rowPx * max(entryCount, 1) + paddingPx`
+ * coerced to at least 1px, where `rowPx` is the shared
+ * [SHORTCUT_SURFACE_ROW_HEIGHT] and `paddingPx` is the exact rendered Column
+ * padding (`2 * [EDIT_SHORTCUT_MENU_HALF_PADDING]`, zero spacing). Callers
+ * pass the B4 constants (16dp edge margin, 320dp max width); the
+ * `max(entryCount, 1)` floor keeps the formula total even though empty lists
+ * never reach composition (they render no menu). The natural height is then
+ * clamped to the visible safe viewport via
+ * [editShortcutMenuCappedHeightPx]; this function itself never clamps to a
+ * viewport. Pure math, framework-free.
  */
 internal fun editShortcutMenuSizePx(
     availableWidthPx: Int,
@@ -242,6 +312,52 @@ internal fun editShortcutMenuSizePx(
 }
 
 /**
+ * Visible safe viewport for the edit-mode shortcut menu, in grid-content pixels.
+ *
+ * `[visibleTopPx, visibleBottomPx]` is the caller-visible window the menu must
+ * stay inside: the grid passes its scroll offset as [visibleTopPx] and
+ * `offset + app-safe usable height` as [visibleBottomPx]. That usable height
+ * already excludes the floating-pill/system-gesture reserve (resolved once in
+ * `:app` and carried as a plain pixel count through `HomeCanvas`), so this
+ * helper subtracts nothing further and reads no insets. The top is usually
+ * nonzero once the grid has scrolled. Pure math, framework-free.
+ */
+internal fun editShortcutMenuVisibleViewport(
+    availableWidthPx: Int,
+    visibleTopPx: Int,
+    visibleBottomPx: Int,
+): PixelRect {
+    require(availableWidthPx > 0) { "availableWidthPx must be positive, was $availableWidthPx" }
+    require(visibleTopPx >= 0) { "visibleTopPx must be non-negative, was $visibleTopPx" }
+    require(visibleBottomPx > visibleTopPx) {
+        "visibleBottomPx ($visibleBottomPx) must exceed visibleTopPx ($visibleTopPx)"
+    }
+    return PixelRect(
+        left = 0,
+        top = visibleTopPx,
+        right = availableWidthPx,
+        bottom = visibleBottomPx,
+    )
+}
+
+/**
+ * Clamps the single measured menu height to the visible safe viewport.
+ *
+ * Returns `min(naturalHeightPx, viewportHeightPx)` coerced to at least 1px:
+ * fitting menus wrap their natural height with no internal scroll, while
+ * taller menus pin to the viewport height and scroll inside the frame. Pure
+ * math, framework-free.
+ */
+internal fun editShortcutMenuCappedHeightPx(
+    naturalHeightPx: Int,
+    viewportHeightPx: Int,
+): Int {
+    require(naturalHeightPx > 0) { "naturalHeightPx must be positive, was $naturalHeightPx" }
+    require(viewportHeightPx > 0) { "viewportHeightPx must be positive, was $viewportHeightPx" }
+    return minOf(naturalHeightPx, viewportHeightPx).coerceAtLeast(1)
+}
+
+/**
  * Measures the edit-mode shortcut menu frame above a tile: try above, flip, clamp.
  *
  * Pure geometry; no composition, no reflow, no tile mutation. The caller renders
@@ -259,10 +375,11 @@ internal fun editShortcutMenuSizePx(
  *
  * [tileBounds] is the tile's content-local frame (may start above the content
  * top for rows above the signed origin; such candidates fail validation and
- * fall through to flipping/clamping). [viewport] is the content-local overlay
- * region (origin at 0,0). [gapPx] separates tile and menu. The overlay must
- * fit the viewport on its own; oversized requests throw instead of silently
- * overflowing.
+ * fall through to flipping/clamping). [viewport] is the visible safe window
+ * in the same content-local coordinates (usually starting at the grid scroll
+ * offset, not at 0,0 — see [editShortcutMenuVisibleViewport]). [gapPx]
+ * separates tile and menu. The overlay must fit the viewport on its own;
+ * oversized requests throw instead of silently overflowing.
  */
 internal fun editShortcutMenuFrame(
     viewport: PixelRect,

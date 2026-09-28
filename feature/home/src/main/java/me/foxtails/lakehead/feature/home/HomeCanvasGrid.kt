@@ -1900,7 +1900,10 @@ internal fun HomeCanvasGrid(
                 // tile-lookup miss, zero shortcuts) uncomposes the menu with
                 // zero activation. Only a row tap reports onSurfaceExecute/
                 // onSurfaceTogglePin with the selected ItemId and entry id;
-                // the menu never moves, resizes or pages tiles.
+                // the menu never moves, resizes or pages tiles. The visible
+                // window is the grid scroll offset plus the app-safe usable
+                // height (pill/gesture reserve already excluded upstream);
+                // minHeightPx stays the WindowedSpanContainer minimum only.
                 val menuSelectedId = interactionEditing?.selectedId
                 // B1 owner gate: rows scoped to another tile (stale A rows after
                 // an A→B switch) hide honestly until the caller's rows for B
@@ -1918,7 +1921,8 @@ internal fun HomeCanvasGrid(
                             rowOrigin = rowOrigin,
                             originYPx = originYPx,
                             availableWidthPx = availableWidthPx,
-                            minHeightPx = minHeightPx,
+                            visibleTopPx = scrollState.value,
+                            visibleBottomPx = scrollState.value + availableHeightPx.coerceAtLeast(1),
                             onSurfaceExecute = onSurfaceExecute,
                             onSurfaceTogglePin = onSurfaceTogglePin,
                         )
