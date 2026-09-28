@@ -27,6 +27,21 @@ interface ShortcutGateway {
     fun refresh(identity: AppIdentity)
 
     /**
+     * Requeries [identity] and, in implementations overriding this method,
+     * completes after that request has published (or failed); cancellation
+     * cancels the request (for example, the `LauncherApps` gateway cancels
+     * its admitted query when the caller is cancelled, and reports stop as
+     * `false`). The source-compatible default is fire-and-forget: it calls
+     * [refresh] and returns `false` immediately without awaiting or
+     * cancelling anything. Platform gateways should override it when a
+     * caller needs to correlate a refresh with its result.
+     */
+    suspend fun refreshAndAwait(identity: AppIdentity): Boolean {
+        refresh(identity)
+        return false
+    }
+
+    /**
      * Starts the shortcut named by [ref] in exactly the accessible profile
      * named by the ref. Returns false when the profile is inaccessible or the
      * platform rejects the start; never throws for launch failures.

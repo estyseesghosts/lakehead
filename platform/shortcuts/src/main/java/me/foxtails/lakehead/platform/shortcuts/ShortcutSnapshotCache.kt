@@ -59,4 +59,8 @@ internal class ShortcutSnapshotCache(maxEntries: Int = 64) {
     }
 
     fun size(): Int = synchronized(lock) { entries.size }
+
+    fun contains(identity: AppIdentity): Boolean = synchronized(lock) { entries.containsKey(identity) }
+
+    fun cachedIdentities(): Set<AppIdentity> = synchronized(lock) { LinkedHashSet(entries.keys) }
 }
