@@ -34,6 +34,7 @@ import me.foxtails.lakehead.core.designsystem.AppTileDefaults
 import me.foxtails.lakehead.core.designsystem.CORNER_CONTROL_TOUCH_SIZE
 import me.foxtails.lakehead.core.designsystem.GestureArbitration
 import me.foxtails.lakehead.core.designsystem.GestureArbitration.LockedAxis
+import me.foxtails.lakehead.core.designsystem.PinnedTileShortcut
 import me.foxtails.lakehead.core.designsystem.PixelRect
 import me.foxtails.lakehead.core.designsystem.RemoveButton
 import me.foxtails.lakehead.core.designsystem.ResizeCandidateOverlay
@@ -160,7 +161,10 @@ data class HomeCanvasViewportStyle(
  *   transfers, empty-tap/Back/navigate/move-start/resize-start/removal
  *   dismisses with zero activation) and renders [surfaceEntries] in caller
  *   rank order via the reused [swipeSurfaceFrame]-pattern geometry
- *   ([editShortcutMenuFrame]); no reflow, no packing, no grid legality.
+ *   ([editShortcutMenuFrame]); no reflow, no packing, no grid legality.  Tile
+ *   strips are NOT the menu: they render [pinnedByTile] on every tile via
+ *   [HomeCanvasTile] + [TilePinnedStrip] arrangement (centered icon when empty,
+ *   compact strip + defined overflow when pinned).
  */
 @Composable
 internal fun HomeCanvasGrid(
@@ -190,6 +194,14 @@ internal fun HomeCanvasGrid(
     onSelectedTileChange: (ItemId?) -> Unit = {},
     onSurfaceExecute: (ItemId, String) -> Unit = { _, _ -> },
     onSurfaceTogglePin: (ItemId, String) -> Unit = { _, _ -> },
+    // C1 tile strip: joined pinned shortcuts per tile (as produced by
+    // TilePinnedStrip.resolve from the persisted binding + live metadata),
+    // keyed by tile id.  Missing entries render no strip.  Strip taps report
+    // onPinnedShortcutClick with the owning tile id and shortcut id;
+    // execution stays with the caller.  Defaults keep previews/tests
+    // pin-free; :app joins the B2 sources when it wires this through.
+    pinnedByTile: Map<ItemId, List<PinnedTileShortcut>> = emptyMap(),
+    onPinnedShortcutClick: (ItemId, String) -> Unit = { _, _ -> },
     // W3 reduced-motion: when true the resize preview snaps to the validated
     // span immediately instead of animating rapidly toward it. Both branches
     // share [resizePreviewFrame] geometry, so the rendered bounds are identical.
@@ -735,6 +747,12 @@ internal fun HomeCanvasGrid(
                             onLaunchApp = onLaunchApp,
                             isEditActive = active != null,
                             activeItemId = active?.itemId,
+                            // C1: per-tile joined pins (empty = centered icon);
+                            // arranged on the live preview span inside the tile.
+                            pinnedShortcuts = pinnedByTile[tile.itemId].orEmpty(),
+                            onShortcutClick = { shortcutId ->
+                                onPinnedShortcutClick(tile.itemId, shortcutId)
+                            },
                             // W1 recess/select: tap transfers selection directly
                             // (selectOnTap, never launch); long-press enters
                             // wiggle-editing (enterOnLongPress).

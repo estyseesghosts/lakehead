@@ -6,6 +6,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import me.foxtails.lakehead.core.designsystem.ShortcutSurfaceEntry
+import me.foxtails.lakehead.core.designsystem.PinnedTileShortcut
 import me.foxtails.lakehead.core.model.AppIdentity
 import me.foxtails.lakehead.core.model.ItemId
 import me.foxtails.lakehead.core.model.ShortcutRef
@@ -13,6 +14,8 @@ import me.foxtails.lakehead.core.model.LogicalSpan
 import me.foxtails.lakehead.core.model.TileBinding
 import me.foxtails.lakehead.data.repository.HomePlacementRepository
 import me.foxtails.lakehead.feature.home.ShortcutOrdering
+import me.foxtails.lakehead.feature.home.HomeRenderTile
+import me.foxtails.lakehead.feature.home.TilePinnedStrip
 import me.foxtails.lakehead.feature.home.TileShortcutPolicy
 import me.foxtails.lakehead.platform.shortcuts.ShortcutGateway
 
@@ -73,6 +76,20 @@ internal class ShortcutSurfaceLoader(
                 repository.saveBinding(updated)
                 true
             }
+        }
+
+    /** Resolves the persisted pin order to the live, label-bearing tile strip model. */
+    suspend fun pinnedForTile(tileId: ItemId, identity: AppIdentity): List<PinnedTileShortcut> =
+        withContext(ioDispatcher) {
+            TilePinnedStrip.resolve(repository.loadBinding(tileId), gateway.shortcutsFor(identity))
+        }
+
+    /** Returns identities whose persisted bindings contain at least one pin. */
+    suspend fun pinnedIdentitiesForTiles(tiles: List<HomeRenderTile>): List<AppIdentity> =
+        withContext(ioDispatcher) {
+            tiles.filter { repository.loadBinding(it.itemId).pinnedShortcuts.isNotEmpty() }
+                .map { it.appIdentity }
+                .distinct()
         }
 
     /**

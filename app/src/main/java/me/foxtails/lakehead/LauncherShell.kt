@@ -34,6 +34,7 @@ import me.foxtails.lakehead.core.designsystem.GestureArbitration
 import me.foxtails.lakehead.core.designsystem.GestureArbitration.ArbWinner
 import me.foxtails.lakehead.core.designsystem.GestureArbitration.LockedAxis
 import me.foxtails.lakehead.core.designsystem.ShortcutSurfaceEntry
+import me.foxtails.lakehead.core.designsystem.PinnedTileShortcut
 import me.foxtails.lakehead.core.model.AppIdentity
 import me.foxtails.lakehead.core.model.ItemId
 import me.foxtails.lakehead.core.model.LogicalPosition
@@ -150,6 +151,8 @@ internal fun LauncherShell(
     onSelectedTileChange: (ItemId?) -> Unit = {},
     onSurfaceExecute: (ItemId, String) -> Unit = { _, _ -> },
     onSurfaceTogglePin: (ItemId, String) -> Unit = { _, _ -> },
+    pinnedByTile: Map<ItemId, List<PinnedTileShortcut>> = emptyMap(),
+    onPinnedShortcutClick: (ItemId, String) -> Unit = { _, _ -> },
     onHeaderTap: (String) -> Unit = {},
     // S1 settings menu: reports the feed provider picked in the transient
     // settings menu. The shell dismisses the menu; binding stays with the caller.
@@ -398,6 +401,8 @@ internal fun LauncherShell(
                     onSelectedTileChange = onSelectedTileChange,
                     onSurfaceExecute = onSurfaceExecute,
                     onSurfaceTogglePin = onSurfaceTogglePin,
+                    pinnedByTile = pinnedByTile,
+                    onPinnedShortcutClick = onPinnedShortcutClick,
                     onTransientHoldChange = { homeHold = it },
                     onPagerHoldChange = { pagerHold = it },
                     isVisible = homeVisible,

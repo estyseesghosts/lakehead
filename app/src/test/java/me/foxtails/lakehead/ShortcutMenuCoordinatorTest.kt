@@ -3,12 +3,14 @@ package me.foxtails.lakehead
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.advanceTimeBy
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
-import kotlin.coroutines.CoroutineContext
 import me.foxtails.lakehead.core.model.AppIdentity
 import me.foxtails.lakehead.core.model.ComponentIdentity
 import me.foxtails.lakehead.core.model.HomeId
@@ -278,20 +280,291 @@ class ShortcutMenuCoordinatorTest {
     }
 
     @Test
+    fun pinnedProjectionUsesBindingOrderAndIsEmptyWithoutPins() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val first = shortcut(identityA, "first", 0)
+        val second = shortcut(identityA, "second", 1)
+        val repository = FakeBindingRepository(
+            mapOf(tileA to TileBinding(tileA, listOf(second.ref, first.ref))),
+        )
+        val gateway = FakeGateway(mapOf(identityA to listOf(first, second)))
+        val coordinator = ShortcutMenuCoordinator(
+            gateway,
+            ShortcutSurfaceLoader(gateway, repository, dispatcher),
+            dispatcher,
+        )
+        coordinator.start(this)
+        coordinator.onHomeTilesChanged(listOf(tile(tileA, identityA), tile(tileB, identityB)))
+        advanceUntilIdle()
+
+        assertEquals(listOf("second", "first"), coordinator.pinnedByTile.value[tileA]?.map { it.id })
+        assertFalse(coordinator.pinnedByTile.value.containsKey(tileB))
+        coordinator.stop()
+    }
+
+    @Test
+    fun persistedPinsRefreshMetadataOnColdStart() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val pinned = shortcut(identityA, "pinned", 0)
+        val gateway = FakeGateway(
+            emptyMap(),
+            refreshResults = mapOf(identityA to listOf(pinned)),
+        )
+        val repository = FakeBindingRepository(
+            mapOf(tileA to TileBinding(tileA, listOf(pinned.ref))),
+        )
+        val coordinator = ShortcutMenuCoordinator(
+            gateway,
+            ShortcutSurfaceLoader(gateway, repository, dispatcher),
+            dispatcher,
+        )
+        coordinator.start(this)
+        coordinator.onHomeTilesChanged(listOf(tile(tileA, identityA)))
+        advanceUntilIdle()
+
+        assertEquals(listOf(identityA), gateway.refreshed)
+        assertEquals(listOf("pinned"), coordinator.pinnedByTile.value[tileA]?.map { it.id })
+        coordinator.stop()
+    }
+
+    @Test
+    fun restartRefreshesPersistedPinsBeforeReprojectingRetainedTiles() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val stale = shortcut(identityA, "same", 0).copy(label = "Old label")
+        val fresh = shortcut(identityA, "same", 0).copy(label = "Fresh label")
+        val gateway = FakeGateway(
+            mapOf(identityA to listOf(stale)),
+            refreshResults = mapOf(identityA to listOf(fresh)),
+        )
+        val repository = FakeBindingRepository(
+            // The stale cached row is deliberately still bound. If the
+            // coordinator projects independently of the refresh, this would
+            // publish the old label before A's refresh completes.
+            mapOf(tileA to TileBinding(tileA, listOf(stale.ref))),
+        )
+        val coordinator = ShortcutMenuCoordinator(
+            gateway,
+            ShortcutSurfaceLoader(gateway, repository, dispatcher),
+            dispatcher,
+        )
+        coordinator.start(this)
+        coordinator.onHomeTilesChanged(listOf(tile(tileA, identityA)))
+        advanceUntilIdle()
+
+        coordinator.stop()
+        gateway.publish(mapOf(identityA to listOf(stale)))
+        coordinator.start(this)
+        advanceUntilIdle()
+
+        assertEquals(listOf("Fresh label"), coordinator.pinnedByTile.value[tileA]?.map { it.label })
+        assertEquals(listOf(identityA, identityA), gateway.refreshed)
+        coordinator.stop()
+    }
+
+    @Test
+    fun restartDoesNotPublishRetainedPinsFromStaleSnapshot() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val stale = shortcut(identityA, "same", 0).copy(label = "Old label")
+        val fresh = shortcut(identityA, "same", 0).copy(label = "Fresh label")
+        val gateway = FakeGateway(
+            mapOf(identityA to listOf(stale)),
+            refreshResults = mapOf(identityA to listOf(fresh)),
+            autoPublishRefreshResults = false,
+        )
+        val repository = FakeBindingRepository(
+            mapOf(tileA to TileBinding(tileA, listOf(stale.ref))),
+        )
+        val coordinator = ShortcutMenuCoordinator(
+            gateway,
+            ShortcutSurfaceLoader(gateway, repository, dispatcher),
+            dispatcher,
+        )
+
+        coordinator.start(this)
+        coordinator.onHomeTilesChanged(listOf(tile(tileA, identityA)))
+        runCurrent()
+
+        assertFalse(coordinator.pinnedByTile.value.containsKey(tileA))
+
+        // Publishing another identity is not evidence that A's refresh ran.
+        gateway.publish(mapOf(identityA to listOf(stale), identityB to listOf(shortcut(identityB, "b", 0))))
+        runCurrent()
+        assertFalse(coordinator.pinnedByTile.value.containsKey(tileA))
+
+        gateway.completeRefresh(identityA)
+        runCurrent()
+
+        assertEquals(listOf("Fresh label"), coordinator.pinnedByTile.value[tileA]?.map { it.label })
+        coordinator.stop()
+    }
+
+    @Test
+    fun pinToggleDoesNotCancelRestartHoldAndFreshProjectionRecovers() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val stale = shortcut(identityA, "same", 0).copy(label = "Old label")
+        val newlyPinned = shortcut(identityA, "new", 1)
+        val fresh = stale.copy(label = "Fresh label")
+        val gateway = FakeGateway(
+            mapOf(identityA to listOf(stale, newlyPinned)),
+            refreshResults = mapOf(identityA to listOf(fresh, newlyPinned)),
+            autoPublishRefreshResults = false,
+        )
+        val repository = FakeBindingRepository(
+            mapOf(tileA to TileBinding(tileA, listOf(stale.ref))),
+        )
+        val coordinator = ShortcutMenuCoordinator(
+            gateway,
+            ShortcutSurfaceLoader(gateway, repository, dispatcher),
+            dispatcher,
+        )
+
+        coordinator.start(this)
+        coordinator.onHomeTilesChanged(listOf(tile(tileA, identityA).copy(span = LogicalSpan(4, 2))))
+        runCurrent()
+        assertFalse(coordinator.pinnedByTile.value.containsKey(tileA))
+
+        // The ordinary metadata refresh caused by this successful toggle must
+        // not cancel the unresolved restart refresh/fallback that owns the hold.
+        coordinator.togglePin(tileA, "new")
+        runCurrent()
+        assertFalse(coordinator.pinnedByTile.value.containsKey(tileA))
+
+        gateway.completeRefresh(identityA)
+        runCurrent()
+
+        assertEquals(listOf("Fresh label", "Label new"), coordinator.pinnedByTile.value[tileA]?.map { it.label })
+        coordinator.stop()
+    }
+
+    @Test
+    fun supersededRefreshResultAfterNewBaselineStaysBlockedUntilCurrentOrFallback() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val stale = shortcut(identityA, "same", 0).copy(label = "Old label")
+        val gateway = FakeGateway(
+            mapOf(identityA to listOf(stale)),
+            refreshResults = mapOf(identityA to listOf(stale)),
+            autoPublishRefreshResults = false,
+        )
+        val repository = FakeBindingRepository(
+            mapOf(tileA to TileBinding(tileA, listOf(stale.ref))),
+        )
+        val coordinator = ShortcutMenuCoordinator(
+            gateway,
+            ShortcutSurfaceLoader(gateway, repository, dispatcher),
+            dispatcher,
+        )
+        coordinator.start(this)
+        coordinator.onHomeTilesChanged(listOf(tile(tileA, identityA)))
+        runCurrent()
+
+        // A new restart request establishes a newer baseline. A publication
+        // from the superseded A request must not release that request's hold.
+        // The snapshot must actually change (B gains rows while A stays
+        // stale) so StateFlow emits and the coordinator has a publication
+        // it is forced to ignore; re-publishing the identical map would be
+        // deduped and prove nothing.
+        coordinator.onHomeTilesChanged(listOf(tile(tileA, identityA)))
+        runCurrent()
+        gateway.publish(mapOf(identityA to listOf(stale), identityB to listOf(shortcut(identityB, "b", 0))))
+        runCurrent()
+        assertFalse(coordinator.pinnedByTile.value.containsKey(tileA))
+
+        advanceTimeBy(1_000)
+        runCurrent()
+        assertEquals(listOf("Old label"), coordinator.pinnedByTile.value[tileA]?.map { it.label })
+        coordinator.stop()
+    }
+
+    @Test
+    fun restartFallbackReleasesStaleProjectionAndLateResultDoesNotReblock() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val stale = shortcut(identityA, "same", 0).copy(label = "Old label")
+        val fresh = shortcut(identityA, "same", 0).copy(label = "Fresh label")
+        val gateway = FakeGateway(
+            mapOf(identityA to listOf(stale)),
+            refreshResults = mapOf(identityA to listOf(fresh)),
+            autoPublishRefreshResults = false,
+        )
+        val repository = FakeBindingRepository(
+            mapOf(tileA to TileBinding(tileA, listOf(stale.ref))),
+        )
+        val coordinator = ShortcutMenuCoordinator(
+            gateway,
+            ShortcutSurfaceLoader(gateway, repository, dispatcher),
+            dispatcher,
+        )
+        coordinator.start(this)
+        coordinator.onHomeTilesChanged(listOf(tile(tileA, identityA)))
+        runCurrent()
+        assertFalse(coordinator.pinnedByTile.value.containsKey(tileA))
+
+        advanceTimeBy(1_000)
+        runCurrent()
+        assertEquals(listOf("Old label"), coordinator.pinnedByTile.value[tileA]?.map { it.label })
+
+        // The timed-out refresh cannot re-enter the initial hold when its
+        // result arrives late; it is an ordinary live update now.
+        gateway.completeRefresh(identityA)
+        runCurrent()
+        assertEquals(listOf("Fresh label"), coordinator.pinnedByTile.value[tileA]?.map { it.label })
+        coordinator.stop()
+    }
+
+    @Test
+    fun unrelatedShortcutUpdateDoesNotReReadEveryBinding() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val pinned = shortcut(identityA, "pinned", 0)
+        val gateway = FakeGateway(
+            mapOf(identityA to listOf(pinned), identityB to emptyList()),
+        )
+        val repository = FakeBindingRepository(
+            mapOf(tileA to TileBinding(tileA, listOf(pinned.ref))),
+        )
+        val coordinator = ShortcutMenuCoordinator(
+            gateway,
+            ShortcutSurfaceLoader(gateway, repository, dispatcher),
+            dispatcher,
+        )
+        coordinator.start(this)
+        coordinator.onHomeTilesChanged(listOf(tile(tileA, identityA), tile(tileB, identityB)))
+        advanceUntilIdle()
+        val loadsBeforeUnrelatedUpdate = repository.bindingLoads
+
+        gateway.publish(mapOf(identityA to listOf(pinned), identityB to listOf(shortcut(identityB, "new", 0))))
+        advanceUntilIdle()
+
+        assertEquals(loadsBeforeUnrelatedUpdate, repository.bindingLoads)
+        coordinator.stop()
+    }
+
+    @Test
+    fun pinAndUnpinUpdatesTileProjection() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val gateway = FakeGateway(mapOf(identityA to listOf(shortcut(identityA, "s", 0))))
+        val repository = FakeBindingRepository(emptyMap())
+        val coordinator = ShortcutMenuCoordinator(
+            gateway,
+            ShortcutSurfaceLoader(gateway, repository, dispatcher),
+            dispatcher,
+        )
+        coordinator.start(this)
+        coordinator.onHomeTilesChanged(listOf(tile(tileA, identityA).copy(span = LogicalSpan(2, 1))))
+        advanceUntilIdle()
+        assertFalse(coordinator.pinnedByTile.value.containsKey(tileA))
+
+        coordinator.togglePin(tileA, "s")
+        advanceUntilIdle()
+        assertEquals(listOf("s"), coordinator.pinnedByTile.value[tileA]?.map { it.id })
+
+        coordinator.togglePin(tileA, "s")
+        advanceUntilIdle()
+        assertFalse(coordinator.pinnedByTile.value.containsKey(tileA))
+        coordinator.stop()
+    }
+
+    @Test
     fun rapidSwitchDropsStaleReload() = runTest {
         val dispatcher = StandardTestDispatcher(testScheduler)
-        // Manual loader queue: entries computation only runs when the test
-        // pumps it. This lets stale A's load finish after the selection has
-        // already moved to B, while B's reload (and its cancel of A's job)
-        // has not run yet — so A truly reaches the publication
-        // generation/selection guard with a stale selection instead of dying
-        // in a cancelled withContext before the guard.
-        val loaderQueue = ArrayDeque<() -> Unit>()
-        val loaderDispatcher = object : CoroutineDispatcher() {
-            override fun dispatch(context: CoroutineContext, block: Runnable) {
-                loaderQueue.addLast { block.run() }
-            }
-        }
         val gateway = FakeGateway(
             mapOf(
                 identityA to listOf(shortcut(identityA, "a1", 0)),
@@ -300,64 +573,38 @@ class ShortcutMenuCoordinatorTest {
         )
         val coordinator = ShortcutMenuCoordinator(
             gateway,
-            ShortcutSurfaceLoader(gateway, FakeBindingRepository(emptyMap()), loaderDispatcher),
+            ShortcutSurfaceLoader(gateway, FakeBindingRepository(emptyMap()), dispatcher),
             dispatcher,
         )
         coordinator.start(this)
-        try {
-            coordinator.onHomeTilesChanged(listOf(tile(tileA, identityA), tile(tileB, identityB)))
-            // Start A's load and let it park inside the loader (no rows yet).
-            coordinator.onSelectionChanged(tileA)
-            advanceUntilIdle()
-            assertNull(coordinator.menu.value)
-            assertEquals(1, loaderQueue.size)
+        coordinator.onHomeTilesChanged(listOf(tile(tileA, identityA), tile(tileB, identityB)))
+        coordinator.onSelectionChanged(tileA)
+        coordinator.onSelectionChanged(tileB)
+        advanceUntilIdle()
 
-            // Finish A's load while the coordinator is idle: A's publication
-            // resume queues on the test scheduler but does not run yet.
-            loaderQueue.removeFirst().invoke()
-
-            // Switch to B before A's stale resume runs. B's reload has not
-            // run, so A's job is still alive when it reaches the guard.
-            coordinator.onSelectionChanged(tileB)
-            // Honest empty synchronously: A's rows never render on B.
-            assertNull(coordinator.menu.value)
-
-            // Run A's stale publication attempt: the guard must drop it (B's
-            // reload launches here and parks behind the manual queue, so B's
-            // rows cannot overwrite the evidence yet). Removing the guard
-            // publishes the stale A menu here and fails this assertion.
-            testScheduler.runCurrent()
-            assertNull(coordinator.menu.value)
-            assertEquals(1, loaderQueue.size)
-
-            // Let B load and publish; B wins.
-            loaderQueue.removeFirst().invoke()
-            advanceUntilIdle()
-
-            val menu = coordinator.menu.value
-            assertEquals(tileB, menu?.tileId)
-            assertEquals(listOf("b1"), menu?.entries?.map { it.id })
-        } finally {
-            // Drain any load still parked in the manual queue before stopping:
-            // otherwise a job suspended there (e.g. B's load when an
-            // assertion above fails) would never observe teardown
-            // cancellation, which parks on an un-pumped custom dispatcher and
-            // hangs runTest instead of reporting the failure.
-            while (loaderQueue.isNotEmpty()) loaderQueue.removeFirst().invoke()
-            coordinator.stop()
-        }
+        assertEquals(tileB, coordinator.menu.value?.tileId)
+        assertEquals(listOf("b1"), coordinator.menu.value?.entries?.map { it.id })
+        coordinator.stop()
     }
 
     private class FakeGateway(
         shortcuts: Map<AppIdentity, List<LauncherShortcut>>,
+        private val refreshResults: Map<AppIdentity, List<LauncherShortcut>> = emptyMap(),
+        private val autoPublishRefreshResults: Boolean = true,
     ) : ShortcutGateway {
         private val mutable = MutableStateFlow(shortcuts)
         override val shortcuts: StateFlow<Map<AppIdentity, List<LauncherShortcut>>> = mutable
         val refreshed = mutableListOf<AppIdentity>()
         val launched = mutableListOf<ShortcutRef>()
+        private val refreshCompletions = mutableMapOf<AppIdentity, CompletableDeferred<Unit>>()
 
         fun publish(next: Map<AppIdentity, List<LauncherShortcut>>) {
             mutable.value = next
+        }
+
+        fun completeRefresh(identity: AppIdentity) {
+            refreshResults[identity]?.let { mutable.value = mutable.value + (identity to it) }
+            refreshCompletions.remove(identity)?.complete(Unit)
         }
 
         override fun shortcutsFor(identity: AppIdentity): List<LauncherShortcut> =
@@ -365,6 +612,19 @@ class ShortcutMenuCoordinatorTest {
 
         override fun refresh(identity: AppIdentity) {
             refreshed += identity
+            if (autoPublishRefreshResults) completeRefresh(identity)
+        }
+
+        override suspend fun refreshAndAwait(identity: AppIdentity): Boolean {
+            refreshed += identity
+            if (autoPublishRefreshResults) {
+                completeRefresh(identity)
+                return true
+            }
+            val completion = CompletableDeferred<Unit>()
+            refreshCompletions[identity] = completion
+            completion.await()
+            return true
         }
 
         override fun launch(ref: ShortcutRef): Boolean {
@@ -380,6 +640,8 @@ class ShortcutMenuCoordinatorTest {
         bindings: Map<ItemId, TileBinding>,
     ) : HomePlacementRepository {
         private val mutableBindings = bindings.toMutableMap()
+        var bindingLoads = 0
+            private set
         override fun load(homeId: HomeId, columns: Int, rows: Int): LoadResult = LoadResult.NotFound
         override fun place(
             homeId: HomeId,
@@ -398,7 +660,7 @@ class ShortcutMenuCoordinatorTest {
         override fun remove(homeId: HomeId, itemId: ItemId): RemoveResult = error("menu coordinator must not write")
         override fun ensureHome(homeId: HomeId): Boolean = error("menu coordinator must not write")
         override fun loadBinding(tileId: ItemId): TileBinding =
-            mutableBindings[tileId] ?: TileBinding(tileId)
+            mutableBindings[tileId].also { bindingLoads++ } ?: TileBinding(tileId)
         fun binding(tileId: ItemId): TileBinding = loadBinding(tileId)
         override fun saveBinding(binding: TileBinding) {
             mutableBindings[binding.tileId] = binding

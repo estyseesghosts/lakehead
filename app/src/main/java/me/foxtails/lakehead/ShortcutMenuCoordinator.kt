@@ -10,9 +10,12 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import me.foxtails.lakehead.core.designsystem.ShortcutSurfaceEntry
+import me.foxtails.lakehead.core.designsystem.PinnedTileShortcut
 import me.foxtails.lakehead.core.model.ItemId
 import me.foxtails.lakehead.feature.home.HomeRenderTile
 import me.foxtails.lakehead.platform.shortcuts.ShortcutGateway
@@ -59,25 +62,65 @@ internal class ShortcutMenuCoordinator(
     private val selections = MutableStateFlow<ItemId?>(null)
     private val tiles = MutableStateFlow<List<HomeRenderTile>>(emptyList())
     private val mutableMenu = MutableStateFlow<SelectedTileMenu?>(null)
+    private val mutablePinnedByTile = MutableStateFlow<Map<ItemId, List<PinnedTileShortcut>>>(emptyMap())
 
     /** Selection-scoped menu rows; null means no menu. */
     val menu: StateFlow<SelectedTileMenu?> = mutableMenu.asStateFlow()
+
+    /** Live joined pin projections, keyed by persisted home tile id. */
+    val pinnedByTile: StateFlow<Map<ItemId, List<PinnedTileShortcut>>> = mutablePinnedByTile.asStateFlow()
 
     private var scope: CoroutineScope? = null
     private var collectJob: Job? = null
     private var reloadJob: Job? = null
     private var generation = 0L
+    private var pinnedJob: Job? = null
+    private var pinnedMetadataJob: Job? = null
+    private var restartHoldJob: Job? = null
+    private var pinnedIdentityByTile = emptyMap<ItemId, me.foxtails.lakehead.core.model.AppIdentity>()
+    private var pinnedSnapshot = emptyMap<me.foxtails.lakehead.core.model.AppIdentity, List<me.foxtails.lakehead.core.model.LauncherShortcut>>()
+    private var pinnedSnapshotInitialized = false
+    private var pinnedSnapshotVersion = 0L
+    private var pinnedProjectionBlocked = false
+    private var pendingInitialPinnedRefreshes =
+        emptyMap<me.foxtails.lakehead.core.model.AppIdentity, PendingPinnedRefresh>()
+    private var pinnedRefreshGeneration = 0L
 
     @Synchronized
     fun start(parentScope: CoroutineScope) {
         if (scope != null) return
         val routeScope = CoroutineScope(parentScope.coroutineContext + SupervisorJob(parentScope.coroutineContext[Job]))
         scope = routeScope
+        pinnedProjectionBlocked = true
         collectJob = routeScope.launch {
             combine(selections, tiles, gateway.shortcuts) { selection, currentTiles, _ ->
                 selection to currentTiles
             }.collect { (selection, currentTiles) ->
                 reload(currentTiles, selection)
+            }
+        }
+        routeScope.launch {
+            gateway.shortcuts.collect { snapshot ->
+                val snapshotVersion = ++pinnedSnapshotVersion
+                val firstSnapshot = !pinnedSnapshotInitialized
+                val changed = if (firstSnapshot) {
+                    pinnedSnapshotInitialized = true
+                    emptySet()
+                } else {
+                    (pinnedSnapshot.keys + snapshot.keys).filterTo(mutableSetOf()) { identity ->
+                        pinnedSnapshot[identity] != snapshot[identity]
+                    }
+                }
+                pinnedSnapshot = snapshot
+                if (firstSnapshot) {
+                    refreshPinnedMetadataForRestart(tiles.value)
+                } else if (pendingInitialPinnedRefreshes.isNotEmpty()) {
+                    // Publications alone have no request origin. Do not let an
+                    // old, uncancellable query release a newer hold; the
+                    // awaitable refresh below is the completion authority.
+                } else if (changed.isNotEmpty()) {
+                    projectPinned(tiles.value.filter { pinnedIdentityByTile[it.itemId] in changed }, false)
+                }
             }
         }
     }
@@ -86,11 +129,25 @@ internal class ShortcutMenuCoordinator(
     fun stop() {
         generation++
         reloadJob?.cancel()
+        pinnedJob?.cancel()
+        pinnedMetadataJob?.cancel()
+        restartHoldJob?.cancel()
         collectJob?.cancel()
         scope?.cancel()
+        mutablePinnedByTile.value = emptyMap()
+        pinnedIdentityByTile = emptyMap()
+        pinnedSnapshot = emptyMap()
+        pinnedSnapshotInitialized = false
+        pinnedSnapshotVersion = 0L
+        pinnedProjectionBlocked = false
+        pendingInitialPinnedRefreshes = emptyMap()
+        pinnedRefreshGeneration++
         scope = null
         collectJob = null
         reloadJob = null
+        pinnedJob = null
+        pinnedMetadataJob = null
+        restartHoldJob = null
     }
 
     /**
@@ -121,6 +178,12 @@ internal class ShortcutMenuCoordinator(
      */
     fun onHomeTilesChanged(currentTiles: List<HomeRenderTile>) {
         tiles.value = currentTiles.toList()
+        projectPinned(currentTiles)
+        if (pinnedProjectionBlocked) {
+            refreshPinnedMetadataForRestart(currentTiles)
+        } else {
+            refreshPinnedMetadata(currentTiles)
+        }
         val current = mutableMenu.value
         if (current != null && currentTiles.none { it.itemId == current.tileId }) {
             mutableMenu.value = null
@@ -173,9 +236,123 @@ internal class ShortcutMenuCoordinator(
         val routeScope = synchronized(this) { scope } ?: return
         routeScope.launch {
             val tile = tiles.value.firstOrNull { it.itemId == tileId } ?: return@launch
-            if (surfaceLoader.togglePin(tileId, tile.appIdentity, tile.span, entryId) &&
-                selections.value == tileId
-            ) reload(tiles.value, tileId)
+            if (surfaceLoader.togglePin(tileId, tile.appIdentity, tile.span, entryId)) {
+                projectPinned(tiles.value.filter { it.itemId == tileId }, false)
+                refreshPinnedMetadata(tiles.value)
+                if (selections.value == tileId) reload(tiles.value, tileId)
+            }
         }
     }
+
+    private fun projectPinned(
+        currentTiles: List<HomeRenderTile>,
+        replaceAll: Boolean = true,
+        allowWhileBlocked: Boolean = false,
+    ) {
+        val routeScope = synchronized(this) { scope } ?: return
+        if (pinnedProjectionBlocked && !allowWhileBlocked) return
+        pinnedJob?.cancel()
+        pinnedJob = routeScope.launch {
+            val projected = currentTiles.associate { tile ->
+                tile.itemId to surfaceLoader.pinnedForTile(tile.itemId, tile.appIdentity)
+            }
+            val identities = currentTiles.associate { tile ->
+                tile.itemId to tile.appIdentity
+            }
+            pinnedIdentityByTile = if (replaceAll) {
+                val pinned = surfaceLoader.pinnedIdentitiesForTiles(currentTiles).toSet()
+                identities.filterValues { it in pinned }
+            } else {
+                pinnedIdentityByTile - currentTiles.map { it.itemId }.toSet() +
+                    identities.filterValues { identity ->
+                        identity in surfaceLoader.pinnedIdentitiesForTiles(currentTiles).toSet()
+                    }
+            }
+            mutablePinnedByTile.value = if (replaceAll) {
+                projected.filterValues { it.isNotEmpty() }
+            } else {
+                (mutablePinnedByTile.value - projected.keys + projected.filterValues { it.isNotEmpty() })
+                    .filterKeys { id -> tiles.value.any { it.itemId == id } }
+            }
+        }
+    }
+
+    private fun refreshPinnedMetadata(currentTiles: List<HomeRenderTile>) {
+        val routeScope = synchronized(this) { scope } ?: return
+        pinnedMetadataJob?.cancel()
+        pinnedMetadataJob = routeScope.launch {
+            val identities = surfaceLoader.pinnedIdentitiesForTiles(currentTiles).distinct()
+            pinnedIdentityByTile = currentTiles
+                .filter { it.appIdentity in identities }
+                .associate { it.itemId to it.appIdentity }
+            identities.forEach(gateway::refresh)
+        }
+    }
+
+    /**
+     * A retained home can still have a stale shortcut snapshot after process
+     * restart. Hold the first projection until each persisted pinned identity
+     * has had its restart refresh published, with a bounded fallback for a
+     * profile/query that cannot publish.
+     */
+    private fun refreshPinnedMetadataForRestart(currentTiles: List<HomeRenderTile>) {
+        val routeScope = synchronized(this) { scope } ?: return
+        val requestGeneration = ++pinnedRefreshGeneration
+        restartHoldJob?.cancel()
+        restartHoldJob = routeScope.launch {
+            try {
+                val identities = surfaceLoader.pinnedIdentitiesForTiles(currentTiles).distinct()
+                val requestSnapshotVersion = pinnedSnapshotVersion
+                pendingInitialPinnedRefreshes = identities.associateWith {
+                    PendingPinnedRefresh(requestGeneration, requestSnapshotVersion)
+                }
+                if (identities.isEmpty()) {
+                    delay(INITIAL_PINNED_REFRESH_TIMEOUT_MS)
+                    if (requestGeneration != pinnedRefreshGeneration) return@launch
+                    pinnedProjectionBlocked = false
+                    projectPinned(currentTiles)
+                    return@launch
+                }
+                val refreshJobs = identities.map { identity ->
+                    launch {
+                        if (gateway.refreshAndAwait(identity)) {
+                            synchronized(this@ShortcutMenuCoordinator) {
+                                if (requestGeneration != pinnedRefreshGeneration) return@launch
+                                pendingInitialPinnedRefreshes = pendingInitialPinnedRefreshes - identity
+                                pinnedProjectionBlocked = pendingInitialPinnedRefreshes.isNotEmpty()
+                            }
+                            if (!pinnedProjectionBlocked) {
+                                projectPinned(tiles.value, allowWhileBlocked = true)
+                            }
+                        }
+                    }
+                }
+                // Keep the bounded fallback independent of query completion.
+                delay(INITIAL_PINNED_REFRESH_TIMEOUT_MS)
+                refreshJobs.forEach(Job::cancel)
+                if (requestGeneration == pinnedRefreshGeneration) {
+                    pendingInitialPinnedRefreshes = emptyMap()
+                    pinnedProjectionBlocked = false
+                    projectPinned(tiles.value)
+                }
+            } finally {
+                // A superseded hold must not strand its state. The generation
+                // guard preserves a newer hold's pending set while ensuring an
+                // independently cancelled current hold releases its block.
+                if (requestGeneration == pinnedRefreshGeneration) {
+                    pendingInitialPinnedRefreshes = emptyMap()
+                    pinnedProjectionBlocked = false
+                }
+            }
+        }
+    }
+
+    private companion object {
+        const val INITIAL_PINNED_REFRESH_TIMEOUT_MS = 1_000L
+    }
+
+    private data class PendingPinnedRefresh(
+        val generation: Long,
+        val snapshotVersion: Long,
+    )
 }
