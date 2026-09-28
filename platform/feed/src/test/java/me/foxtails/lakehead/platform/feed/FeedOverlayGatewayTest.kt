@@ -754,7 +754,15 @@ class FeedOverlayGatewayTest {
         }
 
         val gateway = FeedOverlayGatewayImpl(
-            resolver = FeedProviderResolver { packageName, _ -> packageName in installed },
+            resolver = FeedProviderResolver { packageName, _ ->
+                if (packageName in installed) {
+                    FeedServiceProbeResult.present(
+                        FeedServiceComponent(packageName, "$packageName.FeedService"),
+                    )
+                } else {
+                    FeedServiceProbeResult.absent()
+                }
+            },
             ioDispatcher = UnconfinedTestDispatcher(scope.testScheduler),
             connector = connector,
             packageMonitor = monitor,

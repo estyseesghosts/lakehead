@@ -4,10 +4,7 @@ import android.app.Activity
 import android.os.Bundle
 import android.app.role.RoleManager
 import android.content.Context
-import android.content.Intent
-import android.content.pm.PackageManager
 import android.graphics.BitmapFactory
-import android.os.Build
 import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.setContent
@@ -31,6 +28,7 @@ import me.foxtails.lakehead.data.repository.RoomHomePlacementRepository
 import me.foxtails.lakehead.feature.home.HomeCanvasViewportStyle
 import me.foxtails.lakehead.feature.home.HomeRenderState
 import me.foxtails.lakehead.feature.home.HomeViewportInputs
+import me.foxtails.lakehead.platform.feed.AndroidFeedServiceQuery
 import me.foxtails.lakehead.platform.feed.FeedOverlayGateway
 import me.foxtails.lakehead.platform.feed.FeedOverlayGatewayImpl
 import me.foxtails.lakehead.platform.feed.FeedProviderResolver
@@ -184,27 +182,17 @@ class MainActivity : ComponentActivity() {
     }
 
     // Feed overlay gateway: application context only, never the activity. The
-    // PackageManager probe is the production FeedServiceQuery behind the pure
+    // PackageManager probe lives in the platform boundary adapter behind the pure
     // FeedProviderResolver decision; the gateway owns binding, lifecycle and
     // availability state, and composables only collect the framework-free state.
+    private val feedQuery: FeedServiceQuery by lazy(LazyThreadSafetyMode.NONE) {
+        AndroidFeedServiceQuery(applicationContext)
+    }
+
     private val feedGateway: FeedOverlayGateway by lazy(LazyThreadSafetyMode.NONE) {
-        val context = applicationContext
-        val query = FeedServiceQuery { packageName, action ->
-            val intent = Intent(action).setPackage(packageName)
-            val matches = if (Build.VERSION.SDK_INT >= 33) {
-                context.packageManager.queryIntentServices(
-                    intent,
-                    PackageManager.ResolveInfoFlags.of(0),
-                )
-            } else {
-                @Suppress("DEPRECATION")
-                context.packageManager.queryIntentServices(intent, 0)
-            }
-            matches.isNotEmpty()
-        }
         FeedOverlayGatewayImpl(
-            applicationContext = context,
-            resolver = FeedProviderResolver(query),
+            applicationContext = applicationContext,
+            resolver = FeedProviderResolver(feedQuery),
             ioDispatcher = Dispatchers.IO,
         )
     }

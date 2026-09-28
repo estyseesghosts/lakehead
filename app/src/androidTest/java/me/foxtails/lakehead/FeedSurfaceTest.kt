@@ -18,6 +18,8 @@ import me.foxtails.lakehead.feature.home.HomeRenderState
 import me.foxtails.lakehead.platform.feed.FeedAvailability
 import me.foxtails.lakehead.platform.feed.FeedProviderId
 import me.foxtails.lakehead.platform.feed.FeedProviderResolver
+import me.foxtails.lakehead.platform.feed.FeedServiceComponent
+import me.foxtails.lakehead.platform.feed.FeedServiceProbeResult
 import me.foxtails.lakehead.platform.feed.LAWNFEED_LEGACY_PACKAGE
 import me.foxtails.lakehead.platform.feed.LAWNFEED_PACKAGE
 import me.foxtails.lakehead.platform.feed.NEO_FEED_PACKAGE
@@ -111,7 +113,11 @@ class FeedSurfaceTest {
 
     @Test
     fun resolver_bothProviders_prefersLawnfeed() {
-        val resolver = FeedProviderResolver { _, _ -> true }
+        val resolver = FeedProviderResolver { packageName, _ ->
+            FeedServiceProbeResult.present(
+                FeedServiceComponent(packageName, "$packageName.FeedService"),
+            )
+        }
 
         val result = resolver.resolve()
 
@@ -121,7 +127,13 @@ class FeedSurfaceTest {
     @Test
     fun resolver_lawnfeedOnly_resolvesLawnfeed() {
         val resolver = FeedProviderResolver { packageName, _ ->
-            packageName == LAWNFEED_PACKAGE
+            if (packageName == LAWNFEED_PACKAGE) {
+                FeedServiceProbeResult.present(
+                    FeedServiceComponent(packageName, "$packageName.FeedService"),
+                )
+            } else {
+                FeedServiceProbeResult.absent()
+            }
         }
 
         val result = resolver.resolve()
@@ -132,7 +144,13 @@ class FeedSurfaceTest {
     @Test
     fun resolver_legacyLawnfeedId_resolvesLawnfeed() {
         val resolver = FeedProviderResolver { packageName, _ ->
-            packageName == LAWNFEED_LEGACY_PACKAGE
+            if (packageName == LAWNFEED_LEGACY_PACKAGE) {
+                FeedServiceProbeResult.present(
+                    FeedServiceComponent(packageName, "$packageName.FeedService"),
+                )
+            } else {
+                FeedServiceProbeResult.absent()
+            }
         }
 
         val result = resolver.resolve()
@@ -143,7 +161,13 @@ class FeedSurfaceTest {
     @Test
     fun resolver_neoFeedOnly_resolvesNeoFeed() {
         val resolver = FeedProviderResolver { packageName, _ ->
-            packageName == NEO_FEED_PACKAGE
+            if (packageName == NEO_FEED_PACKAGE) {
+                FeedServiceProbeResult.present(
+                    FeedServiceComponent(packageName, "$packageName.FeedService"),
+                )
+            } else {
+                FeedServiceProbeResult.absent()
+            }
         }
 
         val result = resolver.resolve()
@@ -153,7 +177,7 @@ class FeedSurfaceTest {
 
     @Test
     fun resolver_noProvider_reportsNoProvider() {
-        val resolver = FeedProviderResolver { _, _ -> false }
+        val resolver = FeedProviderResolver { _, _ -> FeedServiceProbeResult.absent() }
 
         val result = resolver.resolve()
 

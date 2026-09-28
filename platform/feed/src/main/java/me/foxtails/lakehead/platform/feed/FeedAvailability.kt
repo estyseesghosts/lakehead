@@ -3,10 +3,16 @@ package me.foxtails.lakehead.platform.feed
 /**
  * Whether a feed provider can be hosted right now.
  *
- * This is the only feed fact a presentation layer needs: an [Available] value names the
- * provider to host, and an [Unavailable] value carries a truthful reason instead of a silent
- * empty state. It holds no framework types, so it can be published as state and collected in
- * a composable without leaking `Context` or `ServiceConnection`.
+ * This is the coarse projection a presentation layer needs — not the diagnosis: an
+ * [Available] value names the provider to host, and an [Unavailable] value carries a
+ * truthful reason instead of a silent empty state. The full discovery verdict lives in
+ * [FeedProviderResolution]: a resolved target projects to [Available], `NO_PROVIDER`
+ * projects to [Unavailable] with [Unavailable.Reason.NO_PROVIDER], `REJECTED` projects
+ * to [Unavailable.Reason.PERMISSION_DENIED], and every other unresolved outcome
+ * (including `NOT_DISCOVERABLE`, definitive or uncertain) projects to
+ * [Unavailable.Reason.QUERY_FAILED]. It holds no framework types, so it can be published
+ * as state and collected in a composable without leaking `Context` or
+ * `ServiceConnection`.
  */
 sealed interface FeedAvailability {
 
