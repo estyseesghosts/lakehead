@@ -18,7 +18,7 @@ class HomeInteractionControllerTest {
     fun lifecycle_normalToAtoBtoNormal_exactlyEachState() {
         val start: HomeInteractionController = HomeInteractionController.Normal
 
-        val afterLongPress = start.enterOnLongPress(tileA, isAvailable = true)
+        val afterLongPress = start.enterOnLongPress(tileA)
         assertTrue(afterLongPress is HomeInteractionController.Editing)
         assertEquals(tileA, (afterLongPress as HomeInteractionController.Editing).selectedId)
 
@@ -33,7 +33,7 @@ class HomeInteractionControllerTest {
     @Test
     fun lifecycle_normalToAtoBtoNormal_viaEmptyTap() {
         val result = HomeInteractionController.Normal
-            .enterOnLongPress(tileA, isAvailable = true)
+            .enterOnLongPress(tileA)
             .selectOnTap(tileB)
             .exitOnEmptyTap()
 
@@ -43,7 +43,7 @@ class HomeInteractionControllerTest {
     @Test
     fun lifecycle_normalToAtoBtoNormal_viaNavigate() {
         val result = HomeInteractionController.Normal
-            .enterOnLongPress(tileA, isAvailable = true)
+            .enterOnLongPress(tileA)
             .selectOnTap(tileB)
             .exitOnNavigate()
 
@@ -92,25 +92,26 @@ class HomeInteractionControllerTest {
         assertEquals(tileB, (updated as HomeInteractionController.Editing).selectedId)
     }
 
-    // ---- unavailable tile: no enter ----
+    // ---- edit entry is independent of launchability: every long-press enters ----
 
     @Test
-    fun enterOnLongPress_unavailable_fromNormal_staysNormal() {
-        val result = HomeInteractionController.Normal.enterOnLongPress(tileA, isAvailable = false)
-        assertSame(HomeInteractionController.Normal, result)
+    fun enterOnLongPress_fromNormal_alwaysEntersEditing() {
+        val result = HomeInteractionController.Normal.enterOnLongPress(tileA)
+        assertTrue(result is HomeInteractionController.Editing)
+        assertEquals(tileA, (result as HomeInteractionController.Editing).selectedId)
     }
 
     @Test
-    fun enterOnLongPress_unavailable_fromEditing_staysUnchanged() {
+    fun enterOnLongPress_fromEditing_retargetsUnconditionally() {
         val editing = HomeInteractionController.Editing(selectedId = tileB)
-        val result = editing.enterOnLongPress(tileA, isAvailable = false)
-        // Unavailable long-press from Editing should not change state
-        assertSame(editing, result)
+        val result = editing.enterOnLongPress(tileA)
+        assertTrue(result is HomeInteractionController.Editing)
+        assertEquals(tileA, (result as HomeInteractionController.Editing).selectedId)
     }
 
     @Test
     fun enterOnLongPress_available_fromNormal_becomesEditing() {
-        val result = HomeInteractionController.Normal.enterOnLongPress(tileA, isAvailable = true)
+        val result = HomeInteractionController.Normal.enterOnLongPress(tileA)
         assertTrue(result is HomeInteractionController.Editing)
         assertEquals(tileA, (result as HomeInteractionController.Editing).selectedId)
     }
@@ -151,7 +152,7 @@ class HomeInteractionControllerTest {
     @Test
     fun editing_nullSelectedId_enterOnLongPress_available_selectsTile() {
         val result = HomeInteractionController.Editing(selectedId = null)
-            .enterOnLongPress(tileB, isAvailable = true)
+            .enterOnLongPress(tileB)
         assertTrue(result is HomeInteractionController.Editing)
         assertEquals(tileB, (result as HomeInteractionController.Editing).selectedId)
     }
@@ -222,7 +223,7 @@ class HomeInteractionControllerTest {
     @Test
     fun enterOnLongPress_available_fromEditing_replacesSelection() {
         val editing = HomeInteractionController.Editing(selectedId = tileA)
-        val result = editing.enterOnLongPress(tileB, isAvailable = true)
+        val result = editing.enterOnLongPress(tileB)
         assertTrue(result is HomeInteractionController.Editing)
         assertEquals(tileB, (result as HomeInteractionController.Editing).selectedId)
     }
@@ -230,7 +231,7 @@ class HomeInteractionControllerTest {
     @Test
     fun enterOnLongPress_sameTile_available_fromEditing_staysEditingSameTile() {
         val editing = HomeInteractionController.Editing(selectedId = tileA)
-        val result = editing.enterOnLongPress(tileA, isAvailable = true)
+        val result = editing.enterOnLongPress(tileA)
         assertTrue(result is HomeInteractionController.Editing)
         assertEquals(tileA, (result as HomeInteractionController.Editing).selectedId)
     }
@@ -343,7 +344,7 @@ class HomeInteractionControllerTest {
 
     @Test
     fun arm_startsDisarmed_onLongPressEntry() {
-        val entered = HomeInteractionController.Normal.enterOnLongPress(tileA, isAvailable = true)
+        val entered = HomeInteractionController.Normal.enterOnLongPress(tileA)
         assertTrue(entered is HomeInteractionController.Editing)
         assertEquals(false, (entered as HomeInteractionController.Editing).resizeArmed)
     }
@@ -432,7 +433,7 @@ class HomeInteractionControllerTest {
     @Test
     fun enterOnLongPress_retarget_clearsArm() {
         val armed = HomeInteractionController.Editing(selectedId = tileA, resizeArmed = true)
-        val retargeted = armed.enterOnLongPress(tileB, isAvailable = true)
+        val retargeted = armed.enterOnLongPress(tileB)
         assertTrue(retargeted is HomeInteractionController.Editing)
         assertEquals(tileB, (retargeted as HomeInteractionController.Editing).selectedId)
         assertEquals(false, retargeted.resizeArmed)

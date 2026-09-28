@@ -1,6 +1,7 @@
 package me.foxtails.lakehead.feature.home
 
 import androidx.activity.ComponentActivity
+import androidx.compose.runtime.Composable
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.semantics.Role
@@ -10,7 +11,9 @@ import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.click
+import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasStateDescription
 import androidx.compose.ui.test.hasText
@@ -26,6 +29,9 @@ import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeUp
 import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import me.foxtails.lakehead.core.designsystem.LauncherTheme
+import me.foxtails.lakehead.core.designsystem.PINNED_OVERFLOW_TAG
+import me.foxtails.lakehead.core.designsystem.PinnedTileShortcut
 import me.foxtails.lakehead.core.designsystem.SquareCellGeometry
 import me.foxtails.lakehead.core.designsystem.RESIZE_HANDLE_TAG
 import me.foxtails.lakehead.core.designsystem.REMOVE_BUTTON_TAG
@@ -52,7 +58,8 @@ import org.junit.runner.RunWith
  *
  * Covers loading/not-found/loaded-empty, populated labels/roles/exact launch identity,
  * unavailable no-launch, metadata/order stability, 1/6/wide geometry, overlay
- * request/focus/target, no long-click, sparse distant rows after scroll, pre-decoded icon
+ * request/focus/target, shared every-region long-press (body/symbol/shortcut,
+ * including unavailable tiles), sparse distant rows after scroll, pre-decoded icon
  * rendering vs label-only fallback, and ownership evidence that the feature performs no
  * decode, catalogue/platform lookup, or database access (behavior plus public-signature
  * inspection). Uses existing Compose test idioms; pixel expectations derive from runtime
@@ -108,20 +115,31 @@ class HomeCanvasTest {
         window = window,
     )
 
+    private fun setThemedContent(content: @Composable () -> Unit) {
+        // Production always composes home content under LauncherTheme
+        // (MainActivity); AppTile requires LocalLauncherDimensions, so bare
+        // content crashes with "No LauncherDimensions provided".
+        composeRule.setContent { LauncherTheme { content() } }
+    }
+
     private fun setCanvas(
         state: HomeRenderState,
         icons: HomeCanvasIcons = emptyMap(),
         onLaunchApp: (AppIdentity) -> Unit = {},
         onRequestDefaultHome: () -> Unit = {},
         overscanRows: Long = 1L,
+        pinnedByTile: Map<ItemId, List<PinnedTileShortcut>> = emptyMap(),
+        onPinnedShortcutClick: (ItemId, String) -> Unit = { _, _ -> },
     ) {
-        composeRule.setContent {
+        setThemedContent {
             HomeCanvas(
                 state = state,
                 iconsByIdentity = icons,
                 onLaunchApp = onLaunchApp,
                 onRequestDefaultHome = onRequestDefaultHome,
                 overscanRows = overscanRows,
+                pinnedByTile = pinnedByTile,
+                onPinnedShortcutClick = onPinnedShortcutClick,
             )
         }
     }
@@ -261,7 +279,7 @@ class HomeCanvasTest {
             tile("a", personal, "Personal App", column = 0, row = 0),
         )
         val holder = androidx.compose.runtime.mutableStateOf(first)
-        composeRule.setContent {
+        setThemedContent {
             HomeCanvas(
                 state = loaded(holder.value),
                 iconsByIdentity = emptyMap(),
@@ -365,7 +383,7 @@ class HomeCanvasTest {
     }
 
     @Test
-    fun tiles_launchableExposesLongClickOnBodyOnly_unavailableDoesNot() {
+    fun tiles_everyRegionExposesSharedLongClick_includingUnavailable() {
         val tiles = listOf(
             tile("a", personal, "Movable App", column = 0, row = 0),
             tile("b", work, null, column = 1, row = 0),
@@ -373,19 +391,25 @@ class HomeCanvasTest {
         setCanvas(loaded(tiles))
         composeRule.waitForIdle()
 
-        // TileBody exposes the move-entry long-click; AppLaunchButton never does.
+        // The shared tile long-press is forwarded from every hit region
+        // (TileBody + app launch glyph); edit entry is independent of
+        // launchability, so unavailable tiles expose it too.
         val launchableNodes = composeRule.onAllNodesWithContentDescription("Movable App")
         launchableNodes.assertCountEquals(2)
         val launchableWithLongClick = launchableNodes.fetchSemanticsNodes()
             .count { it.config.contains(SemanticsActions.OnLongClick) }
-        composeRule.runOnIdle { assertEquals(1, launchableWithLongClick) }
+        composeRule.runOnIdle { assertEquals(2, launchableWithLongClick) }
         val unavailableNodes = composeRule.onAllNodesWithContentDescription("Unavailable app")
         unavailableNodes.assertCountEquals(2)
-        assertFalse(
-            "unavailable tile must expose no long-click action on either region",
-            unavailableNodes.fetchSemanticsNodes()
-                .any { it.config.contains(SemanticsActions.OnLongClick) },
-        )
+        val unavailableWithLongClick = unavailableNodes.fetchSemanticsNodes()
+            .count { it.config.contains(SemanticsActions.OnLongClick) }
+        composeRule.runOnIdle {
+            assertEquals(
+                "unavailable tile must expose the shared long-click on both regions",
+                2,
+                unavailableWithLongClick,
+            )
+        }
     }
 
     @Test
@@ -395,8 +419,8 @@ class HomeCanvasTest {
         setCanvas(loaded(tiles), onLaunchApp = { launched = it })
         composeRule.waitForIdle()
 
-        // Index 0 is TileBody (first sibling in composition order): the only region
-        // with a long-click action.
+        // Index 0 is TileBody (first sibling in composition order); every
+        // region forwards the same shared tile long-press.
         composeRule.onAllNodesWithContentDescription("Movable App")[0]
             .performSemanticsAction(SemanticsActions.OnLongClick) { it() }
         composeRule.waitForIdle()
@@ -412,41 +436,42 @@ class HomeCanvasTest {
             .assertIsDisplayed()
         composeRule.onNodeWithTag(REMOVE_BUTTON_TAG, useUnmergedTree = true)
             .assertIsDisplayed()
-        // Tiles retain click for select; body retains long-click for retarget.
+        // Tiles retain click for select; every region retains long-click for retarget.
         val regions = composeRule.onAllNodesWithContentDescription("Movable App")
         regions.assertCountEquals(2)
         regions[0].assert(hasClickAction())
         regions[1].assert(hasClickAction())
+        val bodyKeepsLongClick = regions.fetchSemanticsNodes()[0]
+            .config.contains(SemanticsActions.OnLongClick)
         composeRule.runOnIdle {
-            val nodes = regions.fetchSemanticsNodes()
             assertTrue(
                 "editing body must retain long-click for retarget",
-                nodes[0].config.contains(SemanticsActions.OnLongClick),
+                bodyKeepsLongClick,
             )
             assertEquals(null, launched)
         }
     }
 
     @Test
-    fun longPressSymbol_doesNotEnterEditing() {
+    fun longPressSymbol_entersEditing() {
+        var launched: AppIdentity? = null
         val tiles = listOf(tile("a", personal, "Movable App", column = 0, row = 0))
-        setCanvas(loaded(tiles))
+        setCanvas(loaded(tiles), onLaunchApp = { launched = it })
         composeRule.waitForIdle()
 
-        // Index 1 is AppLaunchButton: it exposes a click action but no long-click,
-        // so no wiggle-editing entry is possible from the symbol.
-        val symbolNode = composeRule.onAllNodesWithContentDescription("Movable App")[1]
-            .fetchSemanticsNode()
-        assertFalse(
-            "symbol region must expose no long-click action",
-            symbolNode.config.contains(SemanticsActions.OnLongClick),
-        )
+        // Index 1 is the app launch glyph: it forwards the same shared tile
+        // long-press as TileBody, so wiggle-editing entry works from the symbol.
+        composeRule.onAllNodesWithContentDescription("Movable App")[1]
+            .performSemanticsAction(SemanticsActions.OnLongClick) { it() }
+        composeRule.waitForIdle()
+
         composeRule.onNode(hasStateDescription("Editing Movable App, row 0 column 0"))
-            .assertDoesNotExist()
+            .assertIsDisplayed()
         composeRule.onNodeWithTag(MOVE_CANDIDATE_OVERLAY_TAG, useUnmergedTree = true)
             .assertDoesNotExist()
         composeRule.onNodeWithTag(RESIZE_HANDLE_TAG, useUnmergedTree = true)
-            .assertDoesNotExist()
+            .assertIsDisplayed()
+        composeRule.runOnIdle { assertEquals(null, launched) }
     }
 
     @Test
@@ -455,8 +480,8 @@ class HomeCanvasTest {
         setCanvas(loaded(tiles))
         composeRule.waitForIdle()
 
-        // Index 0 is TileBody (first sibling in composition order): the only region
-        // with a long-click action.
+        // Index 0 is TileBody (first sibling in composition order); every
+        // region forwards the same shared tile long-press.
         composeRule.onAllNodesWithContentDescription("Resizable App")[0]
             .performSemanticsAction(SemanticsActions.OnLongClick) { it() }
         composeRule.waitForIdle()
@@ -491,7 +516,7 @@ class HomeCanvasTest {
         composeRule.waitForIdle()
 
         // W1 Editing: every tile region retains click for select (never launch);
-        // body retains long-click for retarget, symbol never exposes long-click.
+        // every region retains the shared long-click for retarget.
         val edited = composeRule.onAllNodesWithContentDescription("Editable App")
         edited.assertCountEquals(2)
         edited[0].assert(hasClickAction())
@@ -500,20 +525,34 @@ class HomeCanvasTest {
         other.assertCountEquals(2)
         other[0].assert(hasClickAction())
         other[1].assert(hasClickAction())
+        // Snapshot semantics off the main thread: fetchSemanticsNodes()
+        // synchronizes and must never run inside runOnIdle.
+        val editedNodes = edited.fetchSemanticsNodes()
+        val editedBodyKeepsLongClick =
+            editedNodes[0].config.contains(SemanticsActions.OnLongClick)
+        val editedSymbolKeepsLongClick =
+            editedNodes[1].config.contains(SemanticsActions.OnLongClick)
+        val otherNodes = other.fetchSemanticsNodes()
+        val otherBodyKeepsLongClick =
+            otherNodes[0].config.contains(SemanticsActions.OnLongClick)
+        val otherSymbolKeepsLongClick =
+            otherNodes[1].config.contains(SemanticsActions.OnLongClick)
         composeRule.runOnIdle {
-            val editedNodes = edited.fetchSemanticsNodes()
             assertTrue(
                 "editing body must retain long-click for retarget",
-                editedNodes[0].config.contains(SemanticsActions.OnLongClick),
+                editedBodyKeepsLongClick,
             )
-            assertFalse(
-                "symbol must never expose long-click",
-                editedNodes[1].config.contains(SemanticsActions.OnLongClick),
+            assertTrue(
+                "editing symbol must retain the shared long-click for retarget",
+                editedSymbolKeepsLongClick,
             )
-            val otherNodes = other.fetchSemanticsNodes()
             assertTrue(
                 "non-selected body must retain long-click for retarget",
-                otherNodes[0].config.contains(SemanticsActions.OnLongClick),
+                otherBodyKeepsLongClick,
+            )
+            assertTrue(
+                "non-selected symbol must retain long-click for retarget",
+                otherSymbolKeepsLongClick,
             )
         }
 
@@ -590,7 +629,7 @@ class HomeCanvasTest {
     }
 
     @Test
-    fun w1_unavailableLongPress_noop() {
+    fun w1_unavailableLongPress_entersEditing() {
         var launched: AppIdentity? = null
         val missing = identity("0", "com.example.gone", "com.example.gone.Main")
         val tiles = listOf(
@@ -600,22 +639,28 @@ class HomeCanvasTest {
         setCanvas(loaded(tiles), onLaunchApp = { launched = it })
         composeRule.waitForIdle()
 
-        // Unavailable tile exposes no long-click on either region.
+        // Edit entry is independent of launchability: the unavailable tile
+        // exposes the shared long-click on both regions.
         val unavailable = composeRule.onAllNodesWithContentDescription("Unavailable app")
         unavailable.assertCountEquals(2)
+        val unavailableLongClicks = unavailable.fetchSemanticsNodes()
+            .count { it.config.contains(SemanticsActions.OnLongClick) }
         composeRule.runOnIdle {
-            unavailable.fetchSemanticsNodes().forEach { node ->
-                assertFalse(
-                    "unavailable tile must expose no long-click action",
-                    node.config.contains(SemanticsActions.OnLongClick),
-                )
-            }
+            assertEquals(
+                "unavailable tile must expose the shared long-click on both regions",
+                2,
+                unavailableLongClicks,
+            )
         }
-        // No Editing semantics appear; available tile stays unselected.
-        composeRule.onNode(hasStateDescription("Editing Available App, row 0 column 1"))
-            .assertDoesNotExist()
+        // Long-press selects the unavailable tile into wiggle-editing with no launch.
+        unavailable[0].performSemanticsAction(SemanticsActions.OnLongClick) { it() }
+        composeRule.waitForIdle()
+        composeRule.onNode(hasStateDescription("Editing Unavailable app, row 0 column 0"))
+            .assertIsDisplayed()
         composeRule.onNodeWithTag(MOVE_CANDIDATE_OVERLAY_TAG, useUnmergedTree = true)
             .assertDoesNotExist()
+        composeRule.onNodeWithTag(RESIZE_HANDLE_TAG, useUnmergedTree = true)
+            .assertIsDisplayed()
         composeRule.runOnIdle { assertEquals(null, launched) }
     }
 
@@ -734,21 +779,22 @@ class HomeCanvasTest {
         composeRule.onNodeWithTag(HOME_TILE_ICON_TAG, useUnmergedTree = true).assertExists()
     }
 
-    // ---- D3 shortcut placeholders (visual-only, inert) ----
+    // ---- C1 pinned shortcut strip (real list, distinct actions) ----
 
     @Test
-    fun defaultCanvas_showsNoShortcutPlaceholders() {
+    fun defaultCanvas_showsNoPinnedStrip() {
         val tiles = listOf(tile("a", personal, "Plain App", column = 0, row = 0))
         setCanvas(loaded(tiles))
 
-        composeRule.onAllNodesWithContentDescription("Shortcut placeholder 1").assertCountEquals(0)
-        composeRule.onAllNodesWithContentDescription("Shortcut placeholder 2").assertCountEquals(0)
+        composeRule.onNodeWithContentDescription("Compose, shortcut").assertDoesNotExist()
+        composeRule.onNodeWithTag(PINNED_OVERFLOW_TAG, useUnmergedTree = true).assertDoesNotExist()
     }
 
     @Test
-    fun homeCanvasTile_forwardsPlaceholders_asTwoInertNodes() {
+    fun homeCanvasTile_rendersPinnedStrip_withDistinctActions() {
         var launched: AppIdentity? = null
-        composeRule.setContent {
+        val shortcutClicks = mutableListOf<String>()
+        setThemedContent {
             HomeCanvasTile(
                 tile = tile(
                     "wide",
@@ -761,34 +807,25 @@ class HomeCanvasTest {
                 ),
                 iconBitmap = null,
                 onLaunchApp = { launched = it },
-                shortcutPlaceholders = 2,
+                // 3x1 capacity is 2: both pins visible, no overflow.
+                pinnedShortcuts = listOf(
+                    PinnedTileShortcut("new-post", "New post"),
+                    PinnedTileShortcut("camera", "Camera"),
+                ),
+                onShortcutClick = { shortcutClicks.add(it) },
             )
         }
         composeRule.waitForIdle()
 
-        // Pass-through renders exactly two distinct placeholder nodes.
-        composeRule.onAllNodesWithContentDescription("Shortcut placeholder 1").assertCountEquals(1)
-        composeRule.onAllNodesWithContentDescription("Shortcut placeholder 2").assertCountEquals(1)
-        val placeholders = listOf("Shortcut placeholder 1", "Shortcut placeholder 2")
-            .map { composeRule.onNodeWithContentDescription(it).fetchSemanticsNode() }
-        composeRule.runOnIdle {
-            placeholders.forEach { node ->
-                assertFalse(
-                    "shortcut placeholder must expose no click action",
-                    node.config.contains(SemanticsActions.OnClick),
-                )
-                assertFalse(
-                    "shortcut placeholder must expose no long-click action",
-                    node.config.contains(SemanticsActions.OnLongClick),
-                )
-                assertFalse(
-                    "shortcut placeholder must not be a button",
-                    node.config.contains(SemanticsProperties.Role),
-                )
-            }
-        }
+        // Two distinct shortcut buttons with their own labels.
+        composeRule.onNodeWithContentDescription("New post, shortcut")
+            .assertExists().assert(hasClickAction()).performClick()
+        composeRule.onNodeWithContentDescription("Camera, shortcut")
+            .assertExists().assert(hasClickAction()).performClick()
+        composeRule.runOnIdle { assertEquals(listOf("new-post", "camera"), shortcutClicks) }
+        composeRule.onNodeWithTag(PINNED_OVERFLOW_TAG, useUnmergedTree = true).assertDoesNotExist()
 
-        // Existing Body/Symbol separation still passes; placeholders trigger neither.
+        // Existing Body/Symbol separation still passes; strip taps launch neither.
         val regions = composeRule.onAllNodesWithContentDescription("Wide App")
         regions.assertCountEquals(2)
         regions[0].assertExists().performClick()
@@ -796,11 +833,13 @@ class HomeCanvasTest {
         composeRule.runOnIdle { launched = null }
         regions[1].assertExists().performClick()
         composeRule.runOnIdle { assertEquals(personal, launched) }
+        composeRule.runOnIdle { assertEquals(2, shortcutClicks.size) }
     }
 
     @Test
-    fun homeCanvasTile_clampsOverCountPlaceholders_toSpanMax() {
-        composeRule.setContent {
+    fun homeCanvasTile_overflowBeyondCapacity_announcedInSemantics() {
+        val shortcutClicks = mutableListOf<String>()
+        setThemedContent {
             HomeCanvasTile(
                 tile = tile(
                     "square",
@@ -813,15 +852,28 @@ class HomeCanvasTest {
                 ),
                 iconBitmap = null,
                 onLaunchApp = {},
-                // 2x2 capacity is 1: over-count renders max instead of crashing.
-                shortcutPlaceholders = 4,
+                // 2x2 capacity is 1: first pin visible, two hidden. The tile
+                // fits its strip to the measured bounds at the grid-unit
+                // pitch, where app + pin exactly fills the edge: the +N node
+                // would overflow, so it yields to TileBody semantics while
+                // the pin stays visible and tappable. Nothing is deleted.
+                pinnedShortcuts = listOf(
+                    PinnedTileShortcut("new-post", "New post"),
+                    PinnedTileShortcut("camera", "Camera"),
+                    PinnedTileShortcut("search", "Search"),
+                ),
+                onShortcutClick = { shortcutClicks.add(it) },
             )
         }
         composeRule.waitForIdle()
 
-        composeRule.onAllNodesWithContentDescription("Shortcut placeholder 1").assertCountEquals(1)
-        composeRule.onAllNodesWithContentDescription("Shortcut placeholder 2").assertCountEquals(0)
-        // Body/Symbol separation survives clamping.
+        composeRule.onNodeWithContentDescription("New post, shortcut")
+            .assertExists().assert(hasClickAction()).performClick()
+        composeRule.onNodeWithContentDescription("Camera, shortcut").assertDoesNotExist()
+        composeRule.onNodeWithTag(PINNED_OVERFLOW_TAG, useUnmergedTree = true).assertDoesNotExist()
+        composeRule.onNode(hasStateDescription("2 more shortcuts")).assertExists()
+        composeRule.runOnIdle { assertEquals(listOf("new-post"), shortcutClicks) }
+        // Body/Symbol separation survives overflow.
         composeRule.onAllNodesWithContentDescription("Square App").assertCountEquals(2)
     }
 
@@ -837,7 +889,7 @@ class HomeCanvasTest {
         var moved: ItemId? = null
         var resized: ItemId? = null
         var launched: AppIdentity? = null
-        composeRule.setContent {
+        setThemedContent {
             HomeCanvas(
                 state = loaded(tiles),
                 iconsByIdentity = emptyMap(),
@@ -853,7 +905,7 @@ class HomeCanvasTest {
         // Hidden before edit.
         composeRule.onAllNodesWithContentDescription("Remove Removable App").assertCountEquals(0)
 
-        // Enter edit from TileBody (index 0: only region with long-click).
+        // Enter edit from TileBody long-press (index 0).
         composeRule.onAllNodesWithContentDescription("Removable App")[0]
             .performSemanticsAction(SemanticsActions.OnLongClick) { it() }
         composeRule.waitForIdle()
@@ -903,6 +955,434 @@ class HomeCanvasTest {
             assertEquals(null, moved)
             assertEquals(null, resized)
             assertEquals(null, launched)
+        }
+    }
+
+    @Test
+    fun removeAffordance_smallTile_topRightCorner_tapCallsOnRemoveOnly() {
+        // A5: a 1x1 tile keeps the top-right corner contract — the remove center
+        // sits on the tile's (right, top) corner.
+        val tiles = listOf(tile("a", personal, "Small App", column = 0, row = 0))
+        var removed: ItemId? = null
+        var moved: ItemId? = null
+        setThemedContent {
+            HomeCanvas(
+                state = loaded(tiles),
+                iconsByIdentity = emptyMap(),
+                onLaunchApp = {},
+                onRequestDefaultHome = {},
+                onMoveTile = { id, _ -> moved = id },
+                onRemoveTile = { removed = it },
+            )
+        }
+        composeRule.waitForIdle()
+
+        composeRule.onAllNodesWithContentDescription("Small App")[0]
+            .performSemanticsAction(SemanticsActions.OnLongClick) { it() }
+        composeRule.waitForIdle()
+
+        val tileBounds = composeRule.onAllNodesWithContentDescription("Small App")[0]
+            .fetchSemanticsNode().boundsInRoot
+        val removeBounds = composeRule.onNodeWithContentDescription("Remove Small App")
+            .assertExists()
+            .assert(hasClickAction())
+            .fetchSemanticsNode().boundsInRoot
+        composeRule.runOnIdle {
+            assertEquals(tileBounds.right, removeBounds.center.x, 1.5f)
+            assertEquals(tileBounds.top, removeBounds.center.y, 1.5f)
+        }
+
+        composeRule.onNodeWithContentDescription("Remove Small App").performClick()
+        composeRule.runOnIdle {
+            assertEquals(ItemId("a"), removed)
+            assertEquals(null, moved)
+        }
+    }
+
+    @Test
+    fun removeAffordance_largeTile_centered_tapCallsOnRemoveOnly() {
+        // A5: a 2x2 tile centers the remove affordance — its center coincides
+        // with the tile center instead of the top-right corner.
+        val tiles = listOf(
+            tile("big", personal, "Big App", column = 0, row = 0, spanColumns = 2, spanRows = 2),
+        )
+        var removed: ItemId? = null
+        var moved: ItemId? = null
+        var resized: ItemId? = null
+        setThemedContent {
+            HomeCanvas(
+                state = loaded(tiles),
+                iconsByIdentity = emptyMap(),
+                onLaunchApp = {},
+                onRequestDefaultHome = {},
+                onMoveTile = { id, _ -> moved = id },
+                onResizeTile = { id, _ -> resized = id },
+                onRemoveTile = { removed = it },
+            )
+        }
+        composeRule.waitForIdle()
+
+        composeRule.onAllNodesWithContentDescription("Big App")[0]
+            .performSemanticsAction(SemanticsActions.OnLongClick) { it() }
+        composeRule.waitForIdle()
+
+        val tileBounds = composeRule.onAllNodesWithContentDescription("Big App")[0]
+            .fetchSemanticsNode().boundsInRoot
+        val removeBounds = composeRule.onNodeWithContentDescription("Remove Big App")
+            .assertExists()
+            .assert(hasClickAction())
+            .assert(
+                SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Button),
+            )
+            .fetchSemanticsNode().boundsInRoot
+        composeRule.runOnIdle {
+            assertEquals(tileBounds.center.x, removeBounds.center.x, 1.5f)
+            assertEquals(tileBounds.center.y, removeBounds.center.y, 1.5f)
+        }
+
+        composeRule.onNodeWithContentDescription("Remove Big App").performClick()
+        composeRule.runOnIdle {
+            assertEquals(ItemId("big"), removed)
+            assertEquals(null, moved)
+            assertEquals(null, resized)
+        }
+    }
+
+    // ---- A2 physical touch: shared long-press + tap independence ----
+
+    @Test
+    fun physicalLongPress_emptyBody_entersEditing_noLaunch() {
+        var launched: AppIdentity? = null
+        // 2x2 with one pin: compact bottom strip (app + pin), free top area
+        // above it for an honest empty-body probe. A 1x1 tile cannot serve:
+        // its centered symbol fills the whole cell.
+        val tiles = listOf(
+            tile("a", personal, "Touch App", column = 0, row = 0, spanColumns = 2, spanRows = 2),
+        )
+        setCanvas(
+            loaded(tiles),
+            onLaunchApp = { launched = it },
+            pinnedByTile = mapOf(
+                ItemId("a") to listOf(PinnedTileShortcut("new-post", "New post")),
+            ),
+        )
+        composeRule.waitForIdle()
+
+        val bodyNode = composeRule.onAllNodesWithContentDescription("Touch App")[0]
+        val tileBounds = bodyNode.fetchSemanticsNode().boundsInRoot
+        val appBounds = composeRule.onAllNodesWithContentDescription("Touch App")[1]
+            .fetchSemanticsNode().boundsInRoot
+        val pinBounds = composeRule.onNodeWithContentDescription("New post, shortcut")
+            .fetchSemanticsNode().boundsInRoot
+        val emptyRoot = Offset(
+            tileBounds.center.x,
+            tileBounds.top + with(composeRule.density) { 4.dp.toPx() },
+        )
+        composeRule.runOnIdle {
+            assertFalse("empty probe must miss app ($appBounds)", appBounds.contains(emptyRoot))
+            assertFalse("empty probe must miss pin ($pinBounds)", pinBounds.contains(emptyRoot))
+        }
+        val emptyLocal = Offset(emptyRoot.x - tileBounds.left, emptyRoot.y - tileBounds.top)
+        bodyNode.performTouchInput { longClick(emptyLocal) }
+        composeRule.waitForIdle()
+
+        composeRule.onNode(hasStateDescription("Editing Touch App, row 0 column 0"))
+            .assertIsDisplayed()
+        composeRule.runOnIdle { assertEquals(null, launched) }
+    }
+
+    @Test
+    fun physicalLongPress_symbol_entersEditing_noLaunch() {
+        var launched: AppIdentity? = null
+        val tiles = listOf(tile("a", personal, "Touch App", column = 0, row = 0))
+        setCanvas(loaded(tiles), onLaunchApp = { launched = it })
+        composeRule.waitForIdle()
+
+        composeRule.onAllNodesWithContentDescription("Touch App")[1]
+            .performTouchInput { longClick() }
+        composeRule.waitForIdle()
+
+        composeRule.onNode(hasStateDescription("Editing Touch App, row 0 column 0"))
+            .assertIsDisplayed()
+        composeRule.runOnIdle { assertEquals(null, launched) }
+    }
+
+    @Test
+    fun physicalLongPress_shortcut_entersEditing_noLaunch() {
+        var launched: AppIdentity? = null
+        val shortcutClicks = mutableListOf<Pair<ItemId, String>>()
+        val tiles = listOf(
+            tile("wide", personal, "Wide App", column = 0, row = 0, spanColumns = 3, spanRows = 1),
+        )
+        setCanvas(
+            loaded(tiles),
+            onLaunchApp = { launched = it },
+            pinnedByTile = mapOf(
+                ItemId("wide") to listOf(
+                    PinnedTileShortcut("new-post", "New post"),
+                    PinnedTileShortcut("camera", "Camera"),
+                ),
+            ),
+            onPinnedShortcutClick = { owner, id -> shortcutClicks.add(owner to id) },
+        )
+        composeRule.waitForIdle()
+
+        composeRule.onNodeWithContentDescription("New post, shortcut")
+            .performTouchInput { longClick() }
+        composeRule.waitForIdle()
+
+        composeRule.onNode(hasStateDescription("Editing Wide App, row 0 column 0"))
+            .assertIsDisplayed()
+        composeRule.runOnIdle {
+            assertEquals(null, launched)
+            assertTrue("long-press release must not fire a shortcut click", shortcutClicks.isEmpty())
+        }
+    }
+
+    @Test
+    fun physicalLongPress_unavailable_entersEditing_noLaunch() {
+        var launched: AppIdentity? = null
+        val missing = identity("0", "com.example.gone", "com.example.gone.Main")
+        val tiles = listOf(tile("gone", missing, null, column = 0, row = 0))
+        setCanvas(loaded(tiles), onLaunchApp = { launched = it })
+        composeRule.waitForIdle()
+
+        composeRule.onAllNodesWithContentDescription("Unavailable app")[0]
+            .performTouchInput { longClick() }
+        composeRule.waitForIdle()
+
+        composeRule.onNode(hasStateDescription("Editing Unavailable app, row 0 column 0"))
+            .assertIsDisplayed()
+        composeRule.runOnIdle { assertEquals(null, launched) }
+    }
+
+    @Test
+    fun physicalTap_bodyAndSymbol_launchExactIdentityOnce_each() {
+        val launched = mutableListOf<AppIdentity>()
+        // 2x2 with one pin: compact bottom strip, free top area for an honest
+        // body tap outside the app/pin glyphs.
+        val tiles = listOf(
+            tile("a", personal, "Tap App", column = 0, row = 0, spanColumns = 2, spanRows = 2),
+        )
+        setCanvas(
+            loaded(tiles),
+            onLaunchApp = { launched.add(it) },
+            pinnedByTile = mapOf(
+                ItemId("a") to listOf(PinnedTileShortcut("new-post", "New post")),
+            ),
+        )
+        composeRule.waitForIdle()
+
+        // Body tap on empty tile area (top-center, above the strip).
+        val bodyNode = composeRule.onAllNodesWithContentDescription("Tap App")[0]
+        val tileBounds = bodyNode.fetchSemanticsNode().boundsInRoot
+        val appBounds = composeRule.onAllNodesWithContentDescription("Tap App")[1]
+            .fetchSemanticsNode().boundsInRoot
+        val pinBounds = composeRule.onNodeWithContentDescription("New post, shortcut")
+            .fetchSemanticsNode().boundsInRoot
+        val emptyRoot = Offset(
+            tileBounds.center.x,
+            tileBounds.top + with(composeRule.density) { 4.dp.toPx() },
+        )
+        composeRule.runOnIdle {
+            assertFalse("empty probe must miss app ($appBounds)", appBounds.contains(emptyRoot))
+            assertFalse("empty probe must miss pin ($pinBounds)", pinBounds.contains(emptyRoot))
+        }
+        val emptyLocal = Offset(emptyRoot.x - tileBounds.left, emptyRoot.y - tileBounds.top)
+        bodyNode.performTouchInput { click(emptyLocal) }
+        composeRule.waitForIdle()
+        composeRule.runOnIdle { assertEquals(listOf(personal), launched) }
+
+        // Symbol tap launches the same exact identity once more, never entering edit.
+        composeRule.onAllNodesWithContentDescription("Tap App")[1]
+            .performTouchInput { click() }
+        composeRule.waitForIdle()
+        composeRule.runOnIdle { assertEquals(listOf(personal, personal), launched) }
+        composeRule.onNode(hasStateDescription("Editing Tap App, row 0 column 0"))
+            .assertDoesNotExist()
+    }
+
+    @Test
+    fun physicalTap_shortcut_reportsOwnIdOnly_noLaunch() {
+        var launched: AppIdentity? = null
+        val shortcutClicks = mutableListOf<Pair<ItemId, String>>()
+        // 4x2 (capacity 3): app + both pins comfortably visible, no overflow.
+        val tiles = listOf(
+            tile("wide", personal, "Wide App", column = 0, row = 0, spanColumns = 4, spanRows = 2),
+        )
+        setCanvas(
+            loaded(tiles),
+            onLaunchApp = { launched = it },
+            pinnedByTile = mapOf(
+                ItemId("wide") to listOf(
+                    PinnedTileShortcut("new-post", "New post"),
+                    PinnedTileShortcut("camera", "Camera"),
+                ),
+            ),
+            onPinnedShortcutClick = { owner, id -> shortcutClicks.add(owner to id) },
+        )
+        composeRule.waitForIdle()
+
+        composeRule.onNodeWithContentDescription("Camera, shortcut")
+            .performTouchInput { click() }
+        composeRule.waitForIdle()
+
+        composeRule.runOnIdle {
+            assertEquals(listOf(ItemId("wide") to "camera"), shortcutClicks)
+            assertEquals(null, launched)
+        }
+        composeRule.onNode(hasStateDescription("Editing Wide App, row 0 column 0"))
+            .assertDoesNotExist()
+    }
+
+    @Test
+    fun physicalTap_editing_selectsWithoutLaunch() {
+        var launched: AppIdentity? = null
+        val tiles = listOf(
+            tile("a", personal, "Alpha App", column = 0, row = 0),
+            tile("b", work, "Beta App", column = 1, row = 0),
+        )
+        setCanvas(loaded(tiles), onLaunchApp = { launched = it })
+        composeRule.waitForIdle()
+
+        // Enter wiggle-editing with a physical long-press on Alpha.
+        composeRule.onAllNodesWithContentDescription("Alpha App")[0]
+            .performTouchInput { longClick() }
+        composeRule.waitForIdle()
+        composeRule.onNode(hasStateDescription("Editing Alpha App, row 0 column 0"))
+            .assertIsDisplayed()
+
+        // Physical tap on Beta transfers selection and never launches.
+        composeRule.onAllNodesWithContentDescription("Beta App")[0]
+            .performTouchInput { click() }
+        composeRule.waitForIdle()
+        composeRule.onNode(hasStateDescription("Editing Beta App, row 0 column 1"))
+            .assertIsDisplayed()
+        composeRule.runOnIdle { assertEquals(null, launched) }
+
+        // Physical tap on the selected tile re-selects and never launches.
+        composeRule.onAllNodesWithContentDescription("Beta App")[1]
+            .performTouchInput { click() }
+        composeRule.waitForIdle()
+        composeRule.onNode(hasStateDescription("Editing Beta App, row 0 column 1"))
+            .assertIsDisplayed()
+        composeRule.runOnIdle { assertEquals(null, launched) }
+    }
+
+    @Test
+    fun physicalTap_shortcutDuringEdit_selectsWithoutShortcutLaunch() {
+        // P3: tapping a pinned shortcut glyph while wiggle-editing selects the
+        // tile via the HomeCanvasTile shortcut route — never launches the app
+        // and never invokes the shortcut. Real pointer input, not semantics.
+        // Composes the tile directly: the grid withholds strip glyphs on the
+        // edit-selected tile by design (floating remove/resize controls own
+        // that footprint; see fitPinnedStrip), so the route is covered here
+        // with a non-selected tile during edit (the transfer case).
+        var launched: AppIdentity? = null
+        var selected: ItemId? = null
+        val shortcutClicks = mutableListOf<String>()
+        val renderTile = tile(
+            "wide",
+            personal,
+            "Wide App",
+            column = 0,
+            row = 0,
+            spanColumns = 4,
+            spanRows = 2,
+        )
+        setThemedContent {
+            HomeCanvasTile(
+                tile = renderTile,
+                iconBitmap = null,
+                onLaunchApp = { launched = it },
+                pinnedShortcuts = listOf(
+                    PinnedTileShortcut("new-post", "New post"),
+                    PinnedTileShortcut("camera", "Camera"),
+                ),
+                onShortcutClick = { shortcutClicks.add(it) },
+                interactionState = HomeInteractionController.Editing(
+                    selectedId = ItemId("other"),
+                ),
+                onSelect = { selected = it },
+                onEnterWiggle = {},
+            )
+        }
+        composeRule.waitForIdle()
+
+        // Physical tap on the pinned shortcut glyph transfers selection to
+        // this tile without launching the app or invoking the shortcut.
+        composeRule.onNodeWithContentDescription("New post, shortcut")
+            .performTouchInput { click() }
+        composeRule.waitForIdle()
+        composeRule.runOnIdle {
+            assertEquals(ItemId("wide"), selected)
+            assertEquals(null, launched)
+            assertTrue(
+                "shortcut tap during edit must not invoke: $shortcutClicks",
+                shortcutClicks.isEmpty(),
+            )
+        }
+    }
+
+    @Test
+    fun activeSession_staleEditingSelection_tilesExposeNoActions_noRetarget() {
+        // P2: an Active move/resize session owns every gesture — a stale W1
+        // Editing selection must not re-enable child actions. The body keeps
+        // only a disabled click (no invoke), the symbol exposes nothing, no
+        // region exposes long-click, and physical taps stay inert (no select
+        // retarget, no launch, no wiggle entry). Selection visuals persist.
+        var launched: AppIdentity? = null
+        var selected: ItemId? = null
+        var wiggleEntered: ItemId? = null
+        val renderTile = tile("a", personal, "Active App", column = 0, row = 0)
+        setThemedContent {
+            HomeCanvasTile(
+                tile = renderTile,
+                iconBitmap = null,
+                onLaunchApp = { launched = it },
+                isEditActive = true,
+                activeItemId = ItemId("a"),
+                interactionState = HomeInteractionController.Editing(
+                    selectedId = ItemId("a"),
+                ),
+                onSelect = { selected = it },
+                onEnterWiggle = { wiggleEntered = it.itemId },
+            )
+        }
+        composeRule.waitForIdle()
+
+        // Index 0 is TileBody (first sibling in composition order), index 1
+        // the app launch glyph. While Active the body click is disabled, the
+        // glyph installs no detector, and neither exposes long-click.
+        val regions = composeRule.onAllNodesWithContentDescription("Active App")
+        regions.assertCountEquals(2)
+        regions[0].assertIsNotEnabled()
+        // Snapshot semantics off the main thread: fetchSemanticsNodes()
+        // synchronizes and must never run inside runOnIdle.
+        val nodes = regions.fetchSemanticsNodes()
+        composeRule.runOnIdle {
+            assertTrue(
+                "active tile must expose no long-click actions",
+                nodes.none { it.config.contains(SemanticsActions.OnLongClick) },
+            )
+            assertTrue(
+                "active symbol must expose no click action",
+                !nodes[1].config.contains(SemanticsActions.OnClick),
+            )
+        }
+        // Selection visuals persist while actions stay inert.
+        composeRule.onNode(hasStateDescription("Editing Active App, row 0 column 0"))
+            .assertIsDisplayed()
+
+        // Physical taps stay inert: no select retarget, no launch, no wiggle entry.
+        regions[0].performTouchInput { click() }
+        composeRule.waitForIdle()
+        regions[1].performTouchInput { click() }
+        composeRule.waitForIdle()
+        composeRule.runOnIdle {
+            assertEquals(null, selected)
+            assertEquals(null, launched)
+            assertEquals(null, wiggleEntered)
         }
     }
 

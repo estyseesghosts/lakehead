@@ -33,25 +33,30 @@ import me.foxtails.lakehead.core.model.ItemId
  * - Body and symbol clicks both dispatch the tile's exact [AppIdentity] only when
  *   [HomeRenderTile.isLaunchable]; unavailable tiles expose no-op clicks and
  *   `stateDescription = "Unavailable"`.
- * - Long-press on a launchable tile calls [onEnterWiggle] to enter/select
- *   transient W1 wiggle-editing from TileBody only (AppLaunchButton never exposes
- *   long-click); unavailable tiles expose no long-click action. The pre-W1
+ * - Long-press on any tile calls [onEnterWiggle] to enter/select
+ *   transient W1 wiggle-editing from every tile region (TileBody, app
+ *   launch/strip glyph and each shortcut glyph forward the same shared
+ *   callback via their own `combinedClickable`; see `AppTile`). Edit entry
+ *   is independent of [HomeRenderTile.isLaunchable]: unavailable tiles
+ *   enter/select exactly like launchable ones. The pre-W1
  *   move-session entry is handled by the grid when a selected tile is dragged.
  * - While [isEditActive] is true every tile is non-interactive
- *   (`isInteractionEnabled = false` on [AppTile], so TileBody
- *   `combinedClickable(enabled = false)` and the symbol `clickable(enabled = false)`
- *   keep minima/mergeDescendants/[Role]/descriptions/border visuals but strip click
- *   and long-click actions) and [onBodyClick]/[onSymbolClick] are no-ops, so taps
- *   during an edit session never launch. W1 wiggle-editing overrides this: when
- *   [interactionState] is [HomeInteractionController.Editing], interaction stays
- *   enabled so taps select instead of launching.
+ *   (`isInteractionEnabled = false` on [AppTile]: TileBody keeps its
+ *   `combinedClickable(enabled = false)` so its click reads disabled, the
+ *   glyph regions install no detector, and the shared long-press is nulled)
+ *   and [onBodyClick]/[onSymbolClick]/strip taps are no-ops, so taps during
+ *   an edit session never launch and never retarget. P2: the Active session
+ *   wins over a stale W1 [HomeInteractionController.Editing] selection —
+ *   interaction stays disabled even then, so neither tap-select nor long-press
+ *   retarget can fire mid-drag. W1 wiggle-editing keeps interaction enabled
+ *   only when no Active session runs, so taps select instead of launching.
  * - W1 recess/select (render-only, no occupancy change): [interactionState] carries
  *   the transient `Normal | Editing(selectedId?)` state owned by the caller
  *   ([HomeInteractionController], never modified here). In `Normal`, body/symbol
- *   clicks launch when [HomeRenderTile.isLaunchable] (unchanged) and long-press on
- *   a launchable tile calls [onEnterWiggle]. In `Editing`, body/symbol clicks call
- *   [onSelect] with the tapped tile's id and never launch, and long-press on a
- *   launchable tile retargets via [onEnterWiggle] (selection transfer, no launch).
+ *   clicks launch when [HomeRenderTile.isLaunchable] (unchanged) and long-press
+ *   calls [onEnterWiggle] independent of launchability. In `Editing`, body/symbol clicks call
+ *   [onSelect] with the tapped tile's id and never launch, and long-press
+ *   retargets via [onEnterWiggle] (selection transfer, no launch).
  *   `isSelected = selectedId == itemId` drives the [AppTileState.isSelected]
  *   border; the tile renders at full scale when selected (or in `Normal`) and at
  *   [WIGGLE_RECESSED_SCALE] when recessed, with selected tiles at `zIndex = 1`.
@@ -70,9 +75,9 @@ import me.foxtails.lakehead.core.model.ItemId
  *   fixtures are retired: there is no count param, only this real list.
  * - [onShortcutClick] reports a strip glyph tap with the shortcut's opaque id;
  *   execution stays with the caller.  Strip glyphs are disabled while
- *   [isEditActive] (the tile drags as one object) and taps select while
- *   W1 wiggle-editing instead of launching, so shortcut invocation never
- *   interferes with tile editing.
+ *   [isEditActive] (the tile drags as one object, no select retarget) and taps
+ *   select while effective W1 wiggle-editing instead of launching, so shortcut
+ *   invocation never interferes with tile editing.
  */
 @Composable
 internal fun HomeCanvasTile(
@@ -94,7 +99,13 @@ internal fun HomeCanvasTile(
     // W1 transient selection, id-keyed (never position/index). Null when Normal or
     // Editing(null): no tile selected.
     val interactionEditing = interactionState as? HomeInteractionController.Editing
+    // P2: an Active move/resize session owns every gesture — W1 wiggle-editing
+    // routing applies only when no Active session is running. While
+    // [isEditActive] every tile is inert (no select retarget, no launch, no
+    // shortcut invoke, no long-press retarget) even when [interactionState]
+    // still holds a stale Editing selection from before the drag started.
     val isInteractionEditing = interactionEditing != null
+    val isEffectiveEditing = isInteractionEditing && !isEditActive
     val isSelected = interactionEditing?.selectedId == tile.itemId
     // W1 recess scale target: full scale in Normal and when selected, recessed
     // otherwise. Single animateFloatAsState interval so A→B selection swaps move
@@ -146,16 +157,18 @@ internal fun HomeCanvasTile(
         ),
         onBodyClick = {
             // diverge later: Body→notification surface per grid.md §10; both launch today.
-            // In W1 Editing, taps select and never launch. In Normal, in-edit taps
+            // In effective W1 Editing, taps select and never launch. In Normal, in-edit taps
             // of a move session stay inert so drag gestures win the slop race.
-            if (isInteractionEditing) {
+            // P2: while an Active session runs even an Editing state selects
+            // nothing — every tap stays inert.
+            if (isEffectiveEditing) {
                 onSelect(tile.itemId)
             } else if (!isEditActive && tile.isLaunchable) {
                 onLaunchApp(tile.appIdentity)
             }
         },
         onSymbolClick = {
-            if (isInteractionEditing) {
+            if (isEffectiveEditing) {
                 onSelect(tile.itemId)
             } else if (!isEditActive && tile.isLaunchable) {
                 onLaunchApp(tile.appIdentity)
@@ -177,28 +190,31 @@ internal fun HomeCanvasTile(
         // W1 retarget: long-press enters/selects wiggle-editing from both Normal
         // and Editing (controller replaces selection directly, no Normal
         // round-trip). Move-session entry is handled by the grid's selected-tile
-        // drag bridge. Unavailable tiles expose none.
-        onLongClick = if (tile.isLaunchable) {
-            { onEnterWiggle(tile) }
-        } else {
-            null
-        },
+        // drag bridge. Independent of launchability: every tile region forwards
+        // this shared callback (see AppTile), so unavailable tiles enter too.
+        // P2: while an Active session runs the tile exposes no long-press
+        // (null strips the action) so a mid-drag press cannot retarget.
+        onLongClick = if (isEditActive) null else ({ onEnterWiggle(tile) }),
         pinnedShortcuts = stripArrangement.visible,
         overflowCount = stripArrangement.overflowCount,
         showOverflowIndicator = stripArrangement.showOverflowIndicator,
         onShortcutClick = { shortcutId ->
-            // Strip taps execute while interactive; in W1 Editing taps select
+            // Strip taps execute while interactive; in effective W1 Editing taps select
             // the tile instead (never launch a shortcut mid-edit), matching
-            // the body/symbol tap contract above.
-            if (isInteractionEditing) {
+            // the body/symbol tap contract above. P2: while an Active session
+            // runs taps stay inert even when still Editing-selected.
+            if (isEffectiveEditing) {
                 onSelect(tile.itemId)
             } else if (!isEditActive && tile.isLaunchable) {
                 onShortcutClick(shortcutId)
             }
         },
-        // W1 Editing keeps interaction enabled so taps select; a move session in
-        // Normal keeps tiles non-interactive so the parent drag owns the gesture.
-        isInteractionEnabled = if (isInteractionEditing) true else !isEditActive,
+        // Effective W1 Editing keeps interaction enabled so taps select; a move
+        // session in Normal keeps tiles non-interactive so the parent drag owns
+        // the gesture. P2: an Active session always wins — interaction stays
+        // disabled even with a stale Editing selection, so no child region
+        // exposes click/long-click actions mid-drag.
+        isInteractionEnabled = !isEditActive,
         isEditSelected = editSelected,
     )
     }

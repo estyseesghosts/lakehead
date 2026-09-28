@@ -18,7 +18,9 @@ import me.foxtails.lakehead.core.model.ItemId
  *   by the selected item: every selection change clears it.
  *
  * ## Transitions
- * - Long-press on an available tile → [Editing] with that tile selected, disarmed.
+ * - Long-press on any tile → [Editing] with that tile selected, disarmed.
+ *   Entry is independent of launchability: unavailable tiles enter exactly
+ *   like launchable ones.
  * - Tap a tile while editing → [Editing] with the tapped tile selected, disarmed.
  * - Tap the selected tile's resize arrow → toggles [Editing.resizeArmed], no write.
  * - Body-drag while armed → move with the snapshotted span, disarms.
@@ -46,17 +48,15 @@ sealed interface HomeInteractionController {
 }
 
 /**
- * Enter edit mode on long-press if [isAvailable] is true.
+ * Enter edit mode on long-press, independent of launchability.
  *
- * Returns [HomeInteractionController.Editing] with [tileId] selected and resize
- * disarmed, or this (unchanged) if the tile is unavailable. Works from both
- * [Normal] and [Editing]; retargeting always clears a previous arm.
+ * Always returns [HomeInteractionController.Editing] with [tileId] selected
+ * and resize disarmed. Works from both [Normal] and [Editing]; retargeting
+ * always clears a previous arm.
  */
 fun HomeInteractionController.enterOnLongPress(
     tileId: ItemId,
-    isAvailable: Boolean,
 ): HomeInteractionController {
-    if (!isAvailable) return this
     return HomeInteractionController.Editing(selectedId = tileId)
 }
 
