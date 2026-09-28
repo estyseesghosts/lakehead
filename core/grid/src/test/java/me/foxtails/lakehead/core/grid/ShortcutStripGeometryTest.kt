@@ -300,6 +300,107 @@ class ShortcutStripGeometryTest {
         assertEquals(0, ShortcutStripGeometry.visibleCount(-5, GridSpan(1, 4)))
     }
 
+    // ── orientationFor ────────────────────────────────────────────────
+
+    @Test
+    fun wideAndSquareSpansAreHorizontal() {
+        assertEquals(
+            ShortcutStripGeometry.PinnedStripOrientation.HORIZONTAL,
+            ShortcutStripGeometry.orientationFor(GridSpan(1, 1)),
+        )
+        assertEquals(
+            ShortcutStripGeometry.PinnedStripOrientation.HORIZONTAL,
+            ShortcutStripGeometry.orientationFor(GridSpan(2, 1)),
+        )
+        assertEquals(
+            ShortcutStripGeometry.PinnedStripOrientation.HORIZONTAL,
+            ShortcutStripGeometry.orientationFor(GridSpan(2, 2)),
+        )
+        assertEquals(
+            ShortcutStripGeometry.PinnedStripOrientation.HORIZONTAL,
+            ShortcutStripGeometry.orientationFor(GridSpan(4, 2)),
+        )
+        assertEquals(
+            ShortcutStripGeometry.PinnedStripOrientation.HORIZONTAL,
+            ShortcutStripGeometry.orientationFor(GridSpan(3, 3)),
+        )
+    }
+
+    @Test
+    fun narrowSpansAreVertical() {
+        assertEquals(
+            ShortcutStripGeometry.PinnedStripOrientation.VERTICAL,
+            ShortcutStripGeometry.orientationFor(GridSpan(1, 2)),
+        )
+        assertEquals(
+            ShortcutStripGeometry.PinnedStripOrientation.VERTICAL,
+            ShortcutStripGeometry.orientationFor(GridSpan(1, 3)),
+        )
+        assertEquals(
+            ShortcutStripGeometry.PinnedStripOrientation.VERTICAL,
+            ShortcutStripGeometry.orientationFor(GridSpan(1, 4)),
+        )
+    }
+
+    // ── capacity normalization (columns × rows, never transposed) ─────────
+
+    @Test
+    fun capacityReadsColumnsFirst_neverTransposed() {
+        // 2-wide × 4-tall holds the app + 1 (edge cells 2 - 1), while
+        // 4-wide × 2-tall holds the app + 3: the axes are never swapped, so
+        // a "2x4" written wide-first must be spelled GridSpan(4, 2).
+        assertEquals(1, ShortcutStripGeometry.maxSlots(GridSpan(2, 4)))
+        assertEquals(3, ShortcutStripGeometry.maxSlots(GridSpan(4, 2)))
+        assertEquals(1, ShortcutStripGeometry.maxSlots(GridSpan(2, 2)))
+        assertEquals(2, ShortcutStripGeometry.maxSlots(GridSpan(3, 2)))
+    }
+
+    // ── stripGroupExtentPx ────────────────────────────────────────────────
+
+    @Test
+    fun groupExtentIsExtentPlusPitches() {
+        // App alone: exactly one slot extent.
+        assertEquals(40L, ShortcutStripGeometry.stripGroupExtentPx(40L, 44L, 1))
+        // App + 1: extent + one pitch.
+        assertEquals(84L, ShortcutStripGeometry.stripGroupExtentPx(40L, 44L, 2))
+        // App + 3 (4-wide tile): extent + three pitches.
+        assertEquals(172L, ShortcutStripGeometry.stripGroupExtentPx(40L, 44L, 4))
+    }
+
+    @Test
+    fun groupExtentRejectsNonPositiveInputs() {
+        assertIllegalArgument { ShortcutStripGeometry.stripGroupExtentPx(0L, 44L, 2) }
+        assertIllegalArgument { ShortcutStripGeometry.stripGroupExtentPx(40L, 0L, 2) }
+        assertIllegalArgument { ShortcutStripGeometry.stripGroupExtentPx(40L, 44L, 0) }
+    }
+
+    @Test
+    fun groupExtentThrowsOnOverflow() {
+        assertArithmeticException {
+            ShortcutStripGeometry.stripGroupExtentPx(Long.MAX_VALUE, Long.MAX_VALUE, 2)
+        }
+    }
+
+    // ── centeredGroupStartPx ──────────────────────────────────────────────
+
+    @Test
+    fun centeredStartMidAlignsGroup() {
+        assertEquals(118L, ShortcutStripGeometry.centeredGroupStartPx(320L, 84L))
+        assertEquals(0L, ShortcutStripGeometry.centeredGroupStartPx(84L, 84L))
+    }
+
+    @Test
+    fun centeredStartTruncatesOddLeftover() {
+        // 321 - 84 = 237, / 2 truncates to 118: the spare pixel sits far-side.
+        assertEquals(118L, ShortcutStripGeometry.centeredGroupStartPx(321L, 84L))
+    }
+
+    @Test
+    fun centeredStartRejectsNegativeInputs() {
+        assertIllegalArgument { ShortcutStripGeometry.centeredGroupStartPx(-1L, 84L) }
+        assertIllegalArgument { ShortcutStripGeometry.centeredGroupStartPx(320L, -1L) }
+    }
+
     // ── helpers ───────────────────────────────────────────────────────────
 
     private fun assertIllegalArgument(block: () -> Unit) {

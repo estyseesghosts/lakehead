@@ -7,6 +7,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.defaultMinSize
@@ -14,18 +15,24 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.text.BasicText
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import me.foxtails.lakehead.core.grid.GridSpan
 import me.foxtails.lakehead.core.grid.ShortcutStripGeometry
 
@@ -109,15 +116,33 @@ internal fun resolveTileColors(
 }
 
 /**
+ * `true` when [span] is a large tile: anything other than `1×1`, `1×2` and
+ * `2×1` (including `2×2` and every wider/taller span).
+ *
+ * Shared rule with the edit-control small set (`1×1`/`1×2`/`2×1` keep the
+ * top-right remove affordance; see `removeControlPlacement` in
+ * `:feature:home`): small spans keep the compact symbol treatment, large
+ * spans with zero pins render the enlarged centered icon and with pins
+ * render the shortcut strip.  Pure, framework-free, no legality checks.
+ */
+fun isLargeTileSpan(span: GridSpan): Boolean =
+    !(span.columns == 1 && span.rows == 1) &&
+        !((span.columns == 1 && span.rows == 2) || (span.columns == 2 && span.rows == 1))
+
+/**
  * Small reusable icon-only app-tile primitive with sibling hit regions.
  *
  * Custom Compose Foundation/graphics/text only: no Material product components, no app
  * inventory, database, persistence, navigation or business logic. Callers supply the
- * accessibility [AppTileState.label], the optional caller-composed [icon] slot, separate
+ * accessibility [AppTileState.label], the caller-composed [icon] slot (which receives
+ * the resolved symbol extent: the 1×1 reference size on small/compact paths, the
+ * centered large extent on large tiles with zero pins), separate
  * body/symbol click callbacks and an optional Body-only long-click callback, plus
  * optional [contentDescription]/[symbolContentDescription] overrides (each defaults to
  * the label so every region always has an accessible name). No text label is ever
- * rendered on the home-tile path.
+ * rendered on the home-tile path: pinned shortcuts stay icon-only per
+ * `docs/Oneshot/00/shortcuts.md` section 24, with their labels exposed as accessible
+ * names (see [pinnedShortcutDescription]) rather than visible text.
  *
  * Layout: the outer [Box] is a non-clickable anchor container (background and
  * selection border only). Its children are siblings, never nested clickables, in
@@ -127,23 +152,48 @@ internal fun resolveTileColors(
  *   Body-only `onLongClick`, [Role.Button]) with `semantics(mergeDescendants = true)`.
  * - AppLaunchButton: [Box.clickable] (`onClick = onSymbolClick`, [Role.Button])
  *   wrapping the [icon] slot, with `semantics(mergeDescendants = true)`.
- * - ShortcutSlot strip: visual-only bottom strip of neutral placeholder dots
- *   (`shortcutPlaceholders` count, default 0 renders none): non-clickable, never
- *   focusable, no [Role.Button]; each dot is a distinct semantics node
- *   ("Shortcut placeholder i+1"). A trailing sibling so order stays Body → Symbol →
- *   slots. Wide spans anchor the strip [Alignment.BottomEnd] as a [Row];
- *   narrow single-column spans anchor [Alignment.BottomCenter] as a [Column].
- *   Index 0 sits nearest the anchor (rightmost in a row, bottommost in a column)
- *   with a fixed pitch, so pin order stays spatially stable.
+ * - Pinned shortcut strip (only when [pinnedShortcuts] is non-empty): the app icon
+ *   moves to its compact anchor and each visible shortcut becomes its own
+ *   [Role.Button] glyph carrying [onShortcutClick] with its opaque id and its own
+ *   accessible label, so TalkBack announces app and shortcuts as discrete actions.
+ *   Wide and square spans lay the group out as one bottom-centered [Row] (app
+ *   rightmost, first-pinned nearest the app, stable pin order, mid-aligned in
+ *   the control-clear region so the group never drifts to an end); narrow
+ *   single-column spans lay it out as a right-edge [Column] with the app
+ *   bottom-most and shortcuts extending upward. Both recompute from the
+ *   measured bounds on every resize. Slot pitch is the grid-unit pitch derived
+ *   from the measured strip edge plus the shared gap ([stripPitch], the `Dp`
+ *   form of `core:grid` `slotPitchPx`); glyphs stay at
+ *   [LauncherDimensions.unitIconSize] (the shared 1×1-equivalent visual metric,
+ *   never scaled to the tile) with `(pitch - extent)` gaps, so a
+ *   full-capacity group exactly fills the padded edge on a normal-phone grid
+ *   and spacing adapts to width instead of a hard-coded adjacency pitch.
+ *   Glyph touch regions equal their visuals here (no 48.dp minima) so
+ *   neighbouring slots never overlap ambiguously on tight strips. The group
+ *   is fitted by [fitPinnedStrip]: shortcuts that do not fit spill into the
+ *   overflow count (far end first, index 0 stays nearest the app), the `+N`
+ *   node renders only when it too fits, and while [isEditSelected] the strip
+ *   additionally clears the floating remove/resize controls (top-right corner
+ *   on small spans, tile-centered on large spans, resize corner always),
+ *   withholding glyphs — down to the whole strip — rather than overlapping.
+ *   Everything withheld stays retained by the caller and announced.
+ * - Overflow indicator (only when the fitted [PinnedStripFit.showOverflowNode]
+ *   holds): a visible `+N` node with no click action and no [Role.Button]
+ *   (non-launchable). Its count covers every hidden shortcut: caller overflow
+ *   plus visibles dropped by the fit. When hidden (edit-selected tile,
+ *   zero-capacity span, or a node that itself does not fit) the total is
+ *   merged into TileBody's `stateDescription` instead, so the overflow stays
+ *   announced.
  *
- * A 1x1 tile is full-bleed (no [LauncherDimensions.tilePadding] inset; the tile
- * background fills the whole cell) while the symbol hit region stays icon-sized
- * ([LauncherDimensions.symbolSize] coerced to the 48.dp minimum) centered on the
- * tile, so ring/edge touches reach TileBody; larger spans keep the tile-padding inset with
- * the caller's natural symbol size anchored via [symbolAlignment] with
- * `hasPinned = pinnedCount > 0`: zero pinned shortcuts centers the symbol,
- * while pinned shortcuts reuse the compact large-tile anchor (tall 1x2 tiles
- * bottom-center, every other span bottom-ends).
+ * Zero pins keeps the unpinned treatment on every span: `1×1` stays full-bleed
+ * (no [LauncherDimensions.tilePadding] inset; the tile background fills the
+ * whole cell) while the symbol hit region stays icon-sized centered on the
+ * tile, small spans (`1×2` bottom-center, `2×1` bottom-right) anchor the
+ * reference-size symbol per `docs/grid.md` section 4, and large spans center
+ * the icon at `min(availableWidth, availableHeight)` after padding with no
+ * strip reserve (the [icon] slot receives that extent). Pinning the first
+ * shortcut switches a large tile to the compact strip layout; unpinning the
+ * last one restores the unpinned anchor.
  *
  * Accessibility: TileBody merges descendants into a focusable node with the resolved
  * content description, the `selected` flag for [AppTileState.isSelected], and
@@ -158,21 +208,37 @@ internal fun resolveTileColors(
  * @param onSymbolClick invoked from AppLaunchButton.
  * @param onLongClick when null TileBody exposes no long-click action; AppLaunchButton
  * never exposes one.
- * @param shortcutPlaceholders test/mock-only count of visual-only neutral-dot
- * shortcut glyphs in the ShortcutSlot strip (default 0, so 1x1 tiles show none).
- * Glyphs are inert: no click/long-click handling and no text labels. The count
- * is clamped via [ShortcutStripGeometry.visibleCount] for [AppTileState.span],
- * so over-counts render max instead of crashing; negative counts are still
- * rejected.
- * @param pinnedCount launcher-tile pinned shortcut count driving the symbol anchor
- * (default 0 → centered via `symbolAlignment(span, false)`). One or more reuses
- * the compact large-tile anchor. Negative counts are rejected. Today this is
- * caller-supplied test state; swipe/menu/persistence wiring lands separately.
+ * @param icon caller-composed symbol slot.  Receives the resolved square symbol
+ * extent for this layout (reference size, compact unit size, or the large centered
+ * extent) so the caller can scale [AppSymbol] without measuring the tile itself.
+ * @param pinnedShortcuts visible pinned shortcuts in pin order (index 0 nearest the
+ * app icon), already clamped to [ShortcutStripGeometry.maxSlots] for [AppTileState.span]
+ * by the caller (`:feature:home` arrangement owns capacity; this tile never
+ * re-derives it).  Empty (default) renders no strip.  Today this is caller-supplied
+ * tile state joined from the persisted binding and live shortcut metadata; the tile
+ * performs no inventory, platform or database access.
+ * @param overflowCount pinned shortcuts hidden beyond strip capacity (default 0).
+ * Never deleted: the caller retains the full ordered list and restores visibility
+ * on resize.  Must be `>= 0`.
+ * @param showOverflowIndicator whether to render the visible `+N` overflow node.
+ * Callers pass false while the tile is edit-selected (edit controls float above
+ * the strip, so the indicator yields) and on zero-capacity spans; the count is
+ * still announced via TileBody semantics in those cases.
+ * @param onShortcutClick invoked with the tapped shortcut's opaque id; pin
+ * toggling and persistence stay with the caller and never execute here.
  * @param isInteractionEnabled when false both hit regions keep their minima,
  * merged-descendants semantics, [Role.Button], descriptions and border visuals
  * but expose no click/long-click actions (`enabled = false` on TileBody's
  * `combinedClickable` and the symbol `clickable`), so in-edit drag gestures win
- * the slop race. Defaults to true (fully interactive).
+ * the slop race. Defaults to true (fully interactive).  Shortcut glyphs follow
+ * the same gate: disabled in edit mode so the tile drags as one object and
+ * shortcut invocation never interferes with tile editing.
+ * @param isEditSelected whether the tile is the edit-selected tile with
+ * floating remove/resize controls above it. The strip reserves their insets
+ * (top-right corner on small spans, tile-centered on large spans, resize
+ * corner always) and withholds glyphs rather than overlapping; withheld
+ * shortcuts join the overflow count announced through the tile body.
+ * Defaults to false. `:feature:home` passes `isSelected || isEditing`.
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -181,13 +247,16 @@ fun AppTile(
     onBodyClick: () -> Unit,
     onSymbolClick: () -> Unit,
     modifier: Modifier = Modifier,
-    icon: (@Composable () -> Unit)? = null,
+    icon: (@Composable (symbolExtent: Dp) -> Unit)? = null,
     contentDescription: String? = null,
     symbolContentDescription: String? = null,
     onLongClick: (() -> Unit)? = null,
-    shortcutPlaceholders: Int = 0,
-    pinnedCount: Int = 0,
+    pinnedShortcuts: List<PinnedTileShortcut> = emptyList(),
+    overflowCount: Int = 0,
+    showOverflowIndicator: Boolean = false,
+    onShortcutClick: (String) -> Unit = {},
     isInteractionEnabled: Boolean = true,
+    isEditSelected: Boolean = false,
 ) {
     require(contentDescription == null || contentDescription.isNotBlank()) {
         "contentDescription must be null or non-blank"
@@ -195,15 +264,12 @@ fun AppTile(
     require(symbolContentDescription == null || symbolContentDescription.isNotBlank()) {
         "symbolContentDescription must be null or non-blank"
     }
-    require(shortcutPlaceholders >= 0) {
-        "shortcutPlaceholders must be >= 0"
+    require(overflowCount >= 0) {
+        "overflowCount must be >= 0"
     }
-    require(pinnedCount >= 0) {
-        "pinnedCount must be >= 0"
-    }
-    // Bottom-edge capacity owned by core:grid: the icon occupies one slot.
-    val renderedPlaceholders = ShortcutStripGeometry.visibleCount(shortcutPlaceholders, state.span)
-    val hasPinned = pinnedCount > 0
+    // Strip capacity is caller-owned (core:grid via :feature:home arrangement);
+    // the visible list arrives pre-clamped and pin-ordered (index 0 nearest app).
+    val hasPinned = pinnedShortcuts.isNotEmpty()
     val resolvedDescription = contentDescription ?: state.label
     val resolvedSymbolDescription = symbolContentDescription ?: resolvedDescription
     val tileColors = resolveTileColors(
@@ -214,7 +280,7 @@ fun AppTile(
     val containerColor = tileColors.container
     val dimensions = LocalLauncherDimensions.current
 
-    Box(
+    BoxWithConstraints(
         modifier = modifier
             .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
             .fillMaxSize()
@@ -231,6 +297,40 @@ fun AppTile(
                 },
             ),
     ) {
+        // Measured-bounds strip fit: what the tile can show without leaving
+        // its bounds or overlapping the floating edit controls. Withheld
+        // shortcuts spill into hiddenCount (rendered as +N only when the node
+        // itself fits, announced through TileBody otherwise); the caller
+        // retains the full ordered list and restores visibility on resize.
+        // Null while pin-free (a zero-capacity span may still carry a caller
+        // overflow count, announced as before).
+        val stripFit = if (hasPinned) {
+            fitPinnedStrip(
+                tileWidth = maxWidth,
+                tileHeight = maxHeight,
+                span = state.span,
+                pinnedCount = pinnedShortcuts.size,
+                overflowCount = overflowCount,
+                showOverflowIndicator = showOverflowIndicator,
+                isEditSelected = isEditSelected,
+                padding = dimensions.tilePadding,
+                gap = dimensions.gridGap,
+                extent = dimensions.unitIconSize,
+            )
+        } else {
+            null
+        }
+        // Hidden overflow stays announced: merged into TileBody's stateDescription
+        // alongside the pressed marker (never a visible node in edit, on
+        // zero-capacity spans, or when the node itself does not fit).
+        val showOverflowNode = stripFit?.showOverflowNode == true
+        val effectiveHiddenCount = stripFit?.hiddenCount ?: overflowCount
+        val hiddenOverflowDescription =
+            if (!showOverflowNode && effectiveHiddenCount > 0) {
+                pinnedOverflowDescription(effectiveHiddenCount)
+            } else {
+                null
+            }
         val isFullBleed = state.span == GridSpan(1, 1)
         // TileBody: primary hit region; the only region with a long-click action.
         Box(
@@ -240,8 +340,12 @@ fun AppTile(
                 .semantics(mergeDescendants = true) {
                     this.contentDescription = resolvedDescription
                     this.selected = state.isSelected
-                    if (state.isPressed) {
-                        this.stateDescription = AppTileDefaults.PressedStateDescription
+                    val markers = listOfNotNull(
+                        if (state.isPressed) AppTileDefaults.PressedStateDescription else null,
+                        hiddenOverflowDescription,
+                    )
+                    if (markers.isNotEmpty()) {
+                        this.stateDescription = markers.joinToString(", ")
                     }
                 }
                 .combinedClickable(
@@ -251,93 +355,136 @@ fun AppTile(
                     role = Role.Button,
                 ),
         )
-        // AppLaunchButton: symbol hit region wrapping the icon slot; a sibling of
-        // TileBody, never nested inside it.
-        if (isFullBleed) {
-            Box(
-                modifier = Modifier
-                    .align(Alignment.Center)
-                    .size(dimensions.symbolSize.coerceAtLeast(48.dp))
-                    .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
-                    .semantics(mergeDescendants = true) {
-                        this.contentDescription = resolvedSymbolDescription
-                    }
-                    .clickable(
-                        enabled = isInteractionEnabled,
-                        onClick = onSymbolClick,
-                        role = Role.Button,
-                    ),
-                contentAlignment = Alignment.Center,
-            ) {
-                if (icon != null) {
-                    icon()
+        if (!hasPinned) {
+            // Unpinned presentation: no strip is reserved until the first pin.
+            if (isFullBleed) {
+                AppLaunchRegion(
+                    resolvedSymbolDescription = resolvedSymbolDescription,
+                    isInteractionEnabled = isInteractionEnabled,
+                    onSymbolClick = onSymbolClick,
+                    boxModifier = Modifier.align(Alignment.Center)
+                        .size(dimensions.symbolSize.coerceAtLeast(48.dp))
+                        .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp),
+                ) { icon?.invoke(dimensions.symbolSize) }
+            } else if (isLargeTileSpan(state.span)) {
+                // Large tile, zero pins: icon scales to min(availW, availH)
+                // after padding, measured live so every resize recomputes it.
+                BoxWithConstraints(
+                    modifier = Modifier.fillMaxSize().padding(dimensions.tilePadding),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    val largeExtent = centeredIconExtent(maxWidth, maxHeight)
+                    AppLaunchRegion(
+                        resolvedSymbolDescription = resolvedSymbolDescription,
+                        isInteractionEnabled = isInteractionEnabled,
+                        onSymbolClick = onSymbolClick,
+                        boxModifier = Modifier.defaultMinSize(minWidth = 48.dp, minHeight = 48.dp),
+                    ) { icon?.invoke(largeExtent) }
+                }
+            } else {
+                // Small spans keep the unpinned anchor from docs/grid.md
+                // section 4: 1x2 bottom-center, 2x1 bottom-right, at the
+                // reference symbol size with the shared tile padding.
+                val smallAlignment = symbolAlignment(state.span, hasPinned = false)
+                Box(
+                    modifier = Modifier.fillMaxSize().padding(dimensions.tilePadding),
+                    contentAlignment = smallAlignment,
+                ) {
+                    AppLaunchRegion(
+                        resolvedSymbolDescription = resolvedSymbolDescription,
+                        isInteractionEnabled = isInteractionEnabled,
+                        onSymbolClick = onSymbolClick,
+                        boxModifier = Modifier
+                            .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp),
+                    ) { icon?.invoke(dimensions.symbolSize) }
                 }
             }
-        } else {
-            Box(
-                modifier = Modifier
-                    .align(symbolAlignment(state.span, hasPinned))
-                    .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
-                    .padding(dimensions.tilePadding)
-                    .semantics(mergeDescendants = true) {
-                        this.contentDescription = resolvedSymbolDescription
-                    }
-                    .clickable(
-                        enabled = isInteractionEnabled,
-                        onClick = onSymbolClick,
-                        role = Role.Button,
-                    ),
-                contentAlignment = Alignment.Center,
-            ) {
-                if (icon != null) {
-                    icon()
-                }
-            }
-        }
-        // ShortcutSlot strip: visual-only bottom strip of neutral placeholder dots.
-        // No clickable, never focusable, no Role.Button; each dot keeps its own
-        // semantics node ("Shortcut placeholder i+1"), so the strip itself must not
-        // merge descendants. Wide spans anchor BottomEnd as a Row extending leftward;
-        // narrow single-column spans anchor BottomCenter as a Column extending upward
-        // (core:grid strip-geometry contract). Index 0 sits nearest the anchor with
-        // fixed pitch, so pin order stays spatially stable. Dots render at
-        // unitIconSize visual weight and never force a 48dp per-slot target, so
-        // 1x1 tiles (default 0, renders none) stay full-bleed.
-        val placeholderTint = MaterialTheme.colorScheme.outlineVariant
-        if (renderedPlaceholders > 0) {
-            if (ShortcutStripGeometry.isNarrow(state.span)) {
+        } else if (ShortcutStripGeometry.isNarrow(state.span)) {
+            // Vertical strip: right edge, app bottom-most, shortcuts upward at
+            // the grid-unit pitch.  Layout derives from the live bounds (the
+            // control-clear bottom inset plus tile padding), so resize
+            // recomputes it with no cached offsets.  Farthest-pinned renders
+            // first (top), index 0 sits nearest above the app.  The fitted
+            // prefix is rendered; withheld shortcuts join the overflow count.
+            val fit = stripFit!!
+            if (fit.showAppGlyph || fit.showOverflowNode || fit.visibleShortcutCount > 0) {
                 Column(
                     modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .padding(dimensions.tilePadding),
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                        .align(Alignment.BottomEnd)
+                        .padding(
+                            start = dimensions.tilePadding,
+                            top = dimensions.tilePadding,
+                            end = dimensions.tilePadding,
+                            bottom = fit.endInset,
+                        ),
+                    verticalArrangement = Arrangement.spacedBy(
+                        (fit.pitch - dimensions.unitIconSize).coerceAtLeast(0.dp),
+                    ),
+                    horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
-                    for (index in renderedPlaceholders - 1 downTo 0) {
-                        Box(
-                            modifier = Modifier
-                                .size(dimensions.unitIconSize)
-                                .background(placeholderTint, CircleShape)
-                                .semantics {
-                                    this.contentDescription = "Shortcut placeholder ${index + 1}"
-                                },
+                    if (fit.showOverflowNode) {
+                        OverflowGlyph(count = fit.hiddenCount)
+                    }
+                    val visible = pinnedShortcuts.take(fit.visibleShortcutCount)
+                    for (index in visible.indices.reversed()) {
+                        val pinned = visible[index]
+                        ShortcutGlyph(
+                            pinned = pinned,
+                            isInteractionEnabled = isInteractionEnabled,
+                            onShortcutClick = onShortcutClick,
+                        )
+                    }
+                    if (fit.showAppGlyph) {
+                        AppStripGlyph(
+                            resolvedSymbolDescription = resolvedSymbolDescription,
+                            isInteractionEnabled = isInteractionEnabled,
+                            onSymbolClick = onSymbolClick,
+                            icon = icon,
                         )
                     }
                 }
-            } else {
+            }
+        } else {
+            // Horizontal strip: one bottom-centered group (app rightmost, then
+            // index 0..N leftward), mid-aligned in the control-clear region
+            // (the Dp form of ShortcutStripGeometry.centeredGroupStartPx), so
+            // the group stays centered instead of right-aligned; the live
+            // anchor recomputes the centering on every resize.  Slots sit at
+            // the grid-unit pitch with glyphs at the shared extent.
+            val fit = stripFit!!
+            if (fit.showAppGlyph || fit.showOverflowNode || fit.visibleShortcutCount > 0) {
                 Row(
                     modifier = Modifier
-                        .align(Alignment.BottomEnd)
-                        .padding(dimensions.tilePadding),
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        .align(Alignment.BottomCenter)
+                        .padding(
+                            start = dimensions.tilePadding,
+                            top = 0.dp,
+                            end = fit.endInset,
+                            bottom = dimensions.tilePadding,
+                        ),
+                    horizontalArrangement = Arrangement.spacedBy(
+                        (fit.pitch - dimensions.unitIconSize).coerceAtLeast(0.dp),
+                    ),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    for (index in renderedPlaceholders - 1 downTo 0) {
-                        Box(
-                            modifier = Modifier
-                                .size(dimensions.unitIconSize)
-                                .background(placeholderTint, CircleShape)
-                                .semantics {
-                                    this.contentDescription = "Shortcut placeholder ${index + 1}"
-                                },
+                    if (fit.showOverflowNode) {
+                        OverflowGlyph(count = fit.hiddenCount)
+                    }
+                    val visible = pinnedShortcuts.take(fit.visibleShortcutCount)
+                    for (index in visible.indices.reversed()) {
+                        val pinned = visible[index]
+                        ShortcutGlyph(
+                            pinned = pinned,
+                            isInteractionEnabled = isInteractionEnabled,
+                            onShortcutClick = onShortcutClick,
+                        )
+                    }
+                    if (fit.showAppGlyph) {
+                        AppStripGlyph(
+                            resolvedSymbolDescription = resolvedSymbolDescription,
+                            isInteractionEnabled = isInteractionEnabled,
+                            onSymbolClick = onSymbolClick,
+                            icon = icon,
                         )
                     }
                 }
@@ -345,3 +492,149 @@ fun AppTile(
         }
     }
 }
+
+/**
+ * App symbol hit region: a sibling of TileBody (never nested inside it) with
+ * `semantics(mergeDescendants = true)` exposing only its own content
+ * description.  Never exposes a long-click action.
+ */
+@Composable
+private fun AppLaunchRegion(
+    resolvedSymbolDescription: String,
+    isInteractionEnabled: Boolean,
+    onSymbolClick: () -> Unit,
+    boxModifier: Modifier,
+    content: @Composable () -> Unit,
+) {
+    Box(
+        modifier = boxModifier
+            .semantics(mergeDescendants = true) {
+                this.contentDescription = resolvedSymbolDescription
+            }
+            .clickable(
+                enabled = isInteractionEnabled,
+                onClick = onSymbolClick,
+                role = Role.Button,
+            ),
+        contentAlignment = Alignment.Center,
+    ) {
+        content()
+    }
+}
+
+/**
+ * Compact app glyph inside the pinned strip: [LauncherDimensions.unitIconSize]
+ * visual (the shared 1×1-equivalent metric per the shortcut spec), own
+ * accessible name, own click.  A sibling of the shortcut glyphs, never merged
+ * with them, so TalkBack announces the app launch separately from shortcuts.
+ */
+@Composable
+private fun AppStripGlyph(
+    resolvedSymbolDescription: String,
+    isInteractionEnabled: Boolean,
+    onSymbolClick: () -> Unit,
+    icon: (@Composable (symbolExtent: Dp) -> Unit)?,
+) {
+    val dimensions = LocalLauncherDimensions.current
+    Box(
+        modifier = Modifier
+            .size(dimensions.unitIconSize)
+            .testTag(APP_STRIP_GLYPH_TAG)
+            .semantics(mergeDescendants = true) {
+                this.contentDescription = resolvedSymbolDescription
+                this.role = Role.Button
+            }
+            .then(
+                if (isInteractionEnabled) {
+                    Modifier.clickable(
+                        onClick = onSymbolClick,
+                        role = Role.Button,
+                    )
+                } else {
+                    Modifier
+                },
+            ),
+        contentAlignment = Alignment.Center,
+    ) {
+        icon?.invoke(dimensions.unitIconSize)
+    }
+}
+
+/**
+ * One pinned shortcut glyph: [LauncherDimensions.unitIconSize] neutral marker
+ * (outline ring, distinct from the app bitmap) with its own accessible label
+ * and its own click reporting the opaque [PinnedTileShortcut.id].  Icon-only
+ * visuals (no visible text); the label lives in semantics.  Disabled (but
+ * still described) while interaction is disabled so the tile drags as one
+ * object in edit mode.
+ */
+@Composable
+private fun ShortcutGlyph(
+    pinned: PinnedTileShortcut,
+    isInteractionEnabled: Boolean,
+    onShortcutClick: (String) -> Unit,
+) {
+    val scheme = MaterialTheme.colorScheme
+    val dimensions = LocalLauncherDimensions.current
+    Box(
+        modifier = Modifier
+            .size(dimensions.unitIconSize)
+            .testTag("$PINNED_SHORTCUT_TAG_PREFIX${pinned.id}")
+            .semantics(mergeDescendants = true) {
+                this.contentDescription = pinnedShortcutDescription(pinned.label)
+                this.role = Role.Button
+            }
+            .then(
+                if (isInteractionEnabled) {
+                    Modifier.clickable(
+                        onClick = { onShortcutClick(pinned.id) },
+                        role = Role.Button,
+                    )
+                } else {
+                    Modifier
+                },
+            ),
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(dimensions.unitIconSize)
+                .background(scheme.outlineVariant, CircleShape)
+                .border(2.dp, scheme.outline, CircleShape),
+        )
+    }
+}
+
+/**
+ * Visible overflow indicator: `+N` with the [pinnedOverflowDescription]
+ * accessible name, no click action and no [Role.Button] (non-launchable).
+ * Rendered only when the caller shows it (capacity available, tile not
+ * edit-selected); otherwise the count merges into TileBody semantics.
+ */
+@Composable
+private fun OverflowGlyph(count: Int) {
+    val scheme = MaterialTheme.colorScheme
+    Box(
+        modifier = Modifier
+            .size(LocalLauncherDimensions.current.unitIconSize)
+            .testTag(PINNED_OVERFLOW_TAG)
+            .semantics(mergeDescendants = true) {
+                this.contentDescription = pinnedOverflowDescription(count)
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        BasicText(
+            text = "+$count",
+            style = TextStyle(color = scheme.onSurface, fontSize = 16.sp),
+        )
+    }
+}
+
+/** Test tag on the compact app glyph inside the pinned strip. */
+const val APP_STRIP_GLYPH_TAG: String = "pinned-strip-app"
+
+/** Test-tag prefix for one pinned shortcut glyph; the shortcut id is appended. */
+const val PINNED_SHORTCUT_TAG_PREFIX: String = "pinned-shortcut-"
+
+/** Test tag on the visible `+N` overflow indicator. */
+const val PINNED_OVERFLOW_TAG: String = "pinned-overflow"

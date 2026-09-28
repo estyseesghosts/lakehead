@@ -3,11 +3,17 @@ package me.foxtails.lakehead.core.grid
 /**
  * Pure geometry for the shortcut strip that appears beside a grid tile.
  *
- * The strip occupies one edge of the tile's bounding rectangle.  Wide tiles
- * (columns ≥ 2, plus the 1×1 tile) anchor the strip at the bottom-right
- * corner and extend it leftward; narrow single-column multi-row tiles
- * (1×2, 1×3 and future 1×N forms) anchor at the bottom-center and extend
- * upward.  All arithmetic is Long-safe and overflow-checked.
+ * The strip occupies one edge of the tile's bounding rectangle.  Wide and
+ * square tiles (columns ≥ 2, plus the 1×1 tile) lay the strip out
+ * horizontally along the bottom edge as one mid-aligned group (app icon plus
+ * its pinned shortcuts, centered — never right-aligned); narrow
+ * single-column multi-row tiles (1×2, 1×3 and future 1×N forms) lay it out
+ * vertically on the right edge with the app icon bottom-right and shortcuts
+ * extending upward.  All arithmetic is Long-safe and overflow-checked.
+ *
+ * Spans are always read columns × rows ([GridSpan.columns] first): a 2-wide
+ * × 4-tall tile is `GridSpan(2, 4)` with capacity 1, while a 4-wide × 2-tall
+ * tile is `GridSpan(4, 2)` with capacity 3.  Never transpose the axes.
  */
 object ShortcutStripGeometry {
 
@@ -16,6 +22,16 @@ object ShortcutStripGeometry {
 
     /** Direction in which successive slot indices move away from the anchor. */
     enum class StripDirection { LEFTWARD, UPWARD }
+
+    /**
+     * Strip orientation for a tile with the given [span].
+     *
+     * Single-column multi-row tiles use [PinnedStripOrientation.VERTICAL]
+     * (right-edge column, app bottom-right, shortcuts upward); every other
+     * span (including 1×1) uses [PinnedStripOrientation.HORIZONTAL]
+     * (bottom-edge row, app plus shortcuts mid-aligned as one group).
+     */
+    enum class PinnedStripOrientation { HORIZONTAL, VERTICAL }
 
     /**
      * `true` when [span] is a narrow single-column multi-row tile, meaning the
@@ -47,8 +63,71 @@ object ShortcutStripGeometry {
         if (isNarrow(span)) StripDirection.UPWARD else StripDirection.LEFTWARD
 
     /**
+     * Returns the strip orientation for a tile with the given [span].
+     *
+     * Single-column multi-row tiles use
+     * [PinnedStripOrientation.VERTICAL]; every other span (including 1×1)
+     * uses [PinnedStripOrientation.HORIZONTAL].  This is the layout-contract
+     * form of [directionFor] for renderers that branch on orientation rather
+     * than growth direction.
+     */
+    fun orientationFor(span: GridSpan): PinnedStripOrientation =
+        if (isNarrow(span)) PinnedStripOrientation.VERTICAL else PinnedStripOrientation.HORIZONTAL
+
+    /**
+     * Total edge extent of one centered strip group in pixels.
+     *
+     * The group holds [slotCount] equal slots (the app icon plus its visible
+     * pinned shortcuts): the first slot contributes the full [extentPx] and
+     * each further slot contributes one [pitchPx] (slot extent plus the fixed
+     * inter-slot gap, see [slotPitchPx]).  Renderers mid-align this width
+     * inside the tile's measured bottom edge (horizontal) or right edge
+     * (vertical) and recompute it from the measured bounds on every resize,
+     * so the group stays centered instead of drifting to an end anchor and
+     * slot positions stay stable as pins are added or removed.
+     *
+     * @param extentPx side length of one square slot in pixels (must be > 0)
+     * @param pitchPx centre-to-centre slot pitch in pixels (must be > 0)
+     * @param slotCount number of slots in the group: 1 + visible shortcuts
+     * (must be ≥ 1)
+     * @return `extentPx + (slotCount - 1) * pitchPx`
+     * @throws IllegalArgumentException if any argument is out of range
+     * @throws ArithmeticException if the computation overflows a `Long`
+     */
+    fun stripGroupExtentPx(extentPx: Long, pitchPx: Long, slotCount: Int): Long {
+        require(extentPx > 0L) { "extentPx must be positive" }
+        require(pitchPx > 0L) { "pitchPx must be positive" }
+        require(slotCount >= 1) { "slotCount must be at least 1" }
+        val gaps = Math.multiplyExact((slotCount - 1).toLong(), pitchPx)
+        return Math.addExact(extentPx, gaps)
+    }
+
+    /**
+     * Start offset that mid-aligns a strip group inside its container edge.
+     *
+     * `start = (containerPx - groupPx) / 2` with truncating division, so the
+     * leftover pixel (if any) sits on the far side.  Callers pass the tile's
+     * measured edge ([containerPx]) and [stripGroupExtentPx] ([groupPx]) as
+     * captured from the same measurement pass, which is what makes the group
+     * recompute its centering on every resize instead of caching an offset.
+     *
+     * @throws IllegalArgumentException if [containerPx] or [groupPx] is negative
+     */
+    fun centeredGroupStartPx(containerPx: Long, groupPx: Long): Long {
+        require(containerPx >= 0L) { "containerPx must be non-negative" }
+        require(groupPx >= 0L) { "groupPx must be non-negative" }
+        return (containerPx - groupPx) / 2L
+    }
+
+    /**
      * Maximum number of shortcut slots that fit along the visible edge of a
      * tile with the given [span].
+     *
+     * Capacity is `usableEdgeCells - 1`: the app icon occupies exactly one
+     * slot on the tile's strip edge, so the remaining edge cells bound the
+     * visible pinned shortcuts (`2×2` → app + 1, `4`-wide × `2`-high → app
+     * + 3).  Axes are never transposed: a 2-wide × 4-tall tile
+     * (`GridSpan(2, 4)`) has capacity 1, not 3.
      *
      * Rules (applied in order):
      * - If either dimension is ≤ 0 the result is 0.

@@ -11,33 +11,47 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.Dp
 import me.foxtails.lakehead.core.grid.GridSpan
-import me.foxtails.lakehead.core.grid.ShortcutStripGeometry
 
 /**
  * Pre-resolved app symbol.
  *
- * Renders a caller-supplied [ImageBitmap] snapshot at [LauncherDimensions.symbolSize]
- * with [ContentScale.Fit]. Callers resolve the bitmap outside composition (cached
- * metadata with callback invalidation); this composable never touches LauncherApps,
+ * Renders a caller-supplied [ImageBitmap] snapshot at [extent] (default
+ * [LauncherDimensions.symbolSize]) with [ContentScale.Fit]. Callers resolve
+ * the bitmap outside composition (cached metadata with callback
+ * invalidation); this composable never touches LauncherApps,
  * PackageManager, or icon decoding.
+ *
+ * Large tiles with zero pinned shortcuts pass
+ * [centeredIconExtent] (the smaller of the tile's available width/height
+ * after padding, with no strip reserve) so the icon scales proportionally
+ * to the tile instead of staying at the 1×1 reference size; every other
+ * path keeps the default extent.  Aspect preservation stays with
+ * [ContentScale.Fit] in both cases.
  *
  * Draw-time monochrome tint: applies [ColorFilter.tint] with the theme `onSurface`
  * colour so every cached normalised PNG (white-on-transparent alpha mask from the
  * platform encoder) renders in the current theme's foreground colour. The tint
  * follows light/dark automatically because it reads `MaterialTheme.colorScheme.onSurface`
  * at composition time; features receive theme-adaptive monochrome icons with no edits.
+ *
+ * @param extent square visual extent of the rendered symbol.  The trailing
+ * `Modifier.size(extent)` applies after the caller's [modifier], so a
+ * caller-supplied size is refined to this square rather than stacked with
+ * the default: pass an explicit value only to scale the symbol (the large
+ * centered-tile path), never to restate the default.
  */
 @Composable
 fun AppSymbol(
     bitmap: ImageBitmap,
     modifier: Modifier = Modifier,
+    extent: Dp = LocalLauncherDimensions.current.symbolSize,
 ) {
     Image(
         bitmap = bitmap,
         contentDescription = null,
         contentScale = ContentScale.Fit,
         colorFilter = ColorFilter.tint(MaterialTheme.colorScheme.onSurface),
-        modifier = modifier.then(Modifier.size(LocalLauncherDimensions.current.symbolSize)),
+        modifier = modifier.then(Modifier.size(extent)),
     )
 }
 
@@ -54,14 +68,15 @@ fun symbolAlignment(span: GridSpan): Alignment = symbolAlignment(span, hasPinned
 /**
  * Pure alignment rule for an app symbol inside its tile, given pin state.
  *
- * Zero pinned shortcuts means centered icon (`docs/Oneshot/00/shortcuts.md`
- * section 2.2: enlarged, aspect-preserved, no reserved shortcut space). One or
- * more pinned shortcuts reuses the compact large-tile anchor by delegating to
- * the `core:grid` strip-geometry anchor contract
- * ([ShortcutStripGeometry.anchorFor]): `BOTTOM_CENTER` maps to bottom-center,
- * `BOTTOM_RIGHT` maps to bottom-end. A 1×1 tile anchors bottom-end (wide) per
- * `docs/design.md` and `docs/grid.md` §4; narrow single-column multi-row tiles
- * (1×2, 1×3 and future 1×N forms) anchor bottom-center.
+ * Zero pinned shortcuts keeps the unpinned anchor from `docs/grid.md`
+ * section 4: bottom-right on every span except `1×2`, which is
+ * bottom-center. The rule is generic over future spans (only the `1×2`
+ * exception is special-cased). One or more pinned shortcuts uses the
+ * compact strip anchor: wide and square tiles anchor the app icon
+ * bottom-end (rightmost slot of the bottom-centered group), and narrow
+ * single-column multi-row tiles anchor it bottom-end on the right edge
+ * with shortcuts extending upward (C1 layout contract).
+ * A 1×1 tile anchors bottom-end (capacity 0 keeps it pin-free in practice).
  *
  * Alignment mapping only, no legality checks: placement legality stays owned
  * by `core:grid`.
@@ -70,11 +85,10 @@ fun symbolAlignment(span: GridSpan): Alignment = symbolAlignment(span, hasPinned
  * (launcher-tile pinning, not Android-platform pinning).
  */
 fun symbolAlignment(span: GridSpan, hasPinned: Boolean): Alignment {
-    if (!hasPinned) return Alignment.Center
-    return when (ShortcutStripGeometry.anchorFor(span)) {
-        ShortcutStripGeometry.ShortcutAnchor.BOTTOM_CENTER -> Alignment.BottomCenter
-        ShortcutStripGeometry.ShortcutAnchor.BOTTOM_RIGHT -> Alignment.BottomEnd
+    if (!hasPinned) {
+        return if (span.columns == 1 && span.rows == 2) Alignment.BottomCenter else Alignment.BottomEnd
     }
+    return Alignment.BottomEnd
 }
 
 /**

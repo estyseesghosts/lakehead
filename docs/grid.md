@@ -191,6 +191,19 @@ Do not implement different icon positioning separately for `2×2`, `3×2`, `4×3
 
 The layout rule should continue working when more spans are introduced.
 
+> C1 pinned-strip amendment (01.md items 8+9): the rule above describes tiles
+> with zero pinned shortcuts only in its centered form — a large tile with no
+> pins centers its icon at `min(availableWidth, availableHeight)` after padding
+> with no strip reserve. Once at least one shortcut is pinned, the app icon
+> uses the compact anchor on every span (`Alignment.BottomEnd`): wide/square
+> tiles render the app plus its shortcuts as one bottom-centered group (app
+> rightmost, first-pinned nearest the app, stable pin order), and narrow
+> single-column tiles render the app bottom-right with shortcuts extending
+> upward on the right edge at the same pitch. Capacity is `usableEdgeCells - 1`
+> from `core:grid` (`2×2` → app + 1, 4-wide × 2-high → app + 3, 2-wide × 4-tall
+> → app + 1, axes never transposed); overflow renders a non-launchable `+N`
+> (or tile semantics when hidden) and is never deleted on shrink.
+
 ---
 
 # 5. App list

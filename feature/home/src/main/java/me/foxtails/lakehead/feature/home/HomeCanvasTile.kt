@@ -14,10 +14,10 @@ import androidx.compose.ui.zIndex
 import me.foxtails.lakehead.core.designsystem.AppSymbol
 import me.foxtails.lakehead.core.designsystem.AppTile
 import me.foxtails.lakehead.core.designsystem.AppTileState
+import me.foxtails.lakehead.core.designsystem.PinnedTileShortcut
 import me.foxtails.lakehead.core.grid.GridSpan
 import me.foxtails.lakehead.core.model.AppIdentity
 import me.foxtails.lakehead.core.model.ItemId
-import me.foxtails.lakehead.core.model.LogicalSpan
 
 /**
  * Maps one [HomeRenderTile] to the reusable [AppTile] primitive.
@@ -61,19 +61,18 @@ import me.foxtails.lakehead.core.model.LogicalSpan
  *   caller-driven [AppTileState.isSelected] border and announces
  *   `stateDescription = "Editing <label>, row R column C"`. The same treatment
  *   applies when W1-selected; both keep the id-keyed contract (never pos/index).
- * - [shortcutPlaceholders] forwards test/mock-only visual placeholder dots to
- *   [AppTile] (default 0 renders none), clamped to
- *   `0..TileShortcutPolicy.maxShortcutSlots(tile.span)` so over-counts render
- *   max instead of crashing; no shortcut inventory, platform wiring or
- *   slot click handling lives here.
- * - [pinnedCount] forwards the launcher-tile pinned shortcut count to [AppTile]
- *   (default 0 → centered symbol anchor), validated `>= 0` and passed through
- *   unclamped: it is never derived from [shortcutPlaceholders] (placeholder dots
- *   are test/mock-only visuals, not pin state) and never clamped to
- *   [TileShortcutPolicy] capacity (capacity bounds the visible strip, not the
- *   anchor-driving pin state). Menu pinning and persistence are implemented, but
- *   the production pinned-shortcut source and tile strip rendering remain deferred
- *   to C1, so callers currently leave the default 0.
+ * - [pinnedShortcuts] carries the tile's joined pinned shortcuts in pin order
+ *   (as produced by [TilePinnedStrip.resolve] from the persisted binding and
+ *   live shortcut metadata; default empty renders no strip).  The tile derives
+ *   the render window via [TilePinnedStrip.arrange] on its live span — visible
+ *   glyphs plus a defined overflow — so resize/move previews recompute the
+ *   strip every frame without touching persistence.  Count-only placeholder
+ *   fixtures are retired: there is no count param, only this real list.
+ * - [onShortcutClick] reports a strip glyph tap with the shortcut's opaque id;
+ *   execution stays with the caller.  Strip glyphs are disabled while
+ *   [isEditActive] (the tile drags as one object) and taps select while
+ *   W1 wiggle-editing instead of launching, so shortcut invocation never
+ *   interferes with tile editing.
  */
 @Composable
 internal fun HomeCanvasTile(
@@ -83,8 +82,8 @@ internal fun HomeCanvasTile(
     modifier: Modifier = Modifier,
     isEditActive: Boolean = false,
     activeItemId: ItemId? = null,
-    shortcutPlaceholders: Int = 0,
-    pinnedCount: Int = 0,
+    pinnedShortcuts: List<PinnedTileShortcut> = emptyList(),
+    onShortcutClick: (String) -> Unit = {},
     interactionState: HomeInteractionController = HomeInteractionController.Normal,
     onSelect: (ItemId) -> Unit = {},
     onEnterWiggle: (HomeRenderTile) -> Unit = {},
@@ -107,12 +106,20 @@ internal fun HomeCanvasTile(
         else -> WIGGLE_RECESSED_SCALE
     }
     val animatedScale by animateFloatAsState(targetValue = scaleTarget, label = "wiggleRecessScale")
-    // Bottom-edge capacity: the icon occupies one slot, so clamp forwarded
-    // placeholders to 0..max (over-counts render max, never crash).
-    // Pin state stays independent: validated pass-through, never derived from
-    // placeholders and never clamped to strip capacity.
-    val clampedPlaceholders = clampedShortcutPlaceholders(shortcutPlaceholders, tile.span)
-    val resolvedPinnedCount = validatedPinnedCount(pinnedCount)
+    // Pinned strip arrangement on the live span: visible glyphs plus defined
+    // overflow, recomputed from the same resolved list on every span change
+    // (including the resize preview, whose span arrives via the copied tile).
+    // Edit-selected tiles yield the +N node to the floating edit controls;
+    // the count stays announced through TileBody semantics. The tile itself
+    // additionally fits the strip to its measured bounds (grid-unit pitch,
+    // control-inset reserves) via isEditSelected below, withholding glyphs
+    // rather than overlapping; the binding retains every pin.
+    val editSelected = isSelected || isEditing
+    val stripArrangement = TilePinnedStrip.arrange(
+        span = tile.span,
+        resolved = pinnedShortcuts,
+        isEditSelected = editSelected,
+    )
     val tileModifier = when {
         isSelected || isEditing -> modifier.semantics {
             stateDescription =
@@ -156,10 +163,11 @@ internal fun HomeCanvasTile(
         },
         modifier = tileModifier,
         icon = if (iconBitmap != null) {
-            {
+            { extent ->
                 AppSymbol(
                     bitmap = iconBitmap,
                     modifier = Modifier.testTag(HOME_TILE_ICON_TAG),
+                    extent = extent,
                 )
             }
         } else {
@@ -175,42 +183,26 @@ internal fun HomeCanvasTile(
         } else {
             null
         },
-        shortcutPlaceholders = clampedPlaceholders,
-        pinnedCount = resolvedPinnedCount,
+        pinnedShortcuts = stripArrangement.visible,
+        overflowCount = stripArrangement.overflowCount,
+        showOverflowIndicator = stripArrangement.showOverflowIndicator,
+        onShortcutClick = { shortcutId ->
+            // Strip taps execute while interactive; in W1 Editing taps select
+            // the tile instead (never launch a shortcut mid-edit), matching
+            // the body/symbol tap contract above.
+            if (isInteractionEditing) {
+                onSelect(tile.itemId)
+            } else if (!isEditActive && tile.isLaunchable) {
+                onShortcutClick(shortcutId)
+            }
+        },
         // W1 Editing keeps interaction enabled so taps select; a move session in
         // Normal keeps tiles non-interactive so the parent drag owns the gesture.
         isInteractionEnabled = if (isInteractionEditing) true else !isEditActive,
+        isEditSelected = editSelected,
     )
     }
 }
-
-/**
- * Validates the caller-supplied pinned shortcut count for [HomeCanvasTile].
- *
- * Pass-through: returns [pinnedCount] unchanged so `APP_WITH_PINNED` (`> 0`)
- * reaches [AppTile] exactly as supplied. Never derived from placeholder dots
- * and never clamped to [TileShortcutPolicy] capacity — capacity bounds the
- * visible strip, not the anchor-driving pin state (a 1×1 tile keeps its pin
- * state even though its strip capacity is 0).
- *
- * Menu pinning and persistence now provide the model; tile rendering will consume
- * that production source in C1. Until then callers leave the default 0.
- *
- * @throws IllegalArgumentException when [pinnedCount] is negative.
- */
-internal fun validatedPinnedCount(pinnedCount: Int): Int {
-    require(pinnedCount >= 0) { "pinnedCount must be >= 0" }
-    return pinnedCount
-}
-
-/**
- * Clamps requested visual placeholder dots into `0..max` strip capacity for
- * [span] via [TileShortcutPolicy]; over-counts render max instead of crashing.
- * Independent of [validatedPinnedCount]: placeholders are test/mock-only
- * visuals, never pin state.
- */
-internal fun clampedShortcutPlaceholders(requested: Int, span: LogicalSpan): Int =
-    requested.coerceIn(0, TileShortcutPolicy.maxShortcutSlots(span))
 
 /** Label fallback when a tile has no joined metadata label. */
 internal const val UNAVAILABLE_LABEL: String = "Unavailable app"

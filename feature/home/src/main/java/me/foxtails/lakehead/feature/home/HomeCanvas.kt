@@ -14,6 +14,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import me.foxtails.lakehead.core.designsystem.ShortcutSurfaceEntry
+import me.foxtails.lakehead.core.designsystem.PinnedTileShortcut
 import me.foxtails.lakehead.core.model.AppIdentity
 import me.foxtails.lakehead.core.model.ItemId
 import me.foxtails.lakehead.core.model.LogicalPosition
@@ -48,6 +49,9 @@ import me.foxtails.lakehead.core.model.LogicalSpan
  *   [surfaceEntriesTileId] names the tile the rows were loaded for (null =
  *   unscoped) and [onSelectedTileChange] reports selection transitions so the
  *   caller can query-on-select; the grid itself never queries.
+ *   Tile strips render [pinnedByTile] (joined per-tile pins; empty renders the
+ *   centered icon): strip taps report [onPinnedShortcutClick] with the owning
+ *   tile id and shortcut id, and execution stays with the caller.
  * - A1 hold signal: [onTransientHoldChange] reports transient hold state owned by
  *   [HomeCanvasGrid] (active edit or wiggle editing) so the shell
  *   can gate pager swipe. Programmatic pill navigation is unaffected.
@@ -88,6 +92,10 @@ fun HomeCanvas(
     onSelectedTileChange: (ItemId?) -> Unit = {},
     onSurfaceExecute: (ItemId, String) -> Unit = { _, _ -> },
     onSurfaceTogglePin: (ItemId, String) -> Unit = { _, _ -> },
+    // C1 tile strip: joined pinned shortcuts per tile, forwarded to
+    // [HomeCanvasGrid] (see its docs).  Defaults keep the canvas pin-free.
+    pinnedByTile: Map<ItemId, List<PinnedTileShortcut>> = emptyMap(),
+    onPinnedShortcutClick: (ItemId, String) -> Unit = { _, _ -> },
     onTransientHoldChange: (Boolean) -> Unit = {},
     onPagerHoldChange: (Boolean) -> Unit = {},
     // P2 navigation visibility: forwarded to [HomeCanvasGrid]. False while the
@@ -162,6 +170,8 @@ fun HomeCanvas(
                     onSelectedTileChange = onSelectedTileChange,
                     onSurfaceExecute = onSurfaceExecute,
                     onSurfaceTogglePin = onSurfaceTogglePin,
+                    pinnedByTile = pinnedByTile,
+                    onPinnedShortcutClick = onPinnedShortcutClick,
                     onTransientHoldChange = onTransientHoldChange,
                     onPagerHoldChange = onPagerHoldChange,
                     isVisible = isVisible,
