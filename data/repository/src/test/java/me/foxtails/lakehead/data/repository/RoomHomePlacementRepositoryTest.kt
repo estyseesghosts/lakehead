@@ -108,6 +108,88 @@ class RoomHomePlacementRepositoryTest {
         assertEquals(LogicalSpan(1, 2), dao.placement(target.itemId.value)!!.toDomain().span)
     }
 
+    @Test fun acceptedMutationNormalizesOtherRowsAndReturnsFinalPlacements() {
+        val home = HomeId("home")
+        seedHome(home.value)
+        val distant = placement(home.value, "distant", 0).copy(position = LogicalPosition(0, 10))
+        seed(distant)
+
+        val result = repository.place(
+            home, ItemId("new"), identity(), LogicalPosition(1, 0), LogicalSpan(1, 1), 6, 20,
+        ) as MutationResult.Accepted
+
+        assertEquals(LogicalPosition(0, 3), dao.placement(distant.itemId.value)!!.toDomain().position)
+        assertEquals(LogicalPosition(0, 3), result.gridResult.placements
+            .first { it.id == distant.itemId }.position.let { LogicalPosition(it.column, it.row) })
+        val again = repository.load(home, 6, 20) as LoadResult.Loaded
+        assertEquals(LogicalPosition(0, 3), again.placements.first { it.itemId == distant.itemId }.position)
+    }
+
+    @Test fun moveNormalizesExcessiveGapWithoutChangingShiftedFieldsOrOtherHome() {
+        val home = HomeId("home")
+        val otherHome = HomeId("other")
+        seedHome(home.value)
+        seedHome(otherHome.value)
+        val target = placement(home.value, "move-target", 0)
+        val shifted = placement(home.value, "move-shifted", 2, ItemAvailability.UNAVAILABLE).copy(
+            position = LogicalPosition(2, 10),
+            span = LogicalSpan(2, 2),
+        )
+        val other = placement(otherHome.value, "other-item", 1).copy(position = LogicalPosition(1, 10))
+        seed(target)
+        seed(shifted)
+        seed(other)
+
+        assertTrue(repository.move(home, target.itemId, LogicalPosition(1, 1), 6, 20) is MutationResult.Accepted)
+
+        assertEquals(shifted.copy(position = LogicalPosition(2, 4)), dao.placement(shifted.itemId.value)!!.toDomain())
+        assertEquals(other, dao.placement(other.itemId.value)!!.toDomain())
+    }
+
+    @Test fun resizeNormalizesExcessiveGapWithoutChangingShiftedFieldsOrOtherHome() {
+        val home = HomeId("home")
+        val otherHome = HomeId("other")
+        seedHome(home.value)
+        seedHome(otherHome.value)
+        val target = placement(home.value, "resize-target", 0)
+        val shifted = placement(home.value, "resize-shifted", 3, ItemAvailability.UNAVAILABLE).copy(
+            position = LogicalPosition(3, 10),
+            span = LogicalSpan(2, 2),
+        )
+        val other = placement(otherHome.value, "other-item", 1).copy(position = LogicalPosition(1, 10))
+        seed(target)
+        seed(shifted)
+        seed(other)
+
+        assertTrue(repository.resize(home, target.itemId, LogicalSpan(2, 2), 6, 20) is MutationResult.Accepted)
+
+        assertEquals(shifted.copy(position = LogicalPosition(3, 4)), dao.placement(shifted.itemId.value)!!.toDomain())
+        assertEquals(other, dao.placement(other.itemId.value)!!.toDomain())
+    }
+
+    @Test fun removeNormalizesExcessiveGapWithoutChangingShiftedFieldsOrOtherHome() {
+        val home = HomeId("home")
+        val otherHome = HomeId("other")
+        seedHome(home.value)
+        seedHome(otherHome.value)
+        val anchor = placement(home.value, "remove-anchor", 0)
+        val target = placement(home.value, "remove-target", 1).copy(position = LogicalPosition(1, 4))
+        val shifted = placement(home.value, "remove-shifted", 2, ItemAvailability.UNAVAILABLE).copy(
+            position = LogicalPosition(2, 10),
+            span = LogicalSpan(2, 2),
+        )
+        val other = placement(otherHome.value, "other-item", 1).copy(position = LogicalPosition(1, 10))
+        seed(anchor)
+        seed(target)
+        seed(shifted)
+        seed(other)
+
+        assertEquals(RemoveResult.Removed, repository.remove(home, target.itemId))
+
+        assertEquals(shifted.copy(position = LogicalPosition(2, 3)), dao.placement(shifted.itemId.value)!!.toDomain())
+        assertEquals(other, dao.placement(other.itemId.value)!!.toDomain())
+    }
+
     @Test fun unrelatedNeighborOperationsRetainUnavailablePlacementAndRowPosition() {
         val home = "home"
         seedHome(home)
@@ -276,27 +358,24 @@ class RoomHomePlacementRepositoryTest {
         assertTrue(result is MutationResult.Accepted)
     }
 
-    @Test fun loadIsReadOnlyAndReloadDistantValidRemains() {
+    @Test fun loadNormalizesAndPersistsDistantValidPlacement() {
         seedHome("home")
         val near = placement("home", "near", 0)
         seed(near)
-        val before = snapshot()
         val first = repository.load(HomeId("home"), 6, 10) as LoadResult.Loaded
         assertEquals(listOf(near), first.placements)
-        // Load performs zero writes.
-        assertEquals(before, snapshot())
 
         val far = AppPlacement(
             HomeId("home"), ItemId("far"), identity(),
             LogicalPosition(0, 16), LogicalSpan(1, 1), ItemAvailability.AVAILABLE,
         )
         seed(far)
-        // Reload (a second load) keeps the distant valid tile with positions
-        // unchanged; no correction or migration runs here.
+        // Reload normalizes the excessive gap and persists the reduced extent.
         val second = repository.load(HomeId("home"), 6, 10) as LoadResult.Loaded
         assertEquals(listOf(near.itemId, far.itemId), second.placements.map { it.itemId })
         assertEquals(LogicalPosition(0, 0), second.placements[0].position)
-        assertEquals(LogicalPosition(0, 16), second.placements[1].position)
+        assertEquals(LogicalPosition(0, 3), second.placements[1].position)
+        assertEquals(LogicalPosition(0, 3), dao.placement(far.itemId.value)!!.toDomain().position)
     }
 
     private fun seedHome(id: String) = dao.insertHome(HomeEntity(id))
