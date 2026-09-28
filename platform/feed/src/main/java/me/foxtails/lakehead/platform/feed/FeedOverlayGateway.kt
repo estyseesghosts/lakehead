@@ -30,8 +30,31 @@ interface FeedOverlayGateway {
      * [FeedAvailability.Unavailable.Reason.NO_PROVIDER]: nothing has been proven until the first
      * off-main resolution after [start] runs. Later values come from resolution, binds and
      * connection callbacks, never from placeholder data.
+     *
+     * Coarse only: `Available` names the provider to host and never implies a binder is
+     * connected or content is rendering. The detailed first-failure diagnosis lives in
+     * [diagnostic] and the per-attempt bind/binder correlation in [bindingEvidence].
      */
     val state: StateFlow<FeedAvailability>
+
+    /**
+     * Current detailed diagnosis, null while hosting (or pending) without failure.
+     *
+     * Discovery failures (`NO_PROVIDER`, `NOT_DISCOVERABLE`, `REJECTED`) come straight
+     * from the resolver verdict; resolution/bind/connection failures (`NOT_RESOLVABLE`,
+     * `BIND_FAILED`, `DISCONNECTED`) come from the D3 bind path. A deliberate [detach]
+     * or [stop] clears the binding failure without reporting one; a stale callback from
+     * a previous generation never overwrites the current value. Read-only for D5 wiring.
+     */
+    val diagnostic: StateFlow<FeedDiagnostic?>
+
+    /**
+     * Per-attempt binding evidence snapshot for the current (or most recent) bind.
+     *
+     * Read-only for D5 wiring: `accepted && !connected` is the expected transient
+     * between `bindService` acceptance and the matching binder callback, not a failure.
+     */
+    val bindingEvidence: StateFlow<FeedBindingEvidence>
 
     /**
      * Begins off-main resolution and package-change invalidation in [scope].

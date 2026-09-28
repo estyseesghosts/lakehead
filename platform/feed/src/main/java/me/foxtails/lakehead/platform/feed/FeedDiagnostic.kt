@@ -94,8 +94,10 @@ enum class FeedDiagnosticStatus(val stage: FeedDiagnosticStage) {
  *
  * Never carries exception text, a stack trace or a `Throwable`: probes that throw are
  * classified into one of these codes and the original failure is dropped, so logging a
- * diagnostic cannot leak redacted detail. D2 defines the discovery causes; later slices
- * extend this list for their own stages rather than reusing a discovery cause.
+ * diagnostic cannot leak redacted detail. D2 defines the discovery causes; D3 adds the
+ * resolution/bind/connection causes for its own stages rather than reusing a discovery
+ * cause. In particular a bind-time `SecurityException` is [BIND_DENIED] (stage BIND),
+ * never the discovery [QUERY_DENIED] (stage DISCOVERY).
  */
 enum class FeedDiagnosticCause {
     /** Every allowlisted package answered confirmed-absent; no failure occurred. */
@@ -112,7 +114,75 @@ enum class FeedDiagnosticCause {
 
     /** The probe failed for a non-security reason; the failure detail is redacted. */
     PROBE_FAILED,
+
+    /** Preflight miss: the resolved exact component no longer publishes the service. */
+    TARGET_NOT_RESOLVABLE,
+
+    /** Preflight denied by the platform; resolvability is unknown, detail redacted. */
+    RESOLUTION_DENIED,
+
+    /** Preflight failed for a non-security reason; resolvability unknown, redacted. */
+    RESOLUTION_FAILED,
+
+    /** `bindService` returned false: the bind was declined, not connected. */
+    BIND_DECLINED,
+
+    /** `bindService` threw `SecurityException`; detail redacted, never REJECTED. */
+    BIND_DENIED,
+
+    /** `bindService` threw for a non-security reason; detail redacted. */
+    BIND_ERROR,
+
+    /** `onServiceConnected` named a package/class other than the attempted target. */
+    UNEXPECTED_COMPONENT,
+
+    /** `onNullBinding` arrived: the service returned a null binder. */
+    NULL_BINDING,
+
+    /** A matching connection later reported `onServiceDisconnected`. */
+    SERVICE_DISCONNECTED,
+
+    /** A matching connection later reported `onBindingDied` or binder death. */
+    BINDER_DIED,
 }
+
+/**
+ * Resolvability of one [FeedProviderTarget] as seen by the bind preflight.
+ *
+ * Framework-free so the gateway can record it in [FeedBindingEvidence] and tests can
+ * script it without touching `PackageManager`: `RESOLVABLE` means the exact component
+ * still publishes the overlay service, `NOT_RESOLVABLE` means it verifiably does not,
+ * and the `UNKNOWN_*` values mean the check itself could not answer (denied vs failed).
+ */
+enum class FeedTargetResolvability {
+    RESOLVABLE,
+    NOT_RESOLVABLE,
+    UNKNOWN_DENIED,
+    UNKNOWN_FAILED,
+}
+
+/**
+ * Per-attempt binding evidence for the current (or most recent) bind.
+ *
+ * Every field is a stable string, boolean or enum — no framework objects, no binder,
+ * no throwable text — so the snapshot can be held in state and logged. The fields
+ * separate the four D3 steps: [attempted] (a bind was tried for [target] at [epoch]),
+ * [resolvability] (preflight verdict), [accepted] (`bindService` true — acceptance,
+ * never proof of a binder), [connected] (a matching binder was installed and
+ * correlated with the acceptance), [active] (the bridge is currently live).
+ * `accepted && !connected` is the expected transient after a successful bind and
+ * before the matching `onServiceConnected`; it is not a failure and carries no new
+ * status or timeout.
+ */
+data class FeedBindingEvidence(
+    val target: FeedProviderTarget? = null,
+    val attempted: Boolean = false,
+    val resolvability: FeedTargetResolvability? = null,
+    val accepted: Boolean = false,
+    val connected: Boolean = false,
+    val active: Boolean = false,
+    val epoch: Long = 0,
+)
 
 /**
  * Per-package visibility evidence behind a discovery diagnostic.
