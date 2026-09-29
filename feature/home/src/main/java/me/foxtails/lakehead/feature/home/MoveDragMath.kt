@@ -4,7 +4,17 @@ import me.foxtails.lakehead.core.model.LogicalPosition
 import me.foxtails.lakehead.core.grid.GridRules
 import kotlin.math.floor
 
-/** Signed cell coordinates produced while a move is still being evaluated. */
+/**
+ * Signed cell coordinates produced while a move is still being evaluated.
+ *
+ * Future MOVE mapping is described by one immutable `MoveCoordinateFrame`,
+ * frozen for the structural geometry of the gesture. Its fields are exactly
+ * `frozenScrollBaselinePx`, `originXPx`, `originYPx`, `rowOrigin`,
+ * `columnStridePx`, `rowStridePx`, `columns`, `span`, `legalityRows`,
+ * `grabOffsetXPx`, and `grabOffsetYPx`. The mapper receives that frame, the
+ * pointer, and current scroll; scroll contributes as
+ * `frozenScrollBaselinePx + (currentScroll - frozenScrollBaselinePx)`.
+ */
 data class MoveCellCandidate(
     val column: Long,
     val row: Long,
@@ -92,7 +102,16 @@ object MoveDragMath {
         return MoveCellResult.Valid(candidate, position)
     }
 
-    /** Convert pixels and apply grid/span bounds without clamping. */
+/**
+ * Convert pixels to a fitting grid/span candidate. The fitting span
+ * candidate is clamped to
+ * `[0, columns - span.columns] x [0, legalityRows - span.rows]`.
+ *
+ * `OUT_OF_BOUNDS` is returned only when the span cannot fit at all (for
+ * example, 4x2 in fewer than 4 columns or fewer than 2 legal rows).
+ * There is no free-cell search. Collision at the clamped location remains
+ * a collision.
+ */
     fun cellForPixel(
         xPx: Float,
         yPx: Float,

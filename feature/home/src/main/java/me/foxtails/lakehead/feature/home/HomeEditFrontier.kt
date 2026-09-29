@@ -20,13 +20,22 @@ import me.foxtails.lakehead.core.model.LogicalPosition
  */
 object HomeEditFrontier {
     /** Bounded working margin appended to the normal boundary at MOVE entry. */
-    const val MARGIN_ROWS: Long = 4L
+// Budget belongs to the MOVE ticker generation; the frontier is only the
+// legality extent. A step request advances it by one margin per call, while
+// candidate remapping remains a separate post-step operation.
+const val MARGIN_ROWS: Long = 4L
 
     /** Edge-proximity band for auto-scroll, in dp. */
-    const val AUTO_SCROLL_EDGE_DP: Int = 64
+    const val AUTO_SCROLL_EDGE_DP: Int = 32
 
-    /** Auto-scroll ticker period in milliseconds (stationary-hold continuation). */
-    const val AUTO_SCROLL_TICK_MS: Long = 80L
+    /** Dwell on edge entry before the first auto-scroll step, in milliseconds. */
+    const val AUTO_SCROLL_DWELL_MS: Long = 200L
+
+    /** Fastest auto-scroll interval (deep at the viewport edge), in milliseconds. */
+    const val AUTO_SCROLL_MIN_INTERVAL_MS: Long = 120L
+
+    /** Slowest auto-scroll interval (at the inner band boundary), in milliseconds. */
+    const val AUTO_SCROLL_MAX_INTERVAL_MS: Long = 300L
 }
 
 /**
@@ -238,6 +247,37 @@ fun autoScrollStepPx(rowStridePx: Long): Int {
 }
 
 /**
+ * Proximity-scaled auto-scroll interval for a viewport-local pointer Y.
+ *
+ * Returns null when [pointerYPx] is outside both edge bands ([autoScrollZone]
+ * reports NONE). Inside a band the interval scales linearly with depth: the
+ * inner boundary scrolls slowest ([HomeEditFrontier.AUTO_SCROLL_MAX_INTERVAL_MS])
+ * and the viewport edge scrolls fastest
+ * ([HomeEditFrontier.AUTO_SCROLL_MIN_INTERVAL_MS]). Top and bottom are
+ * symmetric for equal depths. Pointers past the viewport edge clamp to the
+ * fastest interval. Pure, framework-free.
+ */
+fun autoScrollIntervalMs(
+    pointerYPx: Float,
+    viewportHeightPx: Int,
+    edgePx: Int,
+): Long? {
+    require(viewportHeightPx >= 0) { "viewportHeightPx must be non-negative" }
+    require(edgePx > 0) { "edgePx must be positive" }
+    val zone = autoScrollZone(pointerYPx, viewportHeightPx, edgePx)
+    if (zone == AutoScrollZone.NONE) return null
+    val depthPx = when (zone) {
+        AutoScrollZone.TOP -> edgePx.toFloat() - pointerYPx
+        AutoScrollZone.BOTTOM -> pointerYPx - (viewportHeightPx - edgePx).toFloat()
+        AutoScrollZone.NONE -> return null
+    }.coerceIn(0f, edgePx.toFloat())
+    val fraction = depthPx / edgePx.toFloat()
+    val max = HomeEditFrontier.AUTO_SCROLL_MAX_INTERVAL_MS
+    val min = HomeEditFrontier.AUTO_SCROLL_MIN_INTERVAL_MS
+    return (max - fraction * (max - min).toFloat()).toLong()
+}
+
+/**
  * P1 stationary-hold ticker remap: maps the retained viewport-local pointer
  * ([pointerXPx]/[pointerYPx]) with the CURRENT [scrollPx] (post-step actual)
  * and folds it into [session] via MOVE validity (`core:grid` owns legality).
@@ -248,6 +288,10 @@ fun autoScrollStepPx(rowStridePx: Long): Int {
  * framework-free; the drag loop's per-event path stays authoritative while the
  * pointer moves.
  */
+// This is a step-request remap, not ticker-budget accounting: the budget is
+// local to the LaunchedEffect MOVE generation; successful ScrollState changes
+// count in either direction including exits/re-entry, no-ops are free, and
+// the cap stops only the ticker.
 fun remapMoveCandidateAfterScroll(
     session: HomeEditSession,
     pointerXPx: Float,

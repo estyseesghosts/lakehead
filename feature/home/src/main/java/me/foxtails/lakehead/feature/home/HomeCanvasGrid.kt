@@ -309,7 +309,10 @@ internal fun HomeCanvasGrid(
             // second placement engine) so no recomposition round-trip can
             // leave release holding the pre-scroll cell while the pointer is
             // held stationary with no move events.
-            val liveSessionRef = remember { LiveEditSessionRef(HomeEditSession.Idle) }
+ // The live holder owns the synchronous MOVE session/frame handoff. The
+ // frame is transient metadata beside MOVE state; moveScrollBaseline is only
+ // auto-scroll accounting and never a second coordinate frame.
+ val liveSessionRef = remember { LiveEditSessionRef(HomeEditSession.Idle) }
             // W1 recess/select/exit: transient Normal|Editing(selectedId?) owned by
             // HomeInteractionController (pure, never modified in place). Hoisted
             // alongside editSession inside key(requestedHomeId) so a home switch
@@ -606,13 +609,16 @@ internal fun HomeCanvasGrid(
                     editFrontier = null
                 }
             }
-            // B3 edge auto-scroll continuation for a stationary hold: while a
-            // MOVE drag reports its pointer inside an edge band, advance one row
-            // stride per tick (extending the frontier via grid policy before
-            // scrolling down; the top is limited by the range). The per-frame
-            // drag loop below steps on the same edge value while the pointer
-            // moves; this ticker covers a held pointer with no move events.
-            // Scrolling never calls onMoveTile: release stays the sole commit.
+            // B3 edge auto-scroll continuation for a stationary hold (the ONLY
+            // scroll driver): while a MOVE drag reports its pointer inside an
+            // edge band, advance one row stride per proximity-scaled interval
+            // (extending the frontier via grid policy before scrolling down;
+            // the top is limited by the range). Edge entry dwells 200ms before
+            // the first step; the interval scales from 300ms at the inner band
+            // boundary down to 120ms at the viewport edge. The drag event loop
+            // never scrolls — it only retains the pointer and maps candidates
+            // with the current scroll. Scrolling never calls onMoveTile:
+            // release stays the sole commit.
             val autoScrollEdgePx = with(density) {
                 HomeEditFrontier.AUTO_SCROLL_EDGE_DP.dp.roundToPx()
             }.coerceAtLeast(1)
@@ -625,32 +631,88 @@ internal fun HomeCanvasGrid(
             // holders (width adaptation mid-drag must remap with the live
             // stride, not the entry stride).
             val tickGeometryState = rememberUpdatedState(geometry)
-            val tickOriginXState = rememberUpdatedState(originX)
+ // Structural re-freeze inputs are originX/originY, rowOrigin, both strides,
+ // columns, span, and legalityRows. Scroll alone is not structural. Re-freeze
+ // snapshots new geometry/bounds and actual scroll atomically, retaining the
+ // latest pointer and captured grab offsets; it replaces frame and session
+ // snapshots atomically and remaps that same pointer. Blocked/OOB remaps
+ // preserve last-valid state, without down-position substitution or zeroing.
+ // INTENDED post-M1: tickOriginYLive is render-only; M1 removes it from the
+ // mapper inputs. CURRENTLY it still feeds the mapper.
+ val tickOriginXState = rememberUpdatedState(originX)
             val tickRowOriginState = rememberUpdatedState(rowOrigin)
-            // The G5 animated origin is declared below this effect; mirror it
-            // into live state (refreshed per frame below) so the ticker
-            // remaps with the current frame instead of a frozen value.
+            // INTENDED post-M1: the G5 animated origin is render-only.
+            // CURRENTLY it is mirrored into live state (refreshed per frame
+            // below) so the ticker remaps with the current frame.
             var tickOriginYLive by remember { mutableStateOf(0L) }
             val tickColumnsState = rememberUpdatedState(columns)
             val tickRowsState = rememberUpdatedState(rows)
             val tickStrideState = rememberUpdatedState(rowStridePx)
             val moveTickItemId = if (active?.mode == EditMode.MOVE) active.itemId else null
-            LaunchedEffect(moveTickItemId) {
+ // One MOVE generation budgets eight successful ScrollState changes in
+ // either direction, including exits and re-entry. No-ops are free; the cap
+ // stops the ticker, not the drag; lift/cancel ends the generation.
+ LaunchedEffect(moveTickItemId) {
                 if (moveTickItemId == null) return@LaunchedEffect
+                var dwellZone = AutoScrollZone.NONE
                 while (true) {
-                    delay(HomeEditFrontier.AUTO_SCROLL_TICK_MS)
-                    val pointerY = moveEdgeYPx ?: continue
-                    val pointerX = moveEdgeXPx ?: continue
+                    val entryY = moveEdgeYPx
+                    val entryX = moveEdgeXPx
+                    val entrySession = tickSessionState.value as? HomeEditSession.Active
+                        ?: return@LaunchedEffect
+                    if (entrySession.mode != EditMode.MOVE || entrySession.itemId != moveTickItemId) {
+                        return@LaunchedEffect
+                    }
+                    val entryHeight = viewportHeightSnapshot.value
+                    val entryZone = if (entryY == null || entryX == null) {
+                        AutoScrollZone.NONE
+                    } else {
+                        autoScrollZone(entryY, entryHeight, autoScrollEdgePx)
+                    }
+                    if (entryZone == AutoScrollZone.NONE) {
+                        dwellZone = AutoScrollZone.NONE
+                        delay(HomeEditFrontier.AUTO_SCROLL_MAX_INTERVAL_MS)
+                        continue
+                    }
+                    if (entryZone != dwellZone) {
+                        // Edge entry (or zone change): dwell, then recheck the
+                        // active drag + zone before stepping. A zone change or
+                        // drag end during the dwell cancels the pending step.
+                        dwellZone = entryZone
+                        delay(HomeEditFrontier.AUTO_SCROLL_DWELL_MS)
+                        continue
+                    }
+                    // Sustained hold in the same zone past the dwell: recheck
+                    // the live drag + zone immediately before each single-row
+                    // step so a lift or zone exit cancels instead of scrolling.
+                    val pointerY = moveEdgeYPx
+                    val pointerX = moveEdgeXPx
                     val tickSession = tickSessionState.value as? HomeEditSession.Active
                         ?: return@LaunchedEffect
                     if (tickSession.mode != EditMode.MOVE || tickSession.itemId != moveTickItemId) {
                         return@LaunchedEffect
                     }
+                    if (pointerY == null || pointerX == null) {
+                        dwellZone = AutoScrollZone.NONE
+                        delay(HomeEditFrontier.AUTO_SCROLL_MAX_INTERVAL_MS)
+                        continue
+                    }
                     val snapshotLoaded = loadedSnapshot.value
                     val snapshotHeight = viewportHeightSnapshot.value
                     val snapshotStride = tickStrideState.value
                     val zone = autoScrollZone(pointerY, snapshotHeight, autoScrollEdgePx)
-                    if (zone == AutoScrollZone.NONE) continue
+                    if (zone == AutoScrollZone.NONE) {
+                        dwellZone = AutoScrollZone.NONE
+                        delay(HomeEditFrontier.AUTO_SCROLL_MAX_INTERVAL_MS)
+                        continue
+                    }
+                    if (zone != dwellZone) {
+                        // Zone changed between the dwell and the step:
+                        // cancel the pending step and dwell in the new zone.
+                        dwellZone = zone
+                        delay(HomeEditFrontier.AUTO_SCROLL_DWELL_MS)
+                        continue
+                    }
                     if (zone == AutoScrollZone.BOTTOM) {
                         val grown = editFrontier?.let { boundary ->
                             advanceFrontierForMove(
@@ -759,6 +821,16 @@ internal fun HomeCanvasGrid(
                             }
                         }
                     }
+                    // One row per proximity-scaled interval: slower at the
+                    // inner boundary, faster deep at the edge. Rechecks the
+                    // active drag + zone at the top before the next step.
+                    delay(
+                        autoScrollIntervalMs(
+                            pointerY,
+                            snapshotHeight,
+                            autoScrollEdgePx,
+                        ) ?: HomeEditFrontier.AUTO_SCROLL_MAX_INTERVAL_MS,
+                    )
                 }
             }
             // G5: single animated grid origin. One Animatable moves the whole
@@ -1116,11 +1188,10 @@ internal fun HomeCanvasGrid(
                     val selectedDrag = editingAtDown != null &&
                         (downTile != null || selectedResize)
                     val dragTile = downTile ?: selectedTile?.takeIf { selectedResize }
-                    // A2-S1 armed snapshot: resize is armed only for the down-selected
-                    // tile (arm owned by the selection). Captured once at down alongside
-                    // selected+arrow-hit; the slop wait below never refreshes it, and
-                    // the past-slop route is decided once from this snapshot with no
-                    // mid-gesture switch.
+                    // A2-S1: capture the touch target/zone at down. Sample resize
+                    // arm when slop is crossed, then fix the route: armed handle
+                    // => RESIZE, unarmed handle => NONE, body => MOVE. The
+                    // tap-only path remains unchanged.
                     val armedAtDown = snapshotResizeArmed(interactionAtDown, dragTile?.itemId)
                     var currentSession: HomeEditSession = sessionState.value
                     var sessionAtDown = currentSession as? HomeEditSession.Active
@@ -1169,7 +1240,10 @@ internal fun HomeCanvasGrid(
                             slop = nextChange
                         }
                     }
-                    val slopChange = slop ?: return@awaitEachGesture
+ // Sample arm at slop: armed handle => RESIZE, unarmed handle => NONE,
+ // body => MOVE. The target/zone captured at down fixes the route once;
+ // it is never re-tested mid-gesture.
+ val slopChange = slop ?: return@awaitEachGesture
                     // A3 transfer: a past-slop drag on a non-selected edit tile
                     // moves that tile and transfers selection to it. Below slop
                     // this block never runs, so taps keep the child-tap path
@@ -1410,7 +1484,9 @@ internal fun HomeCanvasGrid(
                                 isVisible = isVisibleState.value,
                                 completedByUp = resizeCompletedByUp,
                             )
-                            if (final != null && commitSpan != null) {
+ // Resize release is exclusively onResizeTile. Retain
+ // Editing(selectedId, resizeArmed = true) after this callback.
+ if (final != null && commitSpan != null) {
                                 onResizeTile(final.itemId, commitSpan)
                                 // Keep session active in MOVE with the committed span as origin.
                                 currentSession = HomeEditSession.Active(
@@ -1484,7 +1560,9 @@ internal fun HomeCanvasGrid(
                         // down hit-test and grab offsets stay frozen at
                         // gestureScrollYPx. Legality uses the transient frontier
                         // bound (moveRows), never the normal bound.
-                        val slopResult = MoveDragMath.cellForPixel(
+ // Pointer events and ticker remaps use the same frame-based mapper. Only
+ // current scroll is live; structural inputs stay frozen until re-freezed.
+ val slopResult = MoveDragMath.cellForPixel(
                             xPx = slopChange.position.x,
                             yPx = slopChange.position.y,
                             cellSizePx = geometry.cellSizePx.toFloat(),
@@ -1561,82 +1639,18 @@ internal fun HomeCanvasGrid(
                             // progress is never overwritten by a stale local.
                             currentSession = liveSessionRef.session
                             if (currentSession !is HomeEditSession.Active) break
-                            // B3 edge auto-scroll (MOVE only): extend the frontier
-                            // via grid policy before scrolling down; the top is
-                            // limited by the range. Steps scroll the ScrollState
-                            // directly and re-baseline as auto-scroll-owned.
+                            // B3 stationary ticker owns all auto-scroll: this loop
+                            // only retains the latest viewport-local pointer for
+                            // the ticker and maps the candidate with the current
+                            // scroll. No per-event edge step, frontier growth,
+                            // or raw dispatch here (prevents event+ticker
+                            // double-step runaway).
                             moveEdgeXPx = moveChange.position.x
                             moveEdgeYPx = moveChange.position.y
-                            var scrollForMap = scrollState.value
-                            val edgeZone = autoScrollZone(
-                                moveChange.position.y,
-                                availableHeightPx,
-                                autoScrollEdgePx,
-                            )
-                            if (edgeZone == AutoScrollZone.BOTTOM) {
-                                val probeResult = MoveDragMath.cellForPixel(
-                                    xPx = moveChange.position.x,
-                                    yPx = moveChange.position.y,
-                                    cellSizePx = geometry.cellSizePx.toFloat(),
-                                    columnGapPx = geometry.columnGapPx.toFloat(),
-                                    rowGapPx = geometry.rowGapPx.toFloat(),
-                                    windowFirstRow = rowOrigin,
-                                    originXPx = originX.toFloat(),
-                                    originYPxPx = originYPx.toFloat(),
-                                    scrollYPx = scrollForMap.toFloat(),
-                                    grabOffsetXPx = grabOffsetXPx,
-                                    grabOffsetYPx = grabOffsetYPx,
-                                    columns = columns,
-                                    rows = moveLegalityRows(rows, editFrontier).toLong(),
-                                    spanColumns = (currentSession as? HomeEditSession.Active)?.candidateSpan?.columns ?: 1,
-                                    spanRows = (currentSession as? HomeEditSession.Active)?.candidateSpan?.rows ?: 1,
-                                )
-                                val liveSession = currentSession as? HomeEditSession.Active
-                                val grown = if (liveSession != null && probeResult is MoveCellResult.Valid) {
-                                    advanceFrontierForMove(
-                                        editFrontier ?: initEditFrontier(
-                                            committedExtent,
-                                            availableHeightPx,
-                                            rowStridePx,
-                                        ),
-                                        probeResult.position,
-                                        liveSession.candidateSpan.rows,
-                                    )
-                                } else {
-                                    editFrontier
-                                }
-                                if (grown != null) {
-                                    editFrontier = grown
-                                    val editMax = editScrollMaxPx(
-                                        layoutRows = editLayoutRows(committedExtent, grown),
-                                        cellSizePx = geometry.cellSizePx,
-                                        rowGapPx = geometry.rowGapPx,
-                                        viewportHeightPx = availableHeightPx,
-                                    )
-                                    val target = (scrollForMap + autoScrollStepPx(rowStridePx))
-                                        .coerceAtMost(editMax)
-                                    // Synchronous raw dispatch: scrollTo is
-                                    // unavailable in the restricted
-                                    // pointer-input scope, and the immediate
-                                    // mutation keeps the steal baseline exact.
-                                    val delta = (target - scrollForMap).toFloat()
-                                    if (delta != 0f) {
-                                        scrollState.dispatchRawDelta(delta)
-                                        moveScrollBaseline = scrollState.value
-                                        scrollForMap = scrollState.value
-                                    }
-                                }
-                            } else if (edgeZone == AutoScrollZone.TOP) {
-                                val target = (scrollForMap - autoScrollStepPx(rowStridePx))
-                                    .coerceAtLeast(0)
-                                val delta = (target - scrollForMap).toFloat()
-                                if (delta != 0f) {
-                                    scrollState.dispatchRawDelta(delta)
-                                    moveScrollBaseline = scrollState.value
-                                    scrollForMap = scrollState.value
-                                }
-                            }
-                            val result = MoveDragMath.cellForPixel(
+                            val scrollForMap = scrollState.value
+ // Shared mapper intent: this event path must match stationary ticker remap;
+ // do not introduce a second pointer-to-cell calculation.
+ val result = MoveDragMath.cellForPixel(
                                 xPx = moveChange.position.x,
                                 yPx = moveChange.position.y,
                                 cellSizePx = geometry.cellSizePx.toFloat(),
@@ -2077,6 +2091,8 @@ internal fun retargetTransferSession(
  * Plain holder, never a second placement engine; reset per home via
  * `key(requestedHomeId)` and cleared on every cancel/hide path.
  */
+// Session and coordinate-frame metadata are handed off atomically through
+// this synchronous holder; release must never read a stale Compose snapshot.
 internal class LiveEditSessionRef(var session: HomeEditSession)
 
 /**

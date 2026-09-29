@@ -41,6 +41,7 @@ sealed interface HomeInteractionController {
      *   Owned by [selectedId]: every transfer, long-press retarget, unpin and exit
      *   clears it, and body-drag start clears it. Transient only, never persisted.
      */
+    /** `resizeArmed` is transient selection state, not a placement mutation. */
     data class Editing(
         val selectedId: ItemId?,
         val resizeArmed: Boolean = false,
@@ -95,6 +96,8 @@ fun HomeInteractionController.armResize(): HomeInteractionController {
  * Idempotent when already disarmed; no-op in [Normal]. Used when a body-drag
  * starts (move keeps the snapshotted span) and when resize ends.
  */
+// R2: route transfer no longer calls disarmResize. Resize release retains
+// Editing(selectedId, resizeArmed = true); the arm is transient state.
 fun HomeInteractionController.disarmResize(): HomeInteractionController {
     if (this !is HomeInteractionController.Editing) return this
     if (!resizeArmed) return this

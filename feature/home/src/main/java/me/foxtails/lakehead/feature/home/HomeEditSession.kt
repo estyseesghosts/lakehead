@@ -12,6 +12,11 @@ import me.foxtails.lakehead.core.model.LogicalSpan
  * Unified transient editing session for move and resize. Pure framework-free state machine.
  * No persistence, no Android imports.
  *
+ * The session owns logical edit state only: item, origin, candidate,
+ * validity, mode, and last-valid values. MOVE coordinate-frame metadata is
+ * separate transient gesture state owned beside the live session; it is not
+ * persisted and is not part of the logical placement/session contract.
+ *
  * States: [Idle] or [Active] (with [EditMode.MOVE] or [EditMode.RESIZE]).
  */
 sealed interface HomeEditSession {
@@ -105,8 +110,11 @@ internal fun HomeEditSession.enterSelectedDrag(
 }
 
 /**
- * Switch to resize mode when the resize affordance was armed at pointer-down.
- * No-op if not Active, already in resize mode, or the affordance was not armed.
+ * Switch to resize mode using the resize-arm sample taken when touch slop is
+ * crossed. The touch target/zone was captured at down; routing is fixed once:
+ * an armed handle enters RESIZE, an unarmed handle enters no drag route, and
+ * a body enters MOVE. The tap-only path is unchanged.
+ * No-op if not Active, already in resize mode, or the supplied sample is false.
  */
 fun HomeEditSession.beginResize(armedAtDown: Boolean): HomeEditSession {
     val active = this as? HomeEditSession.Active ?: return this
@@ -126,7 +134,7 @@ fun HomeEditSession.beginResize(armedAtDown: Boolean): HomeEditSession {
 
 /**
  * Compatibility entry point for callers that have already performed the
- * pointer-down arm check. New callers should pass [armedAtDown] explicitly.
+ * slop-time arm sample. New callers should pass [armedAtDown] explicitly.
  */
 fun HomeEditSession.beginResize(): HomeEditSession = beginResize(armedAtDown = true)
 
