@@ -2,18 +2,27 @@ package me.foxtails.lakehead.feature.home
 
 import me.foxtails.lakehead.core.model.LogicalPosition
 import me.foxtails.lakehead.core.grid.GridRules
+import me.foxtails.lakehead.core.grid.GridSpan
 import kotlin.math.floor
 
+data class MoveCoordinateFrame(
+    val frozenScrollBaselinePx: Float,
+    val originXPx: Float,
+    val originYPx: Float,
+    val rowOrigin: Long,
+    val columnStridePx: Float,
+    val rowStridePx: Float,
+    val columns: Int,
+    val span: GridSpan,
+    val legalityRows: Long,
+    val grabOffsetXPx: Float,
+    val grabOffsetYPx: Float,
+)
+
 /**
- * Signed cell coordinates produced while a move is still being evaluated.
+ * Signed cell coordinates produced while a move is being evaluated.
  *
- * Future MOVE mapping is described by one immutable `MoveCoordinateFrame`,
- * frozen for the structural geometry of the gesture. Its fields are exactly
- * `frozenScrollBaselinePx`, `originXPx`, `originYPx`, `rowOrigin`,
- * `columnStridePx`, `rowStridePx`, `columns`, `span`, `legalityRows`,
- * `grabOffsetXPx`, and `grabOffsetYPx`. The mapper receives that frame, the
- * pointer, and current scroll; scroll contributes as
- * `frozenScrollBaselinePx + (currentScroll - frozenScrollBaselinePx)`.
+ * The mapper keeps the frame's structural geometry stable for the gesture.
  */
 data class MoveCellCandidate(
     val column: Long,
@@ -51,6 +60,7 @@ object MoveDragMath {
         cellSizePx: Float,
         columnGapPx: Float,
         rowGapPx: Float,
+        rowCellSizePx: Float = cellSizePx,
         windowFirstRow: Long,
         originXPx: Float = 0f,
         originYPxPx: Float = 0f,
@@ -60,7 +70,7 @@ object MoveDragMath {
         grabOffsetYPx: Float = 0f,
     ): MoveCellCandidate {
         val cellWidth = cellSizePx + columnGapPx
-        val cellHeight = cellSizePx + rowGapPx
+        val cellHeight = rowCellSizePx + rowGapPx
         val contentX = xPx + scrollXPx - grabOffsetXPx
         val contentY = yPx + scrollYPx - grabOffsetYPx
         val column = if (cellWidth > 0f) {
@@ -113,6 +123,45 @@ object MoveDragMath {
  * a collision.
  */
     fun cellForPixel(
+        frame: MoveCoordinateFrame,
+        pointerXPx: Float,
+        pointerYPxViewport: Float,
+        currentScrollPx: Float,
+    ): MoveCellResult {
+        if (frame.span.columns > frame.columns || frame.span.rows.toLong() > frame.legalityRows) {
+            return MoveCellResult.Rejected(GridRules.Rejection.OUT_OF_BOUNDS)
+        }
+        val effectiveScrollPx =
+            frame.frozenScrollBaselinePx + (currentScrollPx - frame.frozenScrollBaselinePx)
+        val candidate = rawCandidateForPixel(
+            xPx = pointerXPx,
+            yPx = pointerYPxViewport,
+            cellSizePx = frame.columnStridePx,
+            rowCellSizePx = frame.rowStridePx,
+            columnGapPx = 0f,
+            rowGapPx = 0f,
+            windowFirstRow = frame.rowOrigin,
+            originXPx = frame.originXPx,
+            originYPxPx = frame.originYPx,
+            scrollXPx = 0f,
+            scrollYPx = effectiveScrollPx,
+            grabOffsetXPx = frame.grabOffsetXPx,
+            grabOffsetYPx = frame.grabOffsetYPx,
+        )
+        val clamped = MoveCellCandidate(
+            candidate.column.coerceIn(0L, (frame.columns - frame.span.columns).toLong()),
+            candidate.row.coerceIn(0L, frame.legalityRows - frame.span.rows),
+        )
+        return resultForCandidate(
+            candidate = clamped,
+            columns = frame.columns,
+            rows = frame.legalityRows,
+            spanColumns = frame.span.columns,
+            spanRows = frame.span.rows,
+        )
+    }
+
+    fun cellForPixel(
         xPx: Float,
         yPx: Float,
         cellSizePx: Float,
@@ -150,31 +199,5 @@ object MoveDragMath {
         spanRows = spanRows,
     )
 
-     /*
-      * The raw helper is intentionally the only other pixel mapping implementation.
-       * Keep it internal to prevent production callers from bypassing validation;
-       * callers should use cellForPixel, which validates bounds and returns a
-       * MoveCellResult rather than an unchecked LogicalPosition.
-     * @param xPx horizontal pixel offset from the grid's left edge
-     * @param yPx vertical pixel offset from the grid's top edge (within the visible window)
-     * @param cellSizePx cell size in pixels (from SquareCellGeometry)
-     * @param columnGapPx gap between columns in pixels
-     * @param rowGapPx gap between rows in pixels
-     * @param windowFirstRow the first visible row index (for windowed grids)
-     * @param originXPx horizontal pixel origin of column 0's left edge (caller-centered
-     * remainder split); defaults to 0 for edge-to-edge callers
-     * @param originYPxPx vertical pixel origin of the signed renderer frame (G2 rest
-     * `gridOriginY` in rebased coordinates); defaults to 0 for callers without rest offset
-     * @param scrollXPx horizontal content scroll in pixels. The value is added to the
-     * viewport-local pointer position; defaults to 0.
-     * @param scrollYPx vertical content scroll in pixels. The value is added to the
-     * viewport-local pointer position; defaults to 0.
-     * @param grabOffsetXPx horizontal distance from the tile origin to the pointer at
-     * drag start; defaults to 0.
-     * @param grabOffsetYPx vertical distance from the tile origin to the pointer at
-     * drag start; defaults to 0.
-      * @return MoveCellResult.Valid for an in-bounds candidate, or
-      * MoveCellResult.Rejected(GridRules.Rejection.OUT_OF_BOUNDS) otherwise,
-      * including negative coordinates
-      */
+     /* Raw pixel mapping is used by validated cellForPixel overloads. */
  }

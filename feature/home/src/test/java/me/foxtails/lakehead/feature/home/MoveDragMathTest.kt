@@ -1,6 +1,7 @@
 package me.foxtails.lakehead.feature.home
 
 import me.foxtails.lakehead.core.grid.GridRules
+import me.foxtails.lakehead.core.grid.GridSpan
 import me.foxtails.lakehead.core.model.LogicalPosition
 import org.junit.Assert.assertEquals
 import org.junit.Test
@@ -8,6 +9,26 @@ import org.junit.Test
 class MoveDragMathTest {
     private val size = 48f
     private val gap = 4f
+
+    private fun frame(
+        span: GridSpan = GridSpan(1, 1),
+        baseline: Float = 0f,
+        legalityRows: Long = 20,
+        rowOrigin: Long = 0,
+        rowStride: Float = size + gap,
+    ) = MoveCoordinateFrame(
+        frozenScrollBaselinePx = baseline,
+        originXPx = 0f,
+        originYPx = 0f,
+        rowOrigin = rowOrigin,
+        columnStridePx = size + gap,
+        rowStridePx = rowStride,
+        columns = 6,
+        span = span,
+        legalityRows = legalityRows,
+        grabOffsetXPx = 0f,
+        grabOffsetYPx = 0f,
+    )
 
     private fun result(
         x: Float,
@@ -71,6 +92,95 @@ class MoveDragMathTest {
         assertEquals(
             MoveCellResult.Valid(MoveCellCandidate(3, 4), LogicalPosition(3, 4)),
             result(104f, 156f, scrollX = 52f, scrollY = 52f),
+        )
+    }
+
+    @Test
+    fun frozenFrameUsesLiveScrollDeltaForRow() {
+        assertEquals(
+            MoveCellResult.Valid(MoveCellCandidate(0, 3), LogicalPosition(0, 3)),
+            MoveDragMath.cellForPixel(frame(baseline = 0f), 0f, 104f, 52f),
+        )
+    }
+
+    @Test
+    fun fittingSpanClampsAtRightEdge() {
+        assertEquals(
+            MoveCellResult.Valid(MoveCellCandidate(2, 0), LogicalPosition(2, 0)),
+            MoveDragMath.cellForPixel(frame(span = GridSpan(4, 2)), 5 * 52f, 0f, 0f),
+        )
+    }
+
+    @Test
+    fun fittingSpanClampsAtBottomEdge() {
+        assertEquals(
+            MoveCellResult.Valid(MoveCellCandidate(0, 2), LogicalPosition(0, 2)),
+            MoveDragMath.cellForPixel(
+                frame(span = GridSpan(1, 2), legalityRows = 4),
+                0f,
+                1000f,
+                0f,
+            ),
+        )
+    }
+
+    @Test
+    fun unfittableHeightIsOutOfBounds() {
+        assertEquals(
+            MoveCellResult.Rejected(GridRules.Rejection.OUT_OF_BOUNDS),
+            MoveDragMath.cellForPixel(
+                frame(span = GridSpan(1, 2), legalityRows = 1),
+                0f,
+                0f,
+                0f,
+            ),
+        )
+    }
+
+    @Test
+    fun nonzeroRowOriginIsNotAddedTwice() {
+        assertEquals(
+            MoveCellResult.Valid(MoveCellCandidate(0, 6), LogicalPosition(0, 6)),
+            MoveDragMath.cellForPixel(
+                frame(rowOrigin = 5),
+                0f,
+                52f,
+                0f,
+            ),
+        )
+    }
+
+    @Test
+    fun rowMappingUsesRowStride() {
+        assertEquals(
+            MoveCellResult.Valid(MoveCellCandidate(0, 1), LogicalPosition(0, 1)),
+            MoveDragMath.cellForPixel(
+                frame(rowStride = 80f),
+                0f,
+                104f,
+                0f,
+            ),
+        )
+    }
+
+    @Test
+    fun unfittableSpanIsOutOfBounds() {
+        assertEquals(
+            MoveCellResult.Rejected(GridRules.Rejection.OUT_OF_BOUNDS),
+            MoveDragMath.cellForPixel(frame(span = GridSpan(7, 2)), 0f, 0f, 0f),
+        )
+    }
+
+    @Test
+    fun scrollOnlyChangeRemapsWithoutChangingFrame() {
+        val frozen = frame(baseline = 0f)
+        assertEquals(
+            MoveCellResult.Valid(MoveCellCandidate(0, 2), LogicalPosition(0, 2)),
+            MoveDragMath.cellForPixel(frozen, 0f, 104f, 0f),
+        )
+        assertEquals(
+            MoveCellResult.Valid(MoveCellCandidate(0, 3), LogicalPosition(0, 3)),
+            MoveDragMath.cellForPixel(frozen, 0f, 104f, 52f),
         )
     }
 }
