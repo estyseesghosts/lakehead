@@ -1,5 +1,6 @@
 package me.foxtails.lakehead.feature.home
 
+import me.foxtails.lakehead.core.grid.GridSpan
 import me.foxtails.lakehead.core.grid.GridVerticalExtent
 import me.foxtails.lakehead.core.grid.GridVerticalLayout
 import me.foxtails.lakehead.core.model.AppIdentity
@@ -200,40 +201,6 @@ class HomeEditFrontierTest {
         assertEquals(20L, rebased.exclusiveRow)
     }
 
-    // ── move/resize legality rows ──────────────────────────────────────
-
-    @Test
-    fun moveLegality_noFrontier_normalBound() {
-        assertEquals(16, moveLegalityRows(16, null))
-    }
-
-    @Test
-    fun moveLegality_withFrontier_frontierBound() {
-        val boundary = initEditFrontier(extent(2L, 2L), 1800, 108L)
-        assertEquals(20, moveLegalityRows(16, boundary))
-    }
-
-    @Test
-    fun moveLegality_hugeFrontier_saturatesToIntMax() {
-        val boundary = GridVerticalLayout.EditBoundary(
-            exclusiveRow = Long.MAX_VALUE,
-            marginRows = HomeEditFrontier.MARGIN_ROWS,
-        )
-        assertEquals(Int.MAX_VALUE, moveLegalityRows(16, boundary))
-    }
-
-    @Test
-    fun resizeLegality_ignoresFrontier_noExpansion() {
-        val boundary = initEditFrontier(extent(2L, 2L), 1800, 108L)
-        assertEquals(16, resizeLegalityRows(16, boundary))
-        assertEquals(16, resizeLegalityRows(16, null))
-    }
-
-    @Test(expected = IllegalArgumentException::class)
-    fun moveLegality_nonPositiveNormal_throws() {
-        moveLegalityRows(0, null)
-    }
-
     // ── edit-only layout rows/height/scroll-max ────────────────────────
 
     @Test
@@ -248,13 +215,13 @@ class HomeEditFrontierTest {
     }
 
     @Test
-    fun editLayoutRows_signedMinRow_countsFromMin() {
-        // Tiles on rows 18..20 (minRow 18): the frontier end stays absolute
-        // (20) while the row count subtracts the signed minimum.
+    fun editLayoutRows_frontierUsesAbsoluteLogicalExtent() {
+        // The frontier end is an absolute row boundary, so leading rows remain
+        // part of the edit workspace rather than being rebased away.
         val signed = extent(bottomExclusive = 20L, totalRows = 2L, minRow = 18L)
         val boundary = initEditFrontier(signed, 1800, 108L)
         assertEquals(24L, boundary.exclusiveRow)
-        assertEquals(6L, editLayoutRows(signed, boundary))
+        assertEquals(24L, editLayoutRows(signed, boundary))
     }
 
     @Test
@@ -354,216 +321,138 @@ class HomeEditFrontierTest {
         assertEquals(108, autoScrollStepPx(108L))
     }
 
+    @Test
+    fun autoScrollInterval_outsideBand_null() {
+        assertNull(autoScrollIntervalMs(900f, viewportHeightPx = 1800, edgePx = 96))
+        assertNull(autoScrollIntervalMs(0f, viewportHeightPx = 0, edgePx = 96))
+    }
+
+    @Test
+    fun autoScrollInterval_symmetricTopBottom_equal() {
+        val top = autoScrollIntervalMs(10f, viewportHeightPx = 1800, edgePx = 96)
+        val bottom = autoScrollIntervalMs(1790f, viewportHeightPx = 1800, edgePx = 96)
+        assertEquals(top, bottom)
+    }
+
+    @Test
+    fun autoScrollInterval_monotonic_fasterDeeper() {
+        // Just inside the band scrolls slowest (near 300ms), the viewport
+        // edge scrolls fastest (120ms), with a mid-band value strictly between.
+        val inner = autoScrollIntervalMs(95f, viewportHeightPx = 1800, edgePx = 96)
+        val mid = autoScrollIntervalMs(48f, viewportHeightPx = 1800, edgePx = 96)
+        val deep = autoScrollIntervalMs(0f, viewportHeightPx = 1800, edgePx = 96)
+        assertEquals(HomeEditFrontier.AUTO_SCROLL_MIN_INTERVAL_MS, deep)
+        assertTrue(inner!! > mid!! && mid > deep!!)
+        assertTrue(inner in HomeEditFrontier.AUTO_SCROLL_MIN_INTERVAL_MS..
+            HomeEditFrontier.AUTO_SCROLL_MAX_INTERVAL_MS)
+        val innerBottom = autoScrollIntervalMs(1705f, viewportHeightPx = 1800, edgePx = 96)
+        val deepBottom = autoScrollIntervalMs(1800f, viewportHeightPx = 1800, edgePx = 96)
+        assertEquals(HomeEditFrontier.AUTO_SCROLL_MIN_INTERVAL_MS, deepBottom)
+        assertEquals(inner, innerBottom)
+    }
+
     // ── stationary remap primitive ─────────────────────────────────────
+
+    private fun testMetrics() = HomeGridMetrics(
+        columns = 6,
+        cellWidthPx = 100f,
+        cellHeightPx = 100f,
+        columnGapPx = 0f,
+        rowGapPx = 8f,
+        originXPx = 0f,
+        restOffsetYPx = 0f,
+    )
+
+    private fun testFrame() = MoveCoordinateFrame(testMetrics(), GridSpan(1, 1), 0f, 0f)
+
+    private fun entered(tile: HomeRenderTile, tiles: List<HomeRenderTile>): HomeEditState =
+        HomeEditState.Normal
+            .enterOnLongPress(tile.itemId)
+            .beginMove(tile, tiles, testMetrics(), 0f, 0f)
+
+    private fun remap(
+        state: HomeEditState,
+        tiles: List<HomeRenderTile>,
+        x: Float,
+        y: Float,
+        scroll: Int,
+    ) = state.moveTo(
+        pointerXPx = x,
+        pointerYPxViewport = y,
+        scrollYPx = scroll.toFloat(),
+        placements = tiles,
+    )
+
+    private fun HomeEditState.move(): DragState.Move = drag as DragState.Move
 
     @Test
     fun stationaryRemap_samePointer_advancingScroll_movesRow() {
         // The same viewport-local pointer maps to a new row when the CURRENT
-        // scroll offset advances (auto-scroll), with frozen grab/origin.
-        val atRest = MoveDragMath.cellForPixel(
-            xPx = 50f,
-            yPx = 50f,
-            cellSizePx = 100f,
-            columnGapPx = 0f,
-            rowGapPx = 8f,
-            windowFirstRow = 0L,
-            columns = 6,
-            rows = 20L,
-            scrollYPx = 0f,
+        // scroll offset advances (auto-scroll).
+        val frame = testFrame()
+        val atRest = MoveDragMath.cellForPixel(frame, 50f, 50f, 0f)
+        val scrolled = MoveDragMath.cellForPixel(frame, 50f, 50f, 108f)
+        assertEquals(
+            MoveCellResult.Valid(RequestedCell(0, 0), LogicalPosition(0, 0)),
+            atRest,
         )
-        val scrolled = MoveDragMath.cellForPixel(
-            xPx = 50f,
-            yPx = 50f,
-            cellSizePx = 100f,
-            columnGapPx = 0f,
-            rowGapPx = 8f,
-            windowFirstRow = 0L,
-            columns = 6,
-            rows = 20L,
-            scrollYPx = 108f,
+        assertEquals(
+            MoveCellResult.Valid(RequestedCell(0, 1), LogicalPosition(0, 1)),
+            scrolled,
         )
-        assertEquals(MoveCellResult.Valid(MoveCellCandidate(0, 0), LogicalPosition(0, 0)), atRest)
-        assertEquals(MoveCellResult.Valid(MoveCellCandidate(0, 1), LogicalPosition(0, 1)), scrolled)
     }
 
     @Test
-    fun stationaryRemap_frozenScroll_holdsRow() {
-        // A frozen down-time offset keeps the row: only CURRENT-scroll mapping
-        // follows the viewport.
-        val first = MoveDragMath.cellForPixel(
-            xPx = 50f,
-            yPx = 50f,
-            cellSizePx = 100f,
-            columnGapPx = 0f,
-            rowGapPx = 8f,
-            windowFirstRow = 0L,
-            columns = 6,
-            rows = 20L,
-            scrollYPx = 0f,
-        )
-        val second = MoveDragMath.cellForPixel(
-            xPx = 50f,
-            yPx = 50f,
-            cellSizePx = 100f,
-            columnGapPx = 0f,
-            rowGapPx = 8f,
-            windowFirstRow = 0L,
-            columns = 6,
-            rows = 20L,
-            scrollYPx = 0f,
-        )
-        assertEquals(first, second)
+    fun stationaryRemap_sameScroll_isDeterministicAcrossIntermediateScroll() {
+        // Absolute mapping: no accumulated state, so returning to a scroll
+        // value returns the original answer. (Replaces the vacuous
+        // frozen-scroll test that compared two identical calls.)
+        val frame = testFrame()
+        val first = MoveDragMath.cellForPixel(frame, 50f, 50f, 0f)
+        MoveDragMath.cellForPixel(frame, 50f, 50f, 216f)
+        assertEquals(first, MoveDragMath.cellForPixel(frame, 50f, 50f, 0f))
     }
 
-    // ── P1 ticker integration: stationary remap + actual baseline ──────
+    // ── P1 ticker integration: stationary remap ────────────────────────
 
     @Test
     fun tickerRemap_stationaryHold_advancingScroll_updatesCandidate() {
-        // A held pointer with no move events must still follow the viewport:
-        // the same viewport-local pointer maps to the pre-scroll cell at rest
-        // and to the post-scroll cell after one stride step, and the session
-        // candidate tracks it — so release commits the post-scroll cell.
         val tiles = listOf(tile("a", 0, 0), tile("b", 2, 2))
-        val entered = HomeEditSession.Idle
-            .enterIfLaunchable(tiles[1], tiles, columns = 6, rows = 30)
-        val atRest = remapMoveCandidateAfterScroll(
-            session = entered,
-            pointerXPx = 250f,
-            pointerYPx = 1700f,
-            scrollPx = 0,
-            cellSizePx = 100,
-            columnGapPx = 0,
-            rowGapPx = 8,
-            rowOrigin = 0L,
-            originXPx = 0,
-            originYPx = 0L,
-            grabOffsetXPx = 0f,
-            grabOffsetYPx = 0f,
-            tiles = tiles,
-            columns = 6,
-            moveRows = 30,
+        val entered = entered(tiles[1], tiles)
+        val atRest = remap(entered, tiles, 250f, 1700f, scroll = 0)
+        val scrolled = remap(atRest, tiles, 250f, 1700f, scroll = 108)
+        assertEquals(LogicalPosition(2, 15), atRest.move().previewPosition)
+        assertEquals(LogicalPosition(2, 16), scrolled.move().previewPosition)
+        assertEquals(
+            HomeEditCommit.Move(ItemId("b"), LogicalPosition(2, 16)),
+            scrolled.finish().commit,
         )
-        val scrolled = remapMoveCandidateAfterScroll(
-            session = atRest,
-            pointerXPx = 250f,
-            pointerYPx = 1700f,
-            scrollPx = 108,
-            cellSizePx = 100,
-            columnGapPx = 0,
-            rowGapPx = 8,
-            rowOrigin = 0L,
-            originXPx = 0,
-            originYPx = 0L,
-            grabOffsetXPx = 0f,
-            grabOffsetYPx = 0f,
-            tiles = tiles,
-            columns = 6,
-            moveRows = 30,
-        )
-        val restActive = atRest as HomeEditSession.Active
-        val scrolledActive = scrolled as HomeEditSession.Active
-        assertEquals(LogicalPosition(2, 15), restActive.candidatePosition)
-        assertEquals(LogicalPosition(2, 16), scrolledActive.candidatePosition)
-        assertEquals(LogicalPosition(2, 16), scrolled.moveCommitPosition())
     }
 
     @Test
     fun tickerRemap_blockedPostScrollCell_holdsLastValid() {
-        // A post-scroll cell occupied by another tile must not move the ghost:
-        // the candidate reports the collision while lastValid (and the release
-        // commit) stays at the pre-scroll cell.
         val tiles = listOf(tile("a", 0, 0), tile("b", 2, 2))
-        val entered = HomeEditSession.Idle
-            .enterIfLaunchable(tiles[0], tiles, columns = 6, rows = 30)
-        val atRest = remapMoveCandidateAfterScroll(
-            session = entered,
-            pointerXPx = 50f,
-            pointerYPx = 50f,
-            scrollPx = 0,
-            cellSizePx = 100,
-            columnGapPx = 0,
-            rowGapPx = 8,
-            rowOrigin = 0L,
-            originXPx = 0,
-            originYPx = 0L,
-            grabOffsetXPx = 0f,
-            grabOffsetYPx = 0f,
-            tiles = tiles,
-            columns = 6,
-            moveRows = 30,
-        )
-        // Scroll so the same pointer lands on tile b's cell (2, 2): content y
-        // 50 + scroll maps to row floor((50)/108) + origin; solve scroll for
-        // row 2 → scroll in [166, 274). Use 200f-equivalent 200px.
-        val scrolled = remapMoveCandidateAfterScroll(
-            session = atRest,
-            pointerXPx = 250f,
-            pointerYPx = 50f,
-            scrollPx = 200,
-            cellSizePx = 100,
-            columnGapPx = 0,
-            rowGapPx = 8,
-            rowOrigin = 0L,
-            originXPx = 0,
-            originYPx = 0L,
-            grabOffsetXPx = 0f,
-            grabOffsetYPx = 0f,
-            tiles = tiles,
-            columns = 6,
-            moveRows = 30,
-        )
-        val scrolledActive = scrolled as HomeEditSession.Active
-        assertEquals(CandidateValidity.COLLIDING, scrolledActive.candidateValidity)
-        assertEquals(
-            (atRest as HomeEditSession.Active).lastValidPosition,
-            scrolledActive.lastValidPosition,
-        )
+        val entered = entered(tiles[0], tiles)
+        val atRest = remap(entered, tiles, 50f, 50f, scroll = 0)
+        // content y 50 + 200 = 250 → row 2, column 2 → tile b's cell.
+        val scrolled = remap(atRest, tiles, 250f, 50f, scroll = 200)
+        assertEquals(CandidateValidity.COLLIDING, scrolled.move().validity)
+        assertEquals(atRest.move().previewPosition, scrolled.move().previewPosition)
     }
 
     @Test
-    fun tickerRemap_rejectedOutOfBounds_holdsLastValidAndCannotCommit() {
+    fun tickerRemap_pastEdge_isRejectedNotClamped_keepsLastValid() {
+        // Retired contract: the old test expected the request to be clamped to
+        // the last column and committable. Past the right edge is now an
+        // invalid request that holds the last-valid preview and cannot commit.
         val tiles = listOf(tile("a", 0, 0))
-        val entered = HomeEditSession.Idle
-            .enterIfLaunchable(tiles[0], tiles, columns = 6, rows = 30)
-        val atRest = remapMoveCandidateAfterScroll(
-            session = entered,
-            pointerXPx = 150f,
-            pointerYPx = 50f,
-            scrollPx = 0,
-            cellSizePx = 100,
-            columnGapPx = 0,
-            rowGapPx = 8,
-            rowOrigin = 0L,
-            originXPx = 0,
-            originYPx = 0L,
-            grabOffsetXPx = 0f,
-            grabOffsetYPx = 0f,
-            tiles = tiles,
-            columns = 6,
-            moveRows = 30,
-        )
-        val rejected = remapMoveCandidateAfterScroll(
-            session = atRest,
-            pointerXPx = 650f,
-            pointerYPx = 50f,
-            scrollPx = 0,
-            cellSizePx = 100,
-            columnGapPx = 0,
-            rowGapPx = 8,
-            rowOrigin = 0L,
-            originXPx = 0,
-            originYPx = 0L,
-            grabOffsetXPx = 0f,
-            grabOffsetYPx = 0f,
-            tiles = tiles,
-            columns = 6,
-            moveRows = 30,
-        ) as HomeEditSession.Active
+        val entered = entered(tiles[0], tiles)
+        val atRest = remap(entered, tiles, 150f, 50f, scroll = 0)
+        val past = remap(atRest, tiles, 650f, 50f, scroll = 0)
 
-        assertEquals(LogicalPosition(1, 0), rejected.lastValidPosition)
-        assertEquals(LogicalPosition(1, 0), rejected.candidatePosition)
-        assertEquals(CandidateValidity.OUT_OF_BOUNDS, rejected.candidateValidity)
-        assertNull(rejected.moveCommitPosition())
+        assertEquals(LogicalPosition(1, 0), past.move().previewPosition)
+        assertEquals(CandidateValidity.OUT_OF_BOUNDS, past.move().validity)
+        assertEquals(null, past.finish().commit)
     }
 
     @Test
@@ -586,33 +475,32 @@ class HomeEditFrontierTest {
     // ── release-only commit / zero-write cancel ────────────────────────
     @Test
     fun releaseCommit_singlePositionFromLastValid() {
-        // Scrolling/edge steps never commit: only moveCommitPosition at release
-        // yields a position, exactly once, from the last valid cell.
+        // Scrolling/edge steps never commit: only finish() at release yields
+        // a position, exactly once, from the last valid cell.
         val tiles = listOf(tile("a", 0, 0), tile("b", 2, 2))
-        var session: HomeEditSession = HomeEditSession.Idle
-            .enterIfLaunchable(tiles[1], tiles, columns = 6, rows = 30)
-        session = session.updateMoveCandidate(LogicalPosition(3, 3), tiles, 6, 30)
-        assertEquals(LogicalPosition(3, 3), session.moveCommitPosition())
+        val state = entered(tiles[1], tiles).updateMove(
+            MoveCellResult.Valid(RequestedCell(3, 3), LogicalPosition(3, 3)),
+            tiles,
+        )
+        assertEquals(HomeEditCommit.Move(ItemId("b"), LogicalPosition(3, 3)), state.finish().commit)
     }
 
     @Test
     fun cancel_zeroWrite_noCommitPosition() {
         val tiles = listOf(tile("a", 0, 0), tile("b", 2, 2))
-        var session: HomeEditSession = HomeEditSession.Idle
-            .enterIfLaunchable(tiles[1], tiles, columns = 6, rows = 30)
-        session = session.updateMoveCandidate(LogicalPosition(3, 3), tiles, 6, 30)
-        // Cancel (back/empty-tap/pager steal): Idle carries no commit.
-        session = session.cancel()
-        assertNull(session.moveCommitPosition())
+        val state = entered(tiles[1], tiles).updateMove(
+            MoveCellResult.Valid(RequestedCell(3, 3), LogicalPosition(3, 3)),
+            tiles,
+        )
+        // Cancel (back/empty-tap/pager steal): no drag carries no commit.
+        assertNull(state.cancelDrag().finish().commit)
     }
 
     @Test
     fun noMoveRelease_noCommitPosition() {
         // A drag that never leaves the origin commits nothing.
         val tiles = listOf(tile("a", 0, 0))
-        val session: HomeEditSession = HomeEditSession.Idle
-            .enterIfLaunchable(tiles[0], tiles, columns = 6, rows = 30)
-        assertNull(session.moveCommitPosition())
+        assertNull(entered(tiles[0], tiles).finish().commit)
     }
 
     // ── exit collapse/clamp (viewport helpers, no production change) ───

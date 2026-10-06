@@ -483,6 +483,22 @@ Manual home grouping becomes useful metadata elsewhere in the launcher.
 
 ---
 
+# 10B. Optional Slice S1 — Shelter mode (Shizuku-gated, after 1D)
+
+Shelter support is an **optional capability layer**, not a forced default. Baseline behavior without Shizuku is unchanged. Shelter mode is considered activated only while the app holds Shizuku permission (Binder received plus runtime grant; ADB or root backend). Never request Shizuku permission at startup; request it from explicit enhanced-access UI or on first attempt of a Shizuku-only operation. Binder death, denial, stopped Shizuku, or reboot falls back to baseline immediately. Do not persist a `shizuku_enabled` flag as proof of access.
+
+Implement after persisted placement (1C/1D) exists, because the core guarantee is placement preservation. S1 does not block 1C/1D and must not change baseline catalogue, launch, or layout behavior when Shizuku is absent.
+
+* Catalogue: introduce the persistent record keyed by `(packageName, ProfileId)` with `AppAvailability` (`AVAILABLE` / `SHELTER_FROZEN` / `PROFILE_PAUSED` / `UNINSTALLED`). A `LauncherApps` disappearance of a known Shelter work-profile identity resolves via the privileged package-state boundary (`isInstalled` / `isHidden` / `listPackages(includeHidden)`): hidden-but-installed becomes `SHELTER_FROZEN` with placement unchanged; truly uninstalled becomes `UNINSTALLED`. Cold start unions normal enumeration with privileged enumeration so never-seen frozen apps still get `SHELTER_FROZEN` records from cached metadata.
+* Launch: `AVAILABLE` via `LauncherApps.startMainActivity` under the correct profile; `SHELTER_FROZEN` prefers Shelter `PUBLIC_UNFREEZE_AND_LAUNCH` (`DummyActivity`) so auto-freeze bookkeeping stays with Shelter, with privileged unhide plus delayed launch only as fallback. Keep UI behind a sealed launch action; no Shelter/Shizuku/shell details in features.
+* Parity: a Shelter work-profile app, including a frozen one, is treated just like any other app tile. Home, folders, All Apps grouping, and search continue to list it; freeze never causes compaction, reflow, or placement loss. All tile hit targets keep working, **including shortcut buttons**: shortcuts stay visible on frozen tiles and invoke through the same unfreeze-then-deliver path. Only a small frozen indication (badge/opacity) is permitted.
+* Structure: keep `rikka.shizuku.*` inside the privileged integration only; one app-scoped controller exposes `StateFlow` availability; separate availability from per-capability checks; narrow typed privileged operations only, no generic shell executor; simple Binder wrapper vs `UserService` per `docs/shizuku.md`. Planned owners are `platform:privileged` and `platform:shelter`; add modules only when real code needs the boundary.
+* Sequence: dependencies plus `ShizukuProvider`, availability state, controller, domain interfaces, unchanged standard implementations, Shizuku implementations behind interfaces, explicit permission UI, capability checks, binder-death handling, one small privileged feature first, then full S1. Test the full matrix: never-installed, installed-but-stopped, no-permission, denied, granted (ADB vs root), binder death/restart, process recreation, reboot, and unsupported OEM operations.
+
+**Exit gate:** with Shizuku permission granted, freeze a Shelter work-profile app and verify its tile stays in place, remains searchable/groupable/folderable, keeps working shortcut buttons, launches via Shelter flow (fallback only when Shelter absent), and returns to frozen state on re-freeze without layout mutation. Without Shizuku, verify baseline catalogue/launch/layout behavior is unchanged.
+
+---
+
 # 11. Phase 6 — All Apps
 
 The default All Apps surface should not be a conventional Launcher3 alphabetical drawer.
@@ -784,7 +800,9 @@ Build, in this exact order:
 
 **Slice 1D — Folders:** six-column floating folder overlay and persistent membership.
 
-At that point there is a small but genuine launcher with the correct architectural foundation. **Only then** begin expanded tiles, All Apps grouping, global search, Message Center and real Android widgets.
+**Optional Slice S1 — Shelter mode (Shizuku-gated):** after 1D only; persistent `(packageName, ProfileId)` records with `SHELTER_FROZEN` state, placement-preserving freeze handling, privileged enumeration/cold-start recovery, Shelter-first launch with Shizuku fallback, and full tile parity including shortcut buttons. Baseline without Shizuku permission is unchanged.
+
+At that point there is a small but genuine launcher with the correct architectural foundation. **Only then** begin expanded tiles, All Apps grouping, global search, Message Center and real Android widgets. Later All Apps/search work must retain S1 parity: frozen Shelter apps remain first-class entries with working shortcuts.
 
 [1]: https://developer.android.com/reference/android/content/pm/LauncherApps?utm_source=chatgpt.com "LauncherApps  |  API reference  |  Android Developers"
 [2]: https://developer.android.com/reference/kotlin/android/app/role/RoleManager?utm_source=chatgpt.com "RoleManager  |  API reference  |  Android Developers"

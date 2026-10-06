@@ -46,10 +46,10 @@ class RoomHomePlacementRepositoryTest {
         seed(oneSecond)
         seed(other)
 
-        assertEquals(listOf(oneFirst, oneSecond), (repository.load(oneFirst.homeId, 6, 10) as LoadResult.Loaded).placements)
-        assertEquals(listOf(other), (repository.load(other.homeId, 6, 10) as LoadResult.Loaded).placements)
+        assertEquals(listOf(oneFirst, oneSecond), (repository.load(oneFirst.homeId, 6) as LoadResult.Loaded).placements)
+        assertEquals(listOf(other), (repository.load(other.homeId, 6) as LoadResult.Loaded).placements)
         val before = counts()
-        assertEquals(LoadResult.NotFound, repository.load(HomeId("missing"), 6, 10))
+        assertEquals(LoadResult.NotFound, repository.load(HomeId("missing"), 6))
         assertEquals(before, counts())
     }
 
@@ -62,17 +62,17 @@ class RoomHomePlacementRepositoryTest {
         val identity = identity("work", "org.new")
         val rejectedSnapshot = snapshot()
 
-        assertRejected(repository.place(home, candidateId, identity, LogicalPosition(0, 0), LogicalSpan(1, 1), 6, 10), GridRules.Rejection.COLLISION)
+        assertRejected(repository.place(home, candidateId, identity, LogicalPosition(0, 0), LogicalSpan(1, 1), 6), GridRules.Rejection.COLLISION)
         assertEquals(rejectedSnapshot, snapshot())
         val genericId = ItemId("generic")
         val genericIdentity = identity("work", "org.generic")
-        assertTrue(repository.place(home, genericId, genericIdentity, LogicalPosition(1, 0), LogicalSpan(3, 1), 6, 10) is MutationResult.Accepted)
+        assertTrue(repository.place(home, genericId, genericIdentity, LogicalPosition(1, 0), LogicalSpan(3, 1), 6) is MutationResult.Accepted)
         assertEquals(RemoveResult.Removed, repository.remove(home, genericId))
         val postGenericSnapshot = snapshot()
-        assertRejected(repository.place(home, candidateId, identity, LogicalPosition(6, 0), LogicalSpan(1, 1), 6, 10), GridRules.Rejection.OUT_OF_BOUNDS)
+        assertRejected(repository.place(home, candidateId, identity, LogicalPosition(6, 0), LogicalSpan(1, 1), 6), GridRules.Rejection.OUT_OF_BOUNDS)
         assertEquals(postGenericSnapshot, snapshot())
 
-        val result = repository.place(home, candidateId, identity, LogicalPosition(2, 0), LogicalSpan(1, 1), 6, 10)
+        val result = repository.place(home, candidateId, identity, LogicalPosition(2, 0), LogicalSpan(1, 1), 6)
         assertTrue(result is MutationResult.Accepted)
         val persisted = dao.placement(candidateId.value)!!.toDomain()
         assertEquals(identity, persisted.appIdentity)
@@ -88,23 +88,23 @@ class RoomHomePlacementRepositoryTest {
         seed(target)
         seed(neighbor)
         val initial = snapshot()
-        assertRejected(repository.move(target.homeId, target.itemId, LogicalPosition(2, 0), 6, 10), GridRules.Rejection.COLLISION)
+        assertRejected(repository.move(target.homeId, target.itemId, LogicalPosition(2, 0), 6), GridRules.Rejection.COLLISION)
         assertEquals(initial, snapshot())
-        assertRejected(repository.move(target.homeId, target.itemId, LogicalPosition(6, 0), 6, 10), GridRules.Rejection.OUT_OF_BOUNDS)
+        assertRejected(repository.move(target.homeId, target.itemId, LogicalPosition(6, 0), 6), GridRules.Rejection.OUT_OF_BOUNDS)
         assertEquals(initial, snapshot())
-        assertTrue(repository.move(target.homeId, target.itemId, LogicalPosition(1, 0), 6, 10) is MutationResult.Accepted)
+        assertTrue(repository.move(target.homeId, target.itemId, LogicalPosition(1, 0), 6) is MutationResult.Accepted)
         assertEquals(LogicalPosition(1, 0), dao.placement(target.itemId.value)!!.toDomain().position)
         assertEquals(neighbor, dao.placement(neighbor.itemId.value)!!.toDomain())
 
         val beforeResize = snapshot()
-        assertRejected(repository.resize(target.homeId, target.itemId, LogicalSpan(3, 1), 6, 10), GridRules.Rejection.COLLISION)
+        assertRejected(repository.resize(target.homeId, target.itemId, LogicalSpan(3, 1), 6), GridRules.Rejection.COLLISION)
         assertEquals(beforeResize, snapshot())
-        assertRejected(repository.resize(target.homeId, target.itemId, LogicalSpan(2, 1), 6, 10), GridRules.Rejection.COLLISION)
+        assertRejected(repository.resize(target.homeId, target.itemId, LogicalSpan(2, 1), 6), GridRules.Rejection.COLLISION)
         assertEquals(beforeResize, snapshot())
-        assertRejected(repository.resize(target.homeId, target.itemId, LogicalSpan(4, 2), 4, 10), GridRules.Rejection.OUT_OF_BOUNDS)
+        assertRejected(repository.resize(target.homeId, target.itemId, LogicalSpan(4, 2), 4), GridRules.Rejection.OUT_OF_BOUNDS)
         assertEquals(beforeResize, snapshot())
-        assertRejected(repository.resize(target.homeId, target.itemId, LogicalSpan(2, 1), 6, 10), GridRules.Rejection.COLLISION)
-        assertTrue(repository.resize(target.homeId, target.itemId, LogicalSpan(1, 2), 6, 10) is MutationResult.Accepted)
+        assertRejected(repository.resize(target.homeId, target.itemId, LogicalSpan(2, 1), 6), GridRules.Rejection.COLLISION)
+        assertTrue(repository.resize(target.homeId, target.itemId, LogicalSpan(1, 2), 6) is MutationResult.Accepted)
         assertEquals(LogicalSpan(1, 2), dao.placement(target.itemId.value)!!.toDomain().span)
     }
 
@@ -115,13 +115,13 @@ class RoomHomePlacementRepositoryTest {
         seed(distant)
 
         val result = repository.place(
-            home, ItemId("new"), identity(), LogicalPosition(1, 0), LogicalSpan(1, 1), 6, 20,
+            home, ItemId("new"), identity(), LogicalPosition(1, 0), LogicalSpan(1, 1), 6,
         ) as MutationResult.Accepted
 
         assertEquals(LogicalPosition(0, 3), dao.placement(distant.itemId.value)!!.toDomain().position)
         assertEquals(LogicalPosition(0, 3), result.gridResult.placements
             .first { it.id == distant.itemId }.position.let { LogicalPosition(it.column, it.row) })
-        val again = repository.load(home, 6, 20) as LoadResult.Loaded
+        val again = repository.load(home, 6) as LoadResult.Loaded
         assertEquals(LogicalPosition(0, 3), again.placements.first { it.itemId == distant.itemId }.position)
     }
 
@@ -140,7 +140,7 @@ class RoomHomePlacementRepositoryTest {
         seed(shifted)
         seed(other)
 
-        assertTrue(repository.move(home, target.itemId, LogicalPosition(1, 1), 6, 20) is MutationResult.Accepted)
+        assertTrue(repository.move(home, target.itemId, LogicalPosition(1, 1), 6) is MutationResult.Accepted)
 
         assertEquals(shifted.copy(position = LogicalPosition(2, 4)), dao.placement(shifted.itemId.value)!!.toDomain())
         assertEquals(other, dao.placement(other.itemId.value)!!.toDomain())
@@ -161,7 +161,7 @@ class RoomHomePlacementRepositoryTest {
         seed(shifted)
         seed(other)
 
-        assertTrue(repository.resize(home, target.itemId, LogicalSpan(2, 2), 6, 20) is MutationResult.Accepted)
+        assertTrue(repository.resize(home, target.itemId, LogicalSpan(2, 2), 6) is MutationResult.Accepted)
 
         assertEquals(shifted.copy(position = LogicalPosition(3, 4)), dao.placement(shifted.itemId.value)!!.toDomain())
         assertEquals(other, dao.placement(other.itemId.value)!!.toDomain())
@@ -200,8 +200,8 @@ class RoomHomePlacementRepositoryTest {
         val originalUnavailableRowPosition = placementRowPosition(unavailable.itemId)
 
         assertTrue(repository.move(homeId = unavailable.homeId, itemId = neighbor.itemId,
-            position = LogicalPosition(3, 0), columns = 6, rows = 10) is MutationResult.Accepted)
-        assertTrue(repository.resize(unavailable.homeId, neighbor.itemId, LogicalSpan(2, 1), 6, 10) is MutationResult.Accepted)
+            position = LogicalPosition(3, 0), columns = 6) is MutationResult.Accepted)
+        assertTrue(repository.resize(unavailable.homeId, neighbor.itemId, LogicalSpan(2, 1), 6) is MutationResult.Accepted)
         assertEquals(RemoveResult.Removed, repository.remove(unavailable.homeId, neighbor.itemId))
 
         assertEquals(unavailable, dao.placement(unavailable.itemId.value)!!.toDomain())
@@ -239,8 +239,8 @@ class RoomHomePlacementRepositoryTest {
         seed(after)
         val replacementId = ItemId("replacement")
         val identity = identity("work", "org.replacement")
-        assertTrue(repository.place(home, replacementId, identity, LogicalPosition(1, 0), LogicalSpan(1, 1), 6, 10, replaced.itemId) is MutationResult.Accepted)
-        val loaded = (repository.load(home, 6, 10) as LoadResult.Loaded).placements
+        assertTrue(repository.place(home, replacementId, identity, LogicalPosition(1, 0), LogicalSpan(1, 1), 6, replaced.itemId) is MutationResult.Accepted)
+        val loaded = (repository.load(home, 6) as LoadResult.Loaded).placements
         assertEquals(listOf(before.itemId, replacementId, after.itemId), loaded.map { it.itemId })
         assertEquals(null, dao.placement(replaced.itemId.value))
         assertEquals(identity, loaded[1].appIdentity)
@@ -255,7 +255,7 @@ class RoomHomePlacementRepositoryTest {
         try {
             org.junit.Assert.assertThrows(SQLiteConstraintException::class.java) {
                 repository.place(home, ItemId("rollback-new"), identity("work", "org.rollback"),
-                    LogicalPosition(3, 0), LogicalSpan(1, 1), 6, 10, fresh.itemId)
+                    LogicalPosition(3, 0), LogicalSpan(1, 1), 6, fresh.itemId)
             }
         } finally {
             database.openHelper.writableDatabase.execSQL("DROP TRIGGER fail_placement_update")
@@ -278,19 +278,19 @@ class RoomHomePlacementRepositoryTest {
         val newId = ItemId("new")
         assertEquals(
             MutationResult.NotFound,
-            repository.place(HomeId("missing"), newId, identity(), LogicalPosition(1, 0), LogicalSpan(1, 1), 6, 10),
+            repository.place(HomeId("missing"), newId, identity(), LogicalPosition(1, 0), LogicalSpan(1, 1), 6),
         )
         assertEquals(before, snapshot())
-        assertEquals(MutationResult.NotFound, repository.place(first, newId, identity(), LogicalPosition(1, 0), LogicalSpan(1, 1), 6, 10, ItemId("missing")))
+        assertEquals(MutationResult.NotFound, repository.place(first, newId, identity(), LogicalPosition(1, 0), LogicalSpan(1, 1), 6, ItemId("missing")))
         assertEquals(before, snapshot())
-        assertEquals(MutationResult.WrongHome, repository.place(first, newId, identity(), LogicalPosition(1, 0), LogicalSpan(1, 1), 6, 10, other.itemId))
+        assertEquals(MutationResult.WrongHome, repository.place(first, newId, identity(), LogicalPosition(1, 0), LogicalSpan(1, 1), 6, other.itemId))
         assertEquals(before, snapshot())
-        assertRejected(repository.place(first, newId, identity(), LogicalPosition(2, 0), LogicalSpan(1, 1), 6, 10, target.itemId), GridRules.Rejection.COLLISION)
+        assertRejected(repository.place(first, newId, identity(), LogicalPosition(2, 0), LogicalSpan(1, 1), 6, target.itemId), GridRules.Rejection.COLLISION)
         assertEquals(before, snapshot())
-        assertEquals(MutationResult.WrongHome, repository.move(first, other.itemId, LogicalPosition(3, 0), 6, 10))
-        assertEquals(MutationResult.WrongHome, repository.resize(first, other.itemId, LogicalSpan(2, 1), 6, 10))
-        assertEquals(MutationResult.WrongHome, repository.place(second, target.itemId, identity(), LogicalPosition(3, 0), LogicalSpan(1, 1), 6, 10))
-        assertEquals(MutationResult.ItemIdAlreadyExists, repository.place(first, target.itemId, identity(), LogicalPosition(3, 0), LogicalSpan(1, 1), 6, 10))
+        assertEquals(MutationResult.WrongHome, repository.move(first, other.itemId, LogicalPosition(3, 0), 6))
+        assertEquals(MutationResult.WrongHome, repository.resize(first, other.itemId, LogicalSpan(2, 1), 6))
+        assertEquals(MutationResult.WrongHome, repository.place(second, target.itemId, identity(), LogicalPosition(3, 0), LogicalSpan(1, 1), 6))
+        assertEquals(MutationResult.ItemIdAlreadyExists, repository.place(first, target.itemId, identity(), LogicalPosition(3, 0), LogicalSpan(1, 1), 6))
         assertEquals(before, snapshot())
     }
 
@@ -300,12 +300,12 @@ class RoomHomePlacementRepositoryTest {
         seedHome(one.value)
         seedHome(two.value)
         val same = identity("profile", "org.same")
-        assertTrue(repository.place(one, ItemId("one-item"), same, LogicalPosition(0, 0), LogicalSpan(1, 1), 6, 10) is MutationResult.Accepted)
-        assertTrue(repository.place(two, ItemId("two-item"), same, LogicalPosition(0, 0), LogicalSpan(1, 1), 6, 10) is MutationResult.Accepted)
-        assertEquals(same, (repository.load(one, 6, 10) as LoadResult.Loaded).placements.single().appIdentity)
-        assertEquals(same, (repository.load(two, 6, 10) as LoadResult.Loaded).placements.single().appIdentity)
+        assertTrue(repository.place(one, ItemId("one-item"), same, LogicalPosition(0, 0), LogicalSpan(1, 1), 6) is MutationResult.Accepted)
+        assertTrue(repository.place(two, ItemId("two-item"), same, LogicalPosition(0, 0), LogicalSpan(1, 1), 6) is MutationResult.Accepted)
+        assertEquals(same, (repository.load(one, 6) as LoadResult.Loaded).placements.single().appIdentity)
+        assertEquals(same, (repository.load(two, 6) as LoadResult.Loaded).placements.single().appIdentity)
         val before = snapshot()
-        assertEquals(MutationResult.WrongHome, repository.place(two, ItemId("one-item"), identity(), LogicalPosition(1, 0), LogicalSpan(1, 1), 6, 10))
+        assertEquals(MutationResult.WrongHome, repository.place(two, ItemId("one-item"), identity(), LogicalPosition(1, 0), LogicalSpan(1, 1), 6))
         assertEquals(before, snapshot())
     }
 
@@ -329,9 +329,9 @@ class RoomHomePlacementRepositoryTest {
 
     @Test fun ensureHomeCreatesRowSoLoadReturnsEmptyNotNotFound() {
         val homeId = HomeId("new-home")
-        assertEquals(LoadResult.NotFound, repository.load(homeId, 6, 10))
+        assertEquals(LoadResult.NotFound, repository.load(homeId, 6))
         assertTrue(repository.ensureHome(homeId))
-        val loaded = repository.load(homeId, 6, 10)
+        val loaded = repository.load(homeId, 6)
         assertTrue(loaded is LoadResult.Loaded)
         assertEquals(emptyList<AppPlacement>(), (loaded as LoadResult.Loaded).placements)
     }
@@ -351,10 +351,10 @@ class RoomHomePlacementRepositoryTest {
         val identity = identity()
         assertEquals(
             MutationResult.NotFound,
-            repository.place(homeId, itemId, identity, LogicalPosition(0, 0), LogicalSpan(1, 1), 6, 10),
+            repository.place(homeId, itemId, identity, LogicalPosition(0, 0), LogicalSpan(1, 1), 6),
         )
         assertTrue(repository.ensureHome(homeId))
-        val result = repository.place(homeId, itemId, identity, LogicalPosition(0, 0), LogicalSpan(1, 1), 6, 10)
+        val result = repository.place(homeId, itemId, identity, LogicalPosition(0, 0), LogicalSpan(1, 1), 6)
         assertTrue(result is MutationResult.Accepted)
     }
 
@@ -362,7 +362,7 @@ class RoomHomePlacementRepositoryTest {
         seedHome("home")
         val near = placement("home", "near", 0)
         seed(near)
-        val first = repository.load(HomeId("home"), 6, 10) as LoadResult.Loaded
+        val first = repository.load(HomeId("home"), 6) as LoadResult.Loaded
         assertEquals(listOf(near), first.placements)
 
         val far = AppPlacement(
@@ -371,11 +371,40 @@ class RoomHomePlacementRepositoryTest {
         )
         seed(far)
         // Reload normalizes the excessive gap and persists the reduced extent.
-        val second = repository.load(HomeId("home"), 6, 10) as LoadResult.Loaded
+        val second = repository.load(HomeId("home"), 6) as LoadResult.Loaded
         assertEquals(listOf(near.itemId, far.itemId), second.placements.map { it.itemId })
         assertEquals(LogicalPosition(0, 0), second.placements[0].position)
         assertEquals(LogicalPosition(0, 3), second.placements[1].position)
         assertEquals(LogicalPosition(0, 3), dao.placement(far.itemId.value)!!.toDomain().position)
+    }
+
+    @Test
+    fun highRowPlacementMoveResizePreserveRowsAndAuthoritativeResults() {
+        val home = HomeId("high-row")
+        seedHome(home.value)
+        val itemId = ItemId("high-row-item")
+
+        val placed = repository.place(
+            home,
+            itemId,
+            identity(),
+            LogicalPosition(2, 5_000),
+            LogicalSpan(2, 2),
+            6,
+        ) as MutationResult.Accepted
+        assertEquals(LogicalPosition(2, 5_000), placed.gridResult.placements.single { it.id == itemId }.let { LogicalPosition(it.position.column, it.position.row) })
+        assertEquals(LogicalPosition(2, 5_000), (repository.load(home, 6) as LoadResult.Loaded).placements.single().position)
+
+        val moved = repository.move(home, itemId, LogicalPosition(2, 6_000), 6) as MutationResult.Accepted
+        assertEquals(LogicalPosition(2, 6_000), moved.gridResult.placements.single { it.id == itemId }.let { LogicalPosition(it.position.column, it.position.row) })
+        assertEquals(LogicalPosition(2, 6_000), (repository.load(home, 6) as LoadResult.Loaded).placements.single().position)
+
+        val resized = repository.resize(home, itemId, LogicalSpan(2, 3), 6) as MutationResult.Accepted
+        assertEquals(LogicalPosition(2, 6_000), resized.gridResult.placements.single { it.id == itemId }.let { LogicalPosition(it.position.column, it.position.row) })
+        assertEquals(LogicalSpan(2, 3), resized.gridResult.placements.single { it.id == itemId }.span.let { LogicalSpan(it.columns, it.rows) })
+        val reloaded = (repository.load(home, 6) as LoadResult.Loaded).placements.single()
+        assertEquals(LogicalPosition(2, 6_000), reloaded.position)
+        assertEquals(LogicalSpan(2, 3), reloaded.span)
     }
 
     private fun seedHome(id: String) = dao.insertHome(HomeEntity(id))

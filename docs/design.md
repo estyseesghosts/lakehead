@@ -1,6 +1,38 @@
 # Design contract
 
-- MOVE span fitting clamps a candidate to `[0, columns-span.columns] × [0, legalityRows-span.rows]`; a span that cannot fit is observable as `OUT_OF_BOUNDS`, with no free-cell search. Each MOVE drag generation permits eight successful scroll-state changes in either direction, including exits and re-entry; no-ops are free and the cap stops the ticker, not the drag. Lift/cancel ends the generation. Resize arm is sampled at slop and preserved through transfer routing: armed handle routes RESIZE, unarmed handle routes NONE, and body routes MOVE.
+> Active repair contract: `lakehead-grid-repair-plan.md` §3 replaces the historical MOVE clamp/re-freeze/budget rules that were previously stated in this file. Those rules are retained below only as the superseded record they are.
+
+## Frozen Home grid contract (repair plan §3)
+
+These rules are the acceptance contract for every remaining repair slice. They are **not** yet all implemented; each slice records its own status in `state-logs/CURRENT.md`.
+
+1. **Logical origin is permanent:** column 0, row 0. Persisted rows and columns are never negative.
+2. **Horizontal space is bounded by `columns`; vertical logical space is nonnegative and effectively unbounded.** The visible viewport or edit workspace is not a legality bound.
+3. **Leading rows are real.** A tile at row 5 has five logical rows above it. Content height is `max(row + rowSpan)`, never `maxRow - minRow`.
+4. **One immutable `HomeGridMetrics` owns every logical↔pixel transform.** Rendering, hit testing, move, resize and overlays all consume it.
+5. **Scroll is applied exactly once:** viewport Y → content Y is `viewportY + scrollY`.
+6. **A visual rest offset may center a short grid, but it is presentation-only.** It is frozen for the whole edit session and never animates underneath a drag.
+7. **Move is absolute, not accumulated:** current pointer + current scroll − immutable grab offset → requested top-left cell.
+8. **Move preserves span. Resize preserves position.** These are type/state invariants, not late validation.
+9. **Invalid requests stay invalid.** A raw out-of-bounds requested cell is never clamped into a different legal cell; the preview may hold its last valid value.
+10. **Collision is logical rectangle intersection only.** Pixel geometry never decides placement legality.
+11. **Edit workspace size controls only actual scrollable content height.** It can never make a logical cell legal or illegal.
+12. **One gesture chooses one route.** After slop it is MOVE or RESIZE until release or cancel.
+13. **Persistence starts only after release.** Gesture code emits a commit intent and knows nothing about database acknowledgement.
+14. **Repository-normalized accepted placements are authoritative.** When gap normalization moves further tiles, the state owner reconciles from that accepted result.
+15. **Home renders all current tiles directly.** No Home row-window virtualization until real measurements demand it.
+
+### Explicitly retired
+
+Negative persisted Home rows, drag-time origin animation, Home row-window rendering, clamped candidate cells, edit-legality frontiers and persistence acknowledgement leases are **retired contracts**. Do not add, extend or re-document them. Superseded mechanics — `frozenScrollBaselinePx` algebra, structural re-freeze, live move-frame mirrors, row-origin mapping, finite legality-row coupling, signed/rebased renderer support, the eight-step MOVE generation budget — are on the deletion list for repair plan Phase 9, not a pattern to imitate.
+
+Normal-mode centering survives as an optional visual offset. It is presentation only: never a logical row origin, and never a coordinate frame that moves under a stationary pointer.
+
+## Superseded Home MOVE rules (historical — do not implement)
+
+- ~~MOVE span fitting clamps a candidate to `[0, columns-span.columns] × [0, legalityRows-span.rows]`; a span that cannot fit is observable as `OUT_OF_BOUNDS`, with no free-cell search.~~ Retired by contract rule 9: clamping is removed and an out-of-bounds request stays invalid rather than becoming another legal cell.
+- ~~Each MOVE drag generation permits eight successful scroll-state changes in either direction, including exits and re-entry; no-ops are free and the cap stops the ticker, not the drag.~~ Retired: the budget was documented but never enforced, and continuous edge hold is the target behavior (plan Slice 6.3).
+- ~~Resize arm is sampled at slop and preserved through transfer routing.~~ Route choice itself survives as contract rule 12; the specific arm-sampling and transfer-routing mechanics above are superseded by plan Slices 4.1–4.3.
 
 The sketches described in `first_draft.md` specify interaction, not final colors or typography. ProtoLaunch uses many custom launcher-owned UI primitives and should intentionally not look like a stock Android app. Launcher-owned surfaces use custom Compose Foundation, layout, text and drawing primitives rather than stock Material product components. `docs/grid.md` plus `docs/grid/` photos are the visual/interaction authority for the Home grid, tile symbols, app list, and hit regions; this file records the stable rules distilled from them.
 

@@ -4,79 +4,26 @@ import me.foxtails.lakehead.core.model.LogicalPosition
 import me.foxtails.lakehead.core.model.LogicalSpan
 
 /**
- * Pixel drag delta → raw span conversion for resize gestures.
+ * Pointer → raw span conversion for resize gestures.
  *
- * During a resize drag the tile's top-left corner (origin) stays fixed and the
- * bottom-right corner follows the pointer. The raw span is computed from the
- * pointer's pixel position relative to the origin cell's top-left.
- *
- * Pure math, framework-free: takes raw Float/Int values.
+ * The tile's top-left stays fixed at [originPosition]; the pointer (viewport
+ * position plus current scroll, applied once) determines only the requested
+ * span. The position is never an output. Quantizing to product spans remains
+ * the caller's job via [RenderableSpans]. Pure math over [HomeGridMetrics].
  */
 object ResizeDragMath {
 
-    /**
-     * Compute the raw (un-quantized) span from a drag pointer position.
-     *
-     * @param pointerXPx horizontal pixel position of the drag pointer (viewport-local coordinates)
-     * @param pointerYPx vertical pixel position of the drag pointer (viewport-local coordinates)
-     * @param originPosition the tile's fixed top-left logical cell
-     * @param cellSizePx cell size in pixels
-     * @param columnGapPx gap between columns in pixels
-     * @param rowGapPx gap between rows in pixels
-     * @param originXPx horizontal pixel origin of column 0's left edge (caller-centered
-     * remainder split); defaults to 0 for edge-to-edge callers
-     * @param rowOrigin signed renderer row origin the container rebases around
-     * (typically the content `minRow`); defaults to 0
-     * @param originYPxRestPx vertical pixel rest offset applied on top of the rebased
-     * frame (G2 `gridOriginY`); defaults to 0
-     * @param scrollXPx horizontal content scroll in pixels. The value is added to the
-     * viewport-local pointer position; defaults to 0.
-     * @param scrollYPx vertical content scroll in pixels. The value is added to the
-     * viewport-local pointer position; defaults to 0.
-     * @return raw logical span (may be fractional-cell; caller quantizes). Minimum 1×1.
-     */
+    /** Raw logical span, minimum 1×1; may exceed what the product renders. */
     fun rawSpan(
-        pointerXPx: Float,
-        pointerYPx: Float,
+        metrics: HomeGridMetrics,
         originPosition: LogicalPosition,
-        cellSizePx: Float,
-        columnGapPx: Float,
-        rowGapPx: Float,
-        originXPx: Float = 0f,
-        rowOrigin: Long = 0L,
-        originYPxRestPx: Float = 0f,
-        scrollXPx: Float = 0f,
-        scrollYPx: Float = 0f,
-    ): LogicalSpan {
-        val cellWidth = cellSizePx + columnGapPx
-        val cellHeight = cellSizePx + rowGapPx
-
-        // Origin cell's top-left pixel coordinate, including the caller-centered
-        // horizontal origin and the signed vertical origin (G3): the container
-        // rebases rows around `rowOrigin` and shifts by the G2 rest offset, so
-        // `originTop = rest + (originRow - rowOrigin) * stride`.
-        val originLeftPx = originPosition.column * cellWidth + originXPx
-        val originTopPx = originYPxRestPx +
-            (originPosition.row.toLong() - rowOrigin).toFloat() * cellHeight
-
-        // Pointer offset from origin cell's top-left
-        // Resize pointers are viewport-local too. Convert both axes back to the
-        // content frame before comparing them with the fixed tile origin.
-        val dxPx = pointerXPx + scrollXPx - originLeftPx
-        val dyPx = pointerYPx + scrollYPx - originTopPx
-
-        // Raw span = ceil(offset / stride), minimum 1
-        val rawColumns = if (cellWidth > 0f) {
-            ((dxPx / cellWidth) + 1).toInt().coerceAtLeast(1)
-        } else {
-            1
-        }
-        val rawRows = if (cellHeight > 0f) {
-            ((dyPx / cellHeight) + 1).toInt().coerceAtLeast(1)
-        } else {
-            1
-        }
-
-        return LogicalSpan(rawColumns, rawRows)
-    }
+        pointerXPx: Float,
+        pointerYPxViewport: Float,
+        currentScrollXPx: Float = 0f,
+        currentScrollYPx: Float = 0f,
+    ): LogicalSpan = metrics.requestedSpan(
+        origin = originPosition,
+        contentX = pointerXPx + currentScrollXPx,
+        contentY = metrics.contentY(pointerYPxViewport, currentScrollYPx),
+    )
 }

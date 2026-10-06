@@ -44,7 +44,6 @@ internal class AllAppsRouteLoader(
     private val encodedIcons: AppIconSnapshotCache,
     private val decodedIcons: DecodedHomeIconCache<ImageBitmap>,
     private val columnsBound: Int = 5,
-    private val rowsBound: Int = 4096,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) {
     private val mutableState = MutableStateFlow<AllAppsViewState>(AllAppsViewState.Loading)
@@ -100,7 +99,7 @@ internal class AllAppsRouteLoader(
         homeIdentitySet = null
         loadJob = routeScope.launch {
             val result = withContext(ioDispatcher) {
-                repository.load(homeId, columnsBound, rowsBound)
+                repository.load(homeId, columnsBound)
             }
             synchronized(this@AllAppsRouteLoader) {
                 if (requestGeneration != generation || scope !== routeScope) return@launch
@@ -130,7 +129,7 @@ internal class AllAppsRouteLoader(
         loadJob?.cancel()
         loadJob = routeScope.launch {
             val result = withContext(ioDispatcher) {
-                repository.load(homeId, columnsBound, rowsBound)
+                repository.load(homeId, columnsBound)
             }
             synchronized(this@AllAppsRouteLoader) {
                 if (requestGeneration != generation || scope !== routeScope) return@launch

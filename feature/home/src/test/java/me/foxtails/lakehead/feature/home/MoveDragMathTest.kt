@@ -9,178 +9,129 @@ import org.junit.Test
 class MoveDragMathTest {
     private val size = 48f
     private val gap = 4f
+    private val stride = size + gap
+
+    private fun metrics(
+        originX: Float = 0f,
+        rest: Float = 0f,
+        cellHeight: Float = size,
+        columns: Int = 6,
+    ) = HomeGridMetrics(columns, size, cellHeight, gap, gap, originX, rest)
 
     private fun frame(
         span: GridSpan = GridSpan(1, 1),
-        baseline: Float = 0f,
-        legalityRows: Long = 20,
-        rowOrigin: Long = 0,
-        rowStride: Float = size + gap,
-    ) = MoveCoordinateFrame(
-        frozenScrollBaselinePx = baseline,
-        originXPx = 0f,
-        originYPx = 0f,
-        rowOrigin = rowOrigin,
-        columnStridePx = size + gap,
-        rowStridePx = rowStride,
-        columns = 6,
-        span = span,
-        legalityRows = legalityRows,
-        grabOffsetXPx = 0f,
-        grabOffsetYPx = 0f,
-    )
-
-    private fun result(
-        x: Float,
-        y: Float,
-        columns: Int = 6,
-        rows: Long = 20,
-        spanColumns: Int = 1,
-        spanRows: Int = 1,
-        originX: Float = 0f,
-        originY: Float = 0f,
-        scrollX: Float = 0f,
-        scrollY: Float = 0f,
+        metrics: HomeGridMetrics = metrics(),
         grabX: Float = 0f,
         grabY: Float = 0f,
-        firstRow: Long = 0,
-    ) = MoveDragMath.cellForPixel(
-        x, y, size, gap, gap, firstRow, columns, rows,
-        spanColumns, spanRows, originX, originY, scrollX, scrollY, grabX, grabY,
+    ) = MoveCoordinateFrame(metrics, span, grabX, grabY)
+
+    private fun map(frame: MoveCoordinateFrame, x: Float, y: Float, scroll: Float = 0f) =
+        MoveDragMath.cellForPixel(frame, x, y, scroll)
+
+    private fun valid(column: Int, row: Int) = MoveCellResult.Valid(
+        RequestedCell(column.toLong(), row.toLong()),
+        LogicalPosition(column, row),
+    )
+
+    private fun outOfBounds(column: Long, row: Long) = MoveCellResult.Rejected(
+        GridRules.Rejection.OUT_OF_BOUNDS,
+        RequestedCell(column, row),
     )
 
     @Test
-    fun validMappingIncludesCandidateAndPosition() {
+    fun validMappingIncludesRequestAndPosition() {
+        assertEquals(valid(3, 4), map(frame(), 156f, 208f))
+    }
+
+    @Test
+    fun strideGapOriginRestScrollAndGrabAreAppliedOnce() {
+        // Tile top-left should land on cell (2, 4): content (10 + 2*52, 26 + 4*52).
+        // Pointer holds the tile 30/40px inside it, with 52px of scroll applied.
+        val f = frame(metrics = metrics(originX = 10f, rest = 26f), grabX = 30f, grabY = 40f)
+        assertEquals(valid(2, 4), map(f, 114f + 30f, 234f + 40f - 52f, scroll = 52f))
+    }
+
+    @Test
+    fun requestAboveRowZeroIsNegativeAndRejectedNotClampedToRowZero() {
+        assertEquals(outOfBounds(0, -1), map(frame(), 0f, -1f))
+        assertEquals(outOfBounds(0, -3), map(frame(), 0f, -3 * stride))
+    }
+
+    @Test
+    fun requestLeftOfGridIsNegativeAndRejected() {
+        assertEquals(outOfBounds(-1, 0), map(frame(), -1f, 0f))
+    }
+
+    @Test
+    fun grabOffsetAboveTheTileTopCanPushTheRequestAboveRowZero() {
+        // Pointer on row 0 but grabbed 60px down the tile: tile top is above the grid.
+        assertEquals(outOfBounds(0, -2), map(frame(grabY = 60f + stride), 0f, 10f))
+    }
+
+    @Test
+    fun pastRightEdgeIsRejectedNotSnappedToLastLegalColumn() {
+        assertEquals(outOfBounds(6, 0), map(frame(), 6 * stride, 0f))
+        assertEquals(outOfBounds(5, 0), map(frame(span = GridSpan(2, 1)), 5 * stride, 0f))
         assertEquals(
-            MoveCellResult.Valid(MoveCellCandidate(3, 4), LogicalPosition(3, 4)),
-            result(156f, 208f),
+            outOfBounds(5, 0),
+            map(frame(span = GridSpan(4, 2)), 5 * stride, 0f),
         )
     }
 
     @Test
-    fun strideGapOriginScrollGrabAndDiagonalMapOnce() {
-        assertEquals(
-            MoveCellResult.Valid(MoveCellCandidate(2, 4), LogicalPosition(2, 4)),
-            MoveDragMath.cellForPixel(
-                10f + 104f - 20f + 30f,
-                26f + 104f - 52f + 40f,
-                size, gap, gap, 2L, 6, 20L, 1, 1,
-                10f, 26f, 20f, 52f, 30f, 40f,
-            ),
-        )
+    fun lastLegalColumnForTheSpanIsStillValid() {
+        assertEquals(valid(2, 0), map(frame(span = GridSpan(4, 2)), 2 * stride, 0f))
     }
 
     @Test
-    fun negativeBeyondAndSpanCrossingAreRejectedWithoutPosition() {
-        val expected = MoveCellResult.Rejected(GridRules.Rejection.OUT_OF_BOUNDS)
-        assertEquals(expected, result(-1f, 0f))
-        assertEquals(expected, result(0f, 0f, rows = 2, spanRows = 3))
-        assertEquals(expected, result(5 * 52f, 0f, spanColumns = 2))
-        assertEquals(expected, result(0f, 20 * 52f))
+    fun rowBeyondIntRepresentationIsRejected() {
+        val result = map(frame(), 0f, Float.MAX_VALUE) as MoveCellResult.Rejected
+        assertEquals(GridRules.Rejection.OUT_OF_BOUNDS, result.reason)
     }
 
     @Test
-    fun farRowIsValidWhenBoundsIncludeIt() {
-        assertEquals(
-            MoveCellResult.Valid(MoveCellCandidate(0, 100), LogicalPosition(0, 100)),
-            result(0f, 5200f, rows = 101),
-        )
+    fun farRowIsValidBecauseVerticalSpaceIsUnbounded() {
+        assertEquals(valid(0, 100), map(frame(), 0f, 5200f))
     }
 
     @Test
-    fun diagonalScrolledMappingReturnsLogicalPosition() {
-        assertEquals(
-            MoveCellResult.Valid(MoveCellCandidate(3, 4), LogicalPosition(3, 4)),
-            result(104f, 156f, scrollX = 52f, scrollY = 52f),
-        )
+    fun tallSpanHasNoFiniteBottomEdge() {
+        assertEquals(valid(0, 19), map(frame(span = GridSpan(1, 2)), 0f, 1000f))
+        assertEquals(valid(0, 0), map(frame(span = GridSpan(1, 2)), 0f, 0f))
     }
 
     @Test
-    fun frozenFrameUsesLiveScrollDeltaForRow() {
-        assertEquals(
-            MoveCellResult.Valid(MoveCellCandidate(0, 3), LogicalPosition(0, 3)),
-            MoveDragMath.cellForPixel(frame(baseline = 0f), 0f, 104f, 52f),
-        )
-    }
-
-    @Test
-    fun fittingSpanClampsAtRightEdge() {
-        assertEquals(
-            MoveCellResult.Valid(MoveCellCandidate(2, 0), LogicalPosition(2, 0)),
-            MoveDragMath.cellForPixel(frame(span = GridSpan(4, 2)), 5 * 52f, 0f, 0f),
-        )
-    }
-
-    @Test
-    fun fittingSpanClampsAtBottomEdge() {
-        assertEquals(
-            MoveCellResult.Valid(MoveCellCandidate(0, 2), LogicalPosition(0, 2)),
-            MoveDragMath.cellForPixel(
-                frame(span = GridSpan(1, 2), legalityRows = 4),
-                0f,
-                1000f,
-                0f,
-            ),
-        )
-    }
-
-    @Test
-    fun unfittableHeightIsOutOfBounds() {
-        assertEquals(
-            MoveCellResult.Rejected(GridRules.Rejection.OUT_OF_BOUNDS),
-            MoveDragMath.cellForPixel(
-                frame(span = GridSpan(1, 2), legalityRows = 1),
-                0f,
-                0f,
-                0f,
-            ),
-        )
-    }
-
-    @Test
-    fun nonzeroRowOriginIsNotAddedTwice() {
-        assertEquals(
-            MoveCellResult.Valid(MoveCellCandidate(0, 6), LogicalPosition(0, 6)),
-            MoveDragMath.cellForPixel(
-                frame(rowOrigin = 5),
-                0f,
-                52f,
-                0f,
-            ),
-        )
+    fun restOffsetShiftsPixelsButAddsNoRows() {
+        val f = frame(metrics = metrics(rest = 40f))
+        assertEquals(valid(0, 0), map(f, 0f, 40f))
+        assertEquals(valid(0, 1), map(f, 0f, 40f + stride))
     }
 
     @Test
     fun rowMappingUsesRowStride() {
+        assertEquals(valid(0, 1), map(frame(metrics = metrics(cellHeight = 76f)), 0f, 104f))
+    }
+
+    @Test
+    fun unfittableSpanIsRejected() {
         assertEquals(
-            MoveCellResult.Valid(MoveCellCandidate(0, 1), LogicalPosition(0, 1)),
-            MoveDragMath.cellForPixel(
-                frame(rowStride = 80f),
-                0f,
-                104f,
-                0f,
-            ),
+            GridRules.Rejection.OUT_OF_BOUNDS,
+            (map(frame(span = GridSpan(7, 2)), 0f, 0f) as MoveCellResult.Rejected).reason,
         )
     }
 
     @Test
-    fun unfittableSpanIsOutOfBounds() {
-        assertEquals(
-            MoveCellResult.Rejected(GridRules.Rejection.OUT_OF_BOUNDS),
-            MoveDragMath.cellForPixel(frame(span = GridSpan(7, 2)), 0f, 0f, 0f),
-        )
+    fun candidateDependsOnlyOnCurrentPointerAndCurrentScroll() {
+        val f = frame()
+        assertEquals(valid(0, 2), map(f, 0f, 104f, scroll = 0f))
+        assertEquals(valid(0, 3), map(f, 0f, 104f, scroll = stride))
+        // Returning to the first scroll value returns the first answer: no accumulated state.
+        assertEquals(valid(0, 2), map(f, 0f, 104f, scroll = 0f))
     }
 
     @Test
-    fun scrollOnlyChangeRemapsWithoutChangingFrame() {
-        val frozen = frame(baseline = 0f)
-        assertEquals(
-            MoveCellResult.Valid(MoveCellCandidate(0, 2), LogicalPosition(0, 2)),
-            MoveDragMath.cellForPixel(frozen, 0f, 104f, 0f),
-        )
-        assertEquals(
-            MoveCellResult.Valid(MoveCellCandidate(0, 3), LogicalPosition(0, 3)),
-            MoveDragMath.cellForPixel(frozen, 0f, 104f, 52f),
-        )
+    fun spanIsNeverAnOutputOfTheMapping() {
+        val result = map(frame(span = GridSpan(2, 2)), stride, stride) as MoveCellResult.Valid
+        assertEquals(LogicalPosition(1, 1), result.position)
     }
 }

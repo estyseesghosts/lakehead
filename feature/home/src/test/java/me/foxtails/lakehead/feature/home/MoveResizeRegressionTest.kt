@@ -51,20 +51,41 @@ class MoveResizeRegressionTest {
         GridSpan(spanColumns, spanRows),
     )
 
+    private val metrics = HomeGridMetrics(
+        columns = 6,
+        cellWidthPx = 100f,
+        cellHeightPx = 100f,
+        columnGapPx = 0f,
+        rowGapPx = 8f,
+        originXPx = 0f,
+        restOffsetYPx = 0f,
+    )
+
+    private fun begin(t: HomeRenderTile, placements: List<HomeRenderTile>): HomeEditState =
+        HomeEditState.Normal
+            .enterOnLongPress(t.itemId)
+            .beginMove(t, placements, metrics, 0f, 0f)
+
+    private fun HomeEditState.moveRequest(column: Int, row: Int, placements: List<HomeRenderTile>) =
+        updateMove(
+            MoveCellResult.Valid(
+                RequestedCell(column.toLong(), row.toLong()),
+                LogicalPosition(column, row),
+            ),
+            placements,
+        )
+
     @Test
     fun move_preservesSpan_andChangesOnlyPosition() {
         val moving = tile("moving", spanColumns = 2, spanRows = 1)
         val placements = listOf(moving)
-        val session = HomeEditSession.Idle
-            .enterIfLaunchable(moving, placements, columns = 6, rows = 6)
-            .updateMoveCandidate(LogicalPosition(3, 2), placements, 6, 6)
+        val state = begin(moving, placements).moveRequest(3, 2, placements)
 
-        assertEquals(LogicalSpan(2, 1), (session as HomeEditSession.Active).candidateSpan)
+        assertEquals(LogicalSpan(2, 1), state.moveDrag!!.span)
         val result = GridRules.move(
             listOf(placement("moving", 0, 0, 2)),
             ItemId("moving"),
             GridPosition(3, 2),
-            6,
             6,
         ) as GridRules.Result.Accepted
         assertEquals(GridPosition(3, 2), result.placements.single().position)
@@ -75,17 +96,17 @@ class MoveResizeRegressionTest {
     fun resize_preservesPosition_andChangesOnlySpan() {
         val resizing = tile("resizing", column = 2, row = 1)
         val placements = listOf(resizing)
-        val session = HomeEditSession.Idle
-            .enterIfLaunchable(resizing, placements, columns = 6, rows = 6)
-            .beginResize(armedAtDown = true)
-            .updateResizeCandidate(LogicalSpan(2, 3), placements, 6, 6)
+        val state = HomeEditState.Normal
+            .enterOnLongPress(resizing.itemId)
+            .toggleResizeArmed()
+            .beginResize(resizing, metrics)
+            .updateResize(LogicalSpan(2, 3), placements)
 
-        assertEquals(LogicalPosition(2, 1), (session as HomeEditSession.Active).origin)
+        assertEquals(LogicalPosition(2, 1), state.resizeDrag!!.position)
         val result = GridRules.resize(
             listOf(placement("resizing", 2, 1)),
             ItemId("resizing"),
             GridSpan(2, 3),
-            6,
             6,
         ) as GridRules.Result.Accepted
         assertEquals(GridPosition(2, 1), result.placements.single().position)
@@ -95,30 +116,24 @@ class MoveResizeRegressionTest {
     @Test
     fun resize_requiresArmedArrow() {
         val resizing = tile("resizing")
-        val session = HomeEditSession.Idle.enterIfLaunchable(resizing, listOf(resizing), 6, 6)
+        val selected = HomeEditState.Normal.enterOnLongPress(resizing.itemId)
 
-        assertSame(session, session.beginResize(armedAtDown = false))
-        assertEquals(EditMode.RESIZE, session.beginResize(armedAtDown = true).let {
-            (it as HomeEditSession.Active).mode
-        })
+        assertSame(selected, selected.beginResize(resizing, metrics))
+        assertTrue(selected.toggleResizeArmed().beginResize(resizing, metrics).resizeDrag != null)
     }
 
     @Test
     fun move_allowsDiagonalRowCrossingFreePlacement() {
         val moving = tile("moving", spanColumns = 2, spanRows = 2)
         val placements = listOf(moving)
-        val session = HomeEditSession.Idle
-            .enterIfLaunchable(moving, placements, 6, 6)
-            .updateMoveCandidate(LogicalPosition(3, 2), placements, 6, 6)
+        val state = begin(moving, placements).moveRequest(3, 2, placements)
 
-        assertTrue(session is HomeEditSession.Active)
-        assertEquals(CandidateValidity.VALID, (session as HomeEditSession.Active).candidateValidity)
+        assertEquals(CandidateValidity.VALID, state.moveDrag!!.validity)
         assertTrue(
             GridRules.move(
                 listOf(placement("moving", 0, 0, 2, 2)),
                 ItemId("moving"),
                 GridPosition(3, 2),
-                6,
                 6,
             ) is GridRules.Result.Accepted,
         )
@@ -129,35 +144,29 @@ class MoveResizeRegressionTest {
         val moving = tile("moving", spanColumns = 2)
         val obstacle = tile("obstacle", column = 3, row = 1)
         val placements = listOf(moving, obstacle)
-        val session = HomeEditSession.Idle
-            .enterIfLaunchable(moving, placements, 6, 6)
-            .updateMoveCandidate(LogicalPosition(2, 1), placements, 6, 6)
+        val state = begin(moving, placements).moveRequest(2, 1, placements)
 
-        assertEquals(CandidateValidity.COLLIDING, (session as HomeEditSession.Active).candidateValidity)
+        assertEquals(CandidateValidity.COLLIDING, state.moveDrag!!.validity)
         val result = GridRules.move(
             listOf(placement("moving", 0, 0, 2), placement("obstacle", 3, 1)),
             ItemId("moving"),
             GridPosition(2, 1),
-            6,
             6,
         ) as GridRules.Result.Rejected
         assertEquals(GridRules.Rejection.COLLISION, result.reason)
     }
 
     @Test
-    fun bounds_areRejected_bySessionAndGridRules() {
+    fun horizontalBoundsRemainRejectedButRowsAreUnbounded() {
         val moving = tile("moving", spanColumns = 2)
         val placements = listOf(moving)
-        val session = HomeEditSession.Idle
-            .enterIfLaunchable(moving, placements, 6, 6)
-            .updateMoveCandidate(LogicalPosition(5, 5), placements, 6, 6)
+        val state = begin(moving, placements).moveRequest(5, Int.MAX_VALUE, placements)
 
-        assertEquals(CandidateValidity.OUT_OF_BOUNDS, (session as HomeEditSession.Active).candidateValidity)
+        assertEquals(CandidateValidity.OUT_OF_BOUNDS, state.moveDrag!!.validity)
         val result = GridRules.move(
             listOf(placement("moving", 0, 0, 2)),
             ItemId("moving"),
-            GridPosition(5, 5),
-            6,
+            GridPosition(5, Int.MAX_VALUE),
             6,
         ) as GridRules.Result.Rejected
         assertEquals(GridRules.Rejection.OUT_OF_BOUNDS, result.reason)
@@ -170,7 +179,7 @@ class MoveResizeRegressionTest {
             placement("fixed", 2, 0),
             placement("lower", 0, 3),
         )
-        val result = GridRules.move(current, ItemId("moving"), GridPosition(4, 4), 6, 6)
+        val result = GridRules.move(current, ItemId("moving"), GridPosition(4, 4), 6)
             as GridRules.Result.Accepted
 
         assertEquals(listOf(ItemId("moving"), ItemId("fixed"), ItemId("lower")), result.placements.map { it.id })
@@ -187,7 +196,7 @@ class MoveResizeRegressionTest {
             placement("fixed", 4, 0),
             placement("lower", 0, 4),
         )
-        val result = GridRules.resize(current, ItemId("resizing"), GridSpan(2, 2), 6, 6)
+        val result = GridRules.resize(current, ItemId("resizing"), GridSpan(2, 2), 6)
             as GridRules.Result.Accepted
 
         assertEquals(GridPosition(1, 1), result.placements[0].position)

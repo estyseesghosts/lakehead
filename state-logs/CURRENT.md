@@ -1,9 +1,15 @@
+---
 # Current execution state
-- Phase: Two-axis drag fix — **CODE-COMPLETE, DEVICE-PENDING**.
-- Active objective: User/device verification of free 2D movement and related drag interactions.
-- Owner: user/device validation.
-- Latest handoff: [`handoffs/2026-09-26-two-axis-drag-fix.md`](handoffs/2026-09-26-two-axis-drag-fix.md).
-- Device: NOT-RUN — actual up/down/diagonal movement, collision snapback, resize, and edge controls remain unverified.
-- Build/test/lint: **SUCCESS** — home unit 397 passed (cached/up-to-date), compile, assembleDebug, test, lint, repo_map/module_graph. Audits only have pre-existing findings.
-- Known issues: Device proof remains outstanding; do not claim free 2D movement or related interactions are device-verified.
-- Exact next operation: User/device verifies free 2D movement; exit when any concrete device failure is reported as a bounded follow-up.
+- Phase: Home grid repair Phase 3 — in progress (Slice 3.1 started; Phase 2 closed at unit level, not device-verified).
+- Active objective: Phase 3 of `docs/lakehead-grid-repair-plan.md`, one authoritative `HomeEditState` in `:feature:home`. Task: `docs/agents/tasks/grid-repair-phase0.md` (plan in `docs/lakehead-grid-repair-plan.md`).
+- Owner: orchestrator / next agent.
+- Latest handoff: [handoffs/2026-10-06-grid-repair-phase3.md](handoffs/2026-10-06-grid-repair-phase3.md).
+- Prior phase handoff retained as history: [handoffs/2026-10-06-grid-repair-phase2.md](handoffs/2026-10-06-grid-repair-phase2.md).
+- Prior phase handoff retained as history: [handoffs/2026-10-06-grid-repair-phase0.md](handoffs/2026-10-06-grid-repair-phase0.md).
+- Prior phase handoff retained as history: [handoffs/2026-10-05-grid-repair-phase1.md](handoffs/2026-10-05-grid-repair-phase1.md).
+- Prior velocity handoff retained as history: [handoffs/2026-09-30-move-velocity-guard.md](handoffs/2026-09-30-move-velocity-guard.md).
+- Prior nav-viewport handoff retained as history: [handoffs/2026-09-29-nav-viewport-guard.md](handoffs/2026-09-29-nav-viewport-guard.md).
+- Validation: `./gradlew test --rerun-tasks` PASS (263 tasks executed), `assembleDebug` PASS, `lint` completed without errors, `:feature:home:compileDebugAndroidTestKotlin` PASS, `python3 -m unittest discover -s tools/scripts -t tools/scripts` PASS (16 tests); `repo_map.py`, `module_graph.py` (graph unchanged), `function_audit.py` (19 findings), `compose_audit.py` completed. Exit grep clean in `feature/home/src/main` outside `HomeGridGeometry.kt` (see handoff).
+- Known issues: nothing verified on a device; no instrumentation test run. Animated rest offset (`originAnim`) still moves under a drag (contract item 6). MOVE re-freeze is a minimal bridge. `HomeCanvasGrid.kt` still 1,721 lines. Retired designsystem helpers (`ResizeCandidateOverlay`, `resizeCandidateFrame`, `TileBounds.signedBounds`, `WindowedSpanContainer.rowOrigin`) are unused by `:feature:home` and await Phase 5/9. Preserve the dirty worktree; no staging/commit.
+- Exact next operation: when authorized, implement only Slice 3.1, the authoritative `HomeEditState` in `:feature:home`; exit when one state object owns the edit session, frozen metrics and candidate, and unit tests prove position is unchanged during RESIZE and metrics are unchanged during a drag.
+---

@@ -642,7 +642,7 @@ class ShortcutMenuCoordinatorTest {
         private val mutableBindings = bindings.toMutableMap()
         var bindingLoads = 0
             private set
-        override fun load(homeId: HomeId, columns: Int, rows: Int): LoadResult = LoadResult.NotFound
+        override fun load(homeId: HomeId, columns: Int): LoadResult = LoadResult.NotFound
         override fun place(
             homeId: HomeId,
             itemId: ItemId,
@@ -650,12 +650,11 @@ class ShortcutMenuCoordinatorTest {
             position: LogicalPosition,
             span: LogicalSpan,
             columns: Int,
-            rows: Int,
             replacingId: ItemId?,
         ): MutationResult = error("menu coordinator must not write")
-        override fun move(homeId: HomeId, itemId: ItemId, position: LogicalPosition, columns: Int, rows: Int): MutationResult =
+        override fun move(homeId: HomeId, itemId: ItemId, position: LogicalPosition, columns: Int): MutationResult =
             error("menu coordinator must not write")
-        override fun resize(homeId: HomeId, itemId: ItemId, span: LogicalSpan, columns: Int, rows: Int): MutationResult =
+        override fun resize(homeId: HomeId, itemId: ItemId, span: LogicalSpan, columns: Int): MutationResult =
             error("menu coordinator must not write")
         override fun remove(homeId: HomeId, itemId: ItemId): RemoveResult = error("menu coordinator must not write")
         override fun ensureHome(homeId: HomeId): Boolean = error("menu coordinator must not write")

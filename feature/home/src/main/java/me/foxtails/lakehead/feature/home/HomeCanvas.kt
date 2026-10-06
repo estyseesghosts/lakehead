@@ -205,11 +205,19 @@ const val HOME_ROLE_DESCRIPTION: String = "Set ProtoLaunch as default home"
  * A3 usable canvas height: raw viewport height minus the caller-resolved bottom
  * clearance (nav pill / system-gesture reserve), floored at zero.
  *
+ * Fail-fast: for positive [rawHeightPx], the raw height must exceed
+ * [bottomClearancePx]. The zero-height transient ([rawHeightPx] == 0) returns 0
+ * without throwing.
+ *
  * Pure, framework-free and unit-testable.
  */
 internal fun usableCanvasHeightPx(rawHeightPx: Int, bottomClearancePx: Int): Int {
     require(rawHeightPx >= 0) { "rawHeightPx must be non-negative" }
     require(bottomClearancePx >= 0) { "bottomClearancePx must be non-negative" }
+    if (rawHeightPx == 0) return 0
+    require(rawHeightPx > bottomClearancePx) {
+        "rawHeightPx ($rawHeightPx) must exceed bottomClearancePx ($bottomClearancePx)"
+    }
     return (rawHeightPx - bottomClearancePx).coerceAtLeast(0)
 }
 

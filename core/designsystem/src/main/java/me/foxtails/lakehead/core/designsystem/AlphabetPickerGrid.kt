@@ -15,6 +15,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.disabled
+import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextAlign
@@ -65,9 +67,8 @@ fun jumpContentDescription(letter: Char): String = "Jump to $letter"
  *
  * - Enabled (in [enabledLetters]): [contentDescription][jumpContentDescription] plus an
  *   `OnClick` action invoking `onLetterTap(letter)`.
- * - Disabled: same description and role but `clickable(enabled = false)`, which strips
- *   the `OnClick` action and marks the node `disabled()`, so assistive tech announces
- *   the target without offering a dead action.
+ * - Disabled: same description and role but no `OnClick` action and marked `disabled()`,
+ *   so assistive tech announces the target without offering a dead action.
  *
  * `null` spares are empty, non-clickable boxes with no description, role or actions.
  *
@@ -134,11 +135,20 @@ private fun AlphabetPickerCell(
             .testTag(CELL_PREFIX + index)
             .semantics(mergeDescendants = true) {
                 this.contentDescription = jumpContentDescription(letter)
+                this.role = Role.Button
+                if (!isEnabled) {
+                    this.disabled()
+                }
             }
-            .clickable(
-                enabled = isEnabled,
-                onClick = { onLetterTap(letter) },
-                role = Role.Button,
+            .then(
+                if (isEnabled) {
+                    Modifier.clickable(
+                        onClick = { onLetterTap(letter) },
+                        role = Role.Button,
+                    )
+                } else {
+                    Modifier
+                },
             ),
         contentAlignment = Alignment.Center,
     ) {

@@ -4,18 +4,22 @@ import me.foxtails.lakehead.core.designsystem.GestureArbitration
 import me.foxtails.lakehead.core.grid.GridColumns
 import me.foxtails.lakehead.core.grid.GridRowWindow
 import me.foxtails.lakehead.core.grid.GridVerticalExtent
+import me.foxtails.lakehead.core.model.AppIdentity
+import me.foxtails.lakehead.core.model.ComponentIdentity
 import me.foxtails.lakehead.core.model.HomeId
+import me.foxtails.lakehead.core.model.ItemAvailability
 import me.foxtails.lakehead.core.model.ItemId
 import me.foxtails.lakehead.core.model.LogicalPosition
 import me.foxtails.lakehead.core.model.LogicalSpan
+import me.foxtails.lakehead.core.model.ProfileId
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * A1 truth table for [isHomeHold]: hold iff an edit session is active or wiggle
- * editing is engaged. B1 removed the shown-surface arm: no idle/editing flick
+ * A1 truth table for [isHomeHold]: hold iff edit mode is engaged (a drag
+ * implies edit mode). B1 removed the shown-surface arm: no idle/editing flick
  * opens a surface, so there is no shown state left to hold.
  *
  * P0 guards: [gridHoldSignal] forces false on empty tiles (populated→empty
@@ -26,21 +30,32 @@ class HomeHoldTest {
 
     private val tileId = ItemId("tile-1")
 
-    private fun activeSession(): HomeEditSession.Active = HomeEditSession.Active(
+    private val tile = HomeRenderTile(
         itemId = tileId,
-        origin = LogicalPosition(0, 0),
-        originSpan = LogicalSpan(1, 1),
-        candidatePosition = LogicalPosition(0, 0),
-        candidateSpan = LogicalSpan(1, 1),
-        lastValidSpan = LogicalSpan(1, 1),
-        lastValidPosition = LogicalPosition(0, 0),
-        candidateValidity = CandidateValidity.VALID,
-        mode = EditMode.MOVE,
+        appIdentity = AppIdentity(ProfileId("personal"), ComponentIdentity("com.app", "Main")),
+        position = LogicalPosition(0, 0),
+        span = LogicalSpan(1, 1),
+        availability = ItemAvailability.AVAILABLE,
+        label = "tile",
+        icon = null,
+        isLaunchable = true,
     )
 
-    private fun activeResizeSession(): HomeEditSession.Active = activeSession().copy(
-        mode = EditMode.RESIZE,
+    private val metrics = HomeGridMetrics(
+        columns = 5,
+        cellWidthPx = 100f,
+        cellHeightPx = 100f,
+        columnGapPx = 0f,
+        rowGapPx = 8f,
+        originXPx = 0f,
+        restOffsetYPx = 0f,
     )
+
+    private val selected = HomeEditState.Normal.enterOnLongPress(tileId)
+
+    private fun moving() = selected.beginMove(tile, listOf(tile), metrics, 0f, 0f)
+
+    private fun resizing() = selected.toggleResizeArmed().beginResize(tile, metrics)
 
     private fun loadedEmpty(): HomeRenderState.Loaded {
         val homeId = HomeId("home-1")
@@ -57,70 +72,44 @@ class HomeHoldTest {
     }
 
     @Test
-    fun idleNormalHidden_doesNotHold() {
-        assertFalse(
-            isHomeHold(
-                null,
-                HomeInteractionController.Normal,
-            ),
-        )
+    fun normal_doesNotHold() {
+        assertFalse(isHomeHold(HomeEditState.Normal))
     }
 
     @Test
-    fun activeOnly_holds() {
-        assertTrue(
-            isHomeHold(
-                activeSession(),
-                HomeInteractionController.Normal,
-            ),
-        )
+    fun editingWithSelection_holds() {
+        assertTrue(isHomeHold(selected))
     }
 
     @Test
-    fun editingOnly_holds() {
-        assertTrue(
-            isHomeHold(
-                null,
-                HomeInteractionController.Editing(selectedId = tileId),
-            ),
-        )
+    fun moveDrag_holds() {
+        assertTrue(moving().isDragging)
+        assertTrue(isHomeHold(moving()))
     }
 
     @Test
-    fun activeAndEditing_holds() {
-        assertTrue(
-            isHomeHold(
-                activeSession(),
-                HomeInteractionController.Editing(selectedId = tileId),
-            ),
-        )
-    }
-
-    @Test
-    fun resizeActiveOnly_holds() {
-        assertTrue(
-            isHomeHold(
-                activeResizeSession(),
-                HomeInteractionController.Normal,
-            ),
-        )
+    fun resizeDrag_holds() {
+        assertTrue(resizing().isDragging)
+        assertTrue(isHomeHold(resizing()))
     }
 
     @Test
     fun editingNullSelected_holds() {
-        assertTrue(
-            isHomeHold(
-                null,
-                HomeInteractionController.Editing(selectedId = null),
-            ),
-        )
+        val unselected = selected.onTileRemoved(tileId)
+        assertEquals(null, unselected.selectedTileId)
+        assertTrue(isHomeHold(unselected))
+    }
+
+    @Test
+    fun exit_releasesTheHold() {
+        assertFalse(isHomeHold(moving().exit()))
     }
 
     // B1 regression: swipe-to-open is removed. An idle tile swipe that
     // completes at the arbitration layer (COMPLETE under the retired S2
     // thresholds, inlined here as history) must neither hold the pager via
     // a surface nor reach any surface callback: the grid exposes no surface
-    // rows/execute/pin API, and the hold covers active/editing only.
+    // rows/execute/pin API, and the hold covers edit mode only.
     @Test
     fun b1_completeIdleSwipe_showsNoSurface() {
         val settle = GestureArbitration.settleDrag(
@@ -131,74 +120,29 @@ class HomeHoldTest {
             cancelFraction = 0.08f,
         )
         assertEquals(GestureArbitration.Settle.COMPLETE, settle)
-        assertFalse(
-            gridHoldSignal(
-                tilesEmpty = false,
-                active = null,
-                interaction = HomeInteractionController.Normal,
-            ),
-        )
+        assertFalse(gridHoldSignal(tilesEmpty = false, editState = HomeEditState.Normal))
     }
 
     // P0: empty grid never holds, even with stale transient inputs that would
     // otherwise hold. Covers the populated→empty transition where the grid
     // early-returns before transient state exists and must emit false.
     @Test
-    fun gridHoldSignal_emptyWithActive_holdsFalse() {
-        assertFalse(
-            gridHoldSignal(
-                tilesEmpty = true,
-                active = activeSession(),
-                interaction = HomeInteractionController.Normal,
-            ),
-        )
+    fun gridHoldSignal_emptyWithDrag_holdsFalse() {
+        assertFalse(gridHoldSignal(tilesEmpty = true, editState = moving()))
+        assertFalse(gridHoldSignal(tilesEmpty = true, editState = resizing()))
     }
 
     @Test
-    fun gridHoldSignal_emptyWithActiveAndEditing_holdsFalse() {
-        assertFalse(
-            gridHoldSignal(
-                tilesEmpty = true,
-                active = activeResizeSession(),
-                interaction = HomeInteractionController.Editing(selectedId = tileId),
-            ),
-        )
-    }
-
-    @Test
-    fun gridHoldSignal_emptyWithEditingNull_holdsFalse() {
-        assertFalse(
-            gridHoldSignal(
-                tilesEmpty = true,
-                active = null,
-                interaction = HomeInteractionController.Editing(selectedId = null),
-            ),
-        )
+    fun gridHoldSignal_emptyWithEditing_holdsFalse() {
+        assertFalse(gridHoldSignal(tilesEmpty = true, editState = selected))
     }
 
     @Test
     fun gridHoldSignal_nonEmptyDelegatesToPredicate() {
-        assertFalse(
-            gridHoldSignal(
-                tilesEmpty = false,
-                active = null,
-                interaction = HomeInteractionController.Normal,
-            ),
-        )
-        assertTrue(
-            gridHoldSignal(
-                tilesEmpty = false,
-                active = activeSession(),
-                interaction = HomeInteractionController.Normal,
-            ),
-        )
-        assertTrue(
-            gridHoldSignal(
-                tilesEmpty = false,
-                active = activeResizeSession(),
-                interaction = HomeInteractionController.Normal,
-            ),
-        )
+        assertFalse(gridHoldSignal(tilesEmpty = false, editState = HomeEditState.Normal))
+        assertTrue(gridHoldSignal(tilesEmpty = false, editState = selected))
+        assertTrue(gridHoldSignal(tilesEmpty = false, editState = moving()))
+        assertTrue(gridHoldSignal(tilesEmpty = false, editState = resizing()))
     }
 
     // P0: Loading/NotFound never compose the grid, so the canvas must reset

@@ -73,9 +73,12 @@ enum class FeedDiagnosticStage {
  * - [NOT_RESOLVABLE]: reserved for the resolution step (D3+ ownership).
  * - [BIND_FAILED]: reserved for the bind step (D3 ownership).
  * - [DISCONNECTED]: reserved for transport loss (D3 ownership).
- * - [NEGOTIATION_FAILED]: reserved for the AIDL handshake (D4 ownership).
- * - [SURFACE_SESSION_FAILED]: reserved for the window/session handshake (D4 ownership).
- * - [RENDERING_FAILED]: reserved for first-pixel/content rendering (D4 ownership).
+ * - [NEGOTIATION_FAILED]: the AIDL handshake broke before any provider callback
+ *   (D4 ownership, via [FeedProtocolTrace] + [AidlFeedBridge]).
+ * - [SURFACE_SESSION_FAILED]: the window/session handshake broke (D4 ownership,
+ *   via [FeedProtocolTrace] + [AidlFeedBridge]).
+ * - [RENDERING_FAILED]: explicit provider no-content signal after a confirmed
+ *   session (D4 ownership, via [FeedProtocolTrace] + [AidlFeedBridge]).
  */
 enum class FeedDiagnosticStatus(val stage: FeedDiagnosticStage) {
     NO_PROVIDER(FeedDiagnosticStage.DISCOVERY),
@@ -144,6 +147,33 @@ enum class FeedDiagnosticCause {
 
     /** A matching connection later reported `onBindingDied` or binder death. */
     BINDER_DIED,
+
+    /**
+     * A control transact (`openOverlay`, `closeOverlay`, `onScroll`) failed before any
+     * provider callback was ever observed: the AIDL negotiation itself broke, not an
+     * established session. D4 ownership; reported with
+     * [FeedDiagnosticStatus.NEGOTIATION_FAILED]. A failure after a callback was
+     * observed is transport loss on a live session (`DISCONNECTED`), never this.
+     */
+    CONTROL_TRANSACT_FAILED,
+
+    /**
+     * The `windowAttached` transact failed: the host window was never registered, so
+     * the provider holds no session. D4 ownership; reported with
+     * [FeedDiagnosticStatus.SURFACE_SESSION_FAILED]. A completed `windowAttached`
+     * transact is only "signal sent" (oneway, no acknowledgement) — session proof
+     * requires an observed provider callback, tracked in [FeedProtocolTrace].
+     */
+    WINDOW_TRANSACT_FAILED,
+
+    /**
+     * The provider explicitly reported it holds no overlay content
+     * (`hasOverlayContent() == false`) after a session was confirmed by an observed
+     * callback. D4 ownership; reported with [FeedDiagnosticStatus.RENDERING_FAILED].
+     * Only an explicit provider signal reports this — absence of a signal is
+     * "unconfirmed", never a failure, and the host surface tag is never render proof.
+     */
+    CONTENT_ABSENT,
 }
 
 /**

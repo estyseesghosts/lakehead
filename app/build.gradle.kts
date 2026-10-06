@@ -29,6 +29,7 @@ dependencies {
     implementation(project(":core:navigation"))
     implementation(project(":core:designsystem"))
     implementation(project(":platform:launcherapps"))
+    implementation(project(":platform:shortcuts"))
     implementation(project(":platform:feed"))
     implementation(project(":data:repository"))
     implementation(project(":data:database"))

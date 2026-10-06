@@ -89,17 +89,15 @@ class ShortcutSurfaceRowTest {
         val pin = composeRule.onNodeWithTag(PIN_TOGGLE_TAG, useUnmergedTree = true)
         launch.assert(hasClickAction())
         pin.assert(hasClickAction())
-        composeRule.runOnIdle {
-            assertEquals(Role.Button, launch.fetchSemanticsNode().config[SemanticsProperties.Role])
-            assertEquals(Role.Button, pin.fetchSemanticsNode().config[SemanticsProperties.Role])
-        }
+        composeRule.waitForIdle()
+        assertEquals(Role.Button, launch.fetchSemanticsNode().config[SemanticsProperties.Role])
+        assertEquals(Role.Button, pin.fetchSemanticsNode().config[SemanticsProperties.Role])
 
         launch.performClick()
         pin.performClick()
-        composeRule.runOnIdle {
-            assertEquals(1, executions)
-            assertEquals(1, toggles)
-        }
+        composeRule.waitForIdle()
+        assertEquals(1, executions)
+        assertEquals(1, toggles)
     }
 
     @Test
@@ -169,13 +167,11 @@ class ShortcutSurfaceRowTest {
         composeRule.onNodeWithContentDescription("Pin \"Search\" to tile").assertExists()
         val pin = composeRule.onNodeWithTag(PIN_TOGGLE_TAG, useUnmergedTree = true)
             .fetchSemanticsNode()
-        composeRule.runOnIdle {
-            assertFalse(
-                "disabled pin must expose no click action",
-                pin.config.contains(SemanticsActions.OnClick),
-            )
-            assertEquals(Role.Button, pin.config[SemanticsProperties.Role])
-        }
+        assertFalse(
+            "disabled pin must expose no click action",
+            pin.config.contains(SemanticsActions.OnClick),
+        )
+        assertEquals(Role.Button, pin.config[SemanticsProperties.Role])
         // Rank order is caller-owned: rows render in the order supplied.
         composeRule.onNodeWithTag(SHORTCUT_SURFACE_ROW_TAG, useUnmergedTree = true).assertExists()
     }

@@ -27,9 +27,11 @@ object ShortcutOrdering {
      *
      * Returns at most [capacity] items from the front of [fullList]; remaining
      * items are overflow and not rendered. A [capacity] of 0 always returns
-     * an empty list regardless of [fullList] size.
+     * an empty list regardless of [fullList] size.  Generic over the element
+     * type so tile arrangement (which renders label-joined presentation
+     * entries) shares this exact window instead of reimplementing it.
      */
-    fun visibleShortcuts(fullList: List<ShortcutRef>, capacity: Int): List<ShortcutRef> {
+    fun <T> visibleShortcuts(fullList: List<T>, capacity: Int): List<T> {
         require(capacity >= 0) { "capacity must be non-negative" }
         return fullList.take(capacity)
     }
@@ -38,8 +40,9 @@ object ShortcutOrdering {
      * Derives the overflow (hidden) subset of [fullList] for the given [capacity].
      *
      * Returns items beyond the first [capacity]. An empty list when all items fit.
+     * Generic over the element type; see [visibleShortcuts].
      */
-    fun overflowShortcuts(fullList: List<ShortcutRef>, capacity: Int): List<ShortcutRef> {
+    fun <T> overflowShortcuts(fullList: List<T>, capacity: Int): List<T> {
         require(capacity >= 0) { "capacity must be non-negative" }
         return fullList.drop(capacity)
     }
@@ -98,13 +101,14 @@ object ShortcutOrdering {
      * Derives the visible list after a resize, preserving the full list.
      *
      * The full list is unchanged; only the visible window changes based on
-     * the new [capacity]. Returns the new visible subset.
+     * the new [capacity]. Returns the new visible subset.  Generic over the
+     * element type; see [visibleShortcuts].
      */
-    fun resize(
-        fullList: List<ShortcutRef>,
+    fun <T> resize(
+        fullList: List<T>,
         oldCapacity: Int,
         newCapacity: Int,
-    ): List<ShortcutRef> {
+    ): List<T> {
         require(oldCapacity >= 0) { "oldCapacity must be non-negative" }
         require(newCapacity >= 0) { "newCapacity must be non-negative" }
         return visibleShortcuts(fullList, newCapacity)
@@ -115,12 +119,13 @@ object ShortcutOrdering {
      *
      * Returns the visible subset for the given [capacity]. This is the
      * cold-start equivalent of [visibleShortcuts] — the full list is loaded
-     * from persistence and only the visible prefix is rendered.
+     * from persistence and only the visible prefix is rendered.  Generic over
+     * the element type; see [visibleShortcuts].
      */
-    fun restore(
-        fullList: List<ShortcutRef>,
+    fun <T> restore(
+        fullList: List<T>,
         capacity: Int,
-    ): List<ShortcutRef> = visibleShortcuts(fullList, capacity)
+    ): List<T> = visibleShortcuts(fullList, capacity)
 
     /**
      * Lays out [visible] shortcuts according to the given [layout] style.

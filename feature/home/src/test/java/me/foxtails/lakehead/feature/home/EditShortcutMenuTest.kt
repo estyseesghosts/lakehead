@@ -50,17 +50,24 @@ class EditShortcutMenuTest {
     private val tiles = listOf(tile("a"), tile("b"))
     private val entries = listOf(entry("s1"), entry("s2"))
 
-    private fun active(mode: EditMode = EditMode.MOVE) = HomeEditSession.Active(
-        itemId = ItemId("a"),
-        origin = LogicalPosition(0, 0),
-        originSpan = LogicalSpan(1, 1),
-        candidatePosition = LogicalPosition(0, 0),
-        candidateSpan = LogicalSpan(1, 1),
-        lastValidSpan = LogicalSpan(1, 1),
-        lastValidPosition = LogicalPosition(0, 0),
-        candidateValidity = CandidateValidity.VALID,
-        mode = mode,
+    private val gridMetrics = HomeGridMetrics(
+        columns = 6,
+        cellWidthPx = 100f,
+        cellHeightPx = 100f,
+        columnGapPx = 0f,
+        rowGapPx = 8f,
+        originXPx = 0f,
+        restOffsetYPx = 0f,
     )
+
+    private fun movingState() = HomeEditState.Normal
+        .enterOnLongPress(ItemId("a"))
+        .beginMove(tiles.first(), tiles, gridMetrics, 0f, 0f)
+
+    private fun resizingState() = HomeEditState.Normal
+        .enterOnLongPress(ItemId("a"))
+        .toggleResizeArmed()
+        .beginResize(tiles.first(), gridMetrics)
 
     // ---- follow/dismiss selector ----
 
@@ -100,28 +107,34 @@ class EditShortcutMenuTest {
 
     @Test
     fun idleSessionWithSelection_isVisible() {
-        assertTrue(isEditShortcutMenuVisible(null, ItemId("a"), tiles, entries))
+        val selected = HomeEditState.Normal.enterOnLongPress(ItemId("a"))
+        assertTrue(isEditShortcutMenuVisible(selected.isDragging, selected.selectedTileId, tiles, entries))
     }
 
     @Test
     fun moveStart_dismissesWithZeroActivation() {
-        assertFalse(isEditShortcutMenuVisible(active(EditMode.MOVE), ItemId("a"), tiles, entries))
+        val moving = movingState()
+        assertTrue(moving.isDragging)
+        assertFalse(isEditShortcutMenuVisible(moving.isDragging, moving.selectedTileId, tiles, entries))
     }
 
     @Test
     fun resizeStart_dismissesWithZeroActivation() {
-        assertFalse(isEditShortcutMenuVisible(active(EditMode.RESIZE), ItemId("a"), tiles, entries))
+        val resizing = resizingState()
+        assertTrue(resizing.isDragging)
+        assertFalse(isEditShortcutMenuVisible(resizing.isDragging, resizing.selectedTileId, tiles, entries))
     }
 
     @Test
     fun emptyTapBackNavigate_dismissesViaNullSelection() {
-        // exitOnEmptyTap/exitOnBack/exitOnNavigate all yield Normal (no selectedId).
-        assertFalse(isEditShortcutMenuVisible(null, null, tiles, entries))
+        // exit() yields Normal (no selectedTileId).
+        val exited = HomeEditState.Normal.enterOnLongPress(ItemId("a")).exit()
+        assertFalse(isEditShortcutMenuVisible(exited.isDragging, exited.selectedTileId, tiles, entries))
     }
 
     @Test
     fun removal_dismissesViaMissingTile() {
-        assertFalse(isEditShortcutMenuVisible(null, ItemId("gone"), tiles, entries))
+        assertFalse(isEditShortcutMenuVisible(false, ItemId("gone"), tiles, entries))
     }
 
     // ---- B1 selection scoping (owner gate) ----

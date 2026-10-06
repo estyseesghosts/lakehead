@@ -1,7 +1,7 @@
 ---
 description: Read-only mapper of ProtoLaunch modules, symbols, callers and ownership.
 mode: subagent
-model: opencode-go/muse-spark-1.3-contributor
+model: opencode-go/longcat-2.5-preview-free
 permissions:
   - action: "*"
     resource: "*"

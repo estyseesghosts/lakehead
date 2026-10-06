@@ -523,12 +523,12 @@ class AidlFeedBridgeTest {
         val service = FakeService(overlay)
         val losses = AtomicInteger(0)
         var bridgeRef: AidlFeedBridge? = null
-        val bridge = AidlFeedBridge(service.binder) {
+        val bridge = AidlFeedBridge(service.binder, onConnectionLost = {
             losses.incrementAndGet()
             // Re-entrant teardown from the delivery thread must not deadlock the
             // bounded close-wait (same-thread skip).
             bridgeRef?.close()
-        }
+        })
         bridgeRef = bridge
 
         service.deathRecipients.single().binderDied()
@@ -776,6 +776,199 @@ class AidlFeedBridgeTest {
         assertEquals(listOf(3), received)
     }
 
+    // D4 protocol trace: binder → negotiation → window/session → render with
+    // first-failure attribution. A completed oneway transact is never proof of the
+    // next stage: only an observed provider callback confirms a session, and only
+    // an explicit content signal confirms render.
+
+    @Test
+    fun windowAttachFailureReportsSessionStageFirst() {
+        val harness = Harness()
+        harness.overlay.failWith = RemoteException("dead")
+
+        harness.bridge.windowAttached(WindowManager.LayoutParams(), 0)
+
+        // Session-stage verdict alongside the transport loss: the window was never
+        // registered, so the provider holds no session.
+        assertEquals(
+            listOf(
+                FeedDiagnosticStatus.SURFACE_SESSION_FAILED to
+                    FeedDiagnosticCause.WINDOW_TRANSACT_FAILED,
+            ),
+            harness.protocolFailures.toList(),
+        )
+        assertEquals(1, harness.losses.get())
+        val trace = harness.bridge.protocolTrace()
+        assertFalse(trace.windowSignalSent)
+        assertFalse(trace.sessionConfirmed)
+        assertEquals(FeedDiagnosticStatus.SURFACE_SESSION_FAILED, trace.firstFailure?.status)
+        assertEquals(FeedDiagnosticCause.WINDOW_TRANSACT_FAILED, trace.firstFailure?.cause)
+    }
+
+    @Test
+    fun controlFailureBeforeCallbackReportsNegotiationStage() {
+        val harness = Harness()
+        harness.overlay.failWith = RemoteException("dead")
+
+        harness.bridge.setProgress(0.5f)
+
+        // No provider callback was ever observed: the handshake itself broke, not a
+        // live session.
+        assertEquals(
+            listOf(
+                FeedDiagnosticStatus.NEGOTIATION_FAILED to
+                    FeedDiagnosticCause.CONTROL_TRANSACT_FAILED,
+            ),
+            harness.protocolFailures.toList(),
+        )
+        assertEquals(1, harness.losses.get())
+        assertEquals(
+            FeedDiagnosticStatus.NEGOTIATION_FAILED,
+            harness.bridge.protocolTrace().firstFailure?.status,
+        )
+    }
+
+    @Test
+    fun controlFailureAfterCallbackReportsLossOnly() {
+        val harness = Harness()
+        harness.bridge.callback.overlayScrollChanged(0.5f)
+        assertTrue(harness.bridge.protocolTrace().sessionConfirmed)
+        harness.overlay.failWith = RemoteException("dead")
+
+        harness.bridge.setProgress(0.75f)
+
+        // A callback was observed, so this is transport loss on a live session
+        // (the gateway's DISCONNECTED path) — never a negotiation verdict.
+        assertTrue(harness.protocolFailures.isEmpty())
+        assertEquals(1, harness.losses.get())
+        assertTrue(harness.bridge.protocolTrace().sessionConfirmed)
+    }
+
+    @Test
+    fun successfulAttachMarksSignalSentWithoutSession() {
+        val harness = Harness()
+        assertFalse(harness.bridge.protocolTrace().windowSignalSent)
+
+        harness.bridge.windowAttached(WindowManager.LayoutParams(), 0)
+
+        // The oneway transact completed, but no provider callback was observed: the
+        // signal left the host, the session stays unconfirmed.
+        val trace = harness.bridge.protocolTrace()
+        assertTrue(trace.windowSignalSent)
+        assertFalse(trace.sessionConfirmed)
+        assertFalse(trace.contentConfirmed)
+        assertTrue(trace.firstFailure == null)
+        assertTrue(harness.protocolFailures.isEmpty())
+        assertEquals(0, harness.losses.get())
+    }
+
+    @Test
+    fun statusCallbackConfirmsSessionWithoutAttach() {
+        val harness = Harness()
+
+        harness.bridge.callback.overlayStatusChanged(1)
+
+        val trace = harness.bridge.protocolTrace()
+        assertTrue(trace.sessionConfirmed)
+        assertFalse(trace.windowSignalSent)
+        assertFalse(trace.contentConfirmed)
+    }
+
+    @Test
+    fun queryHasContentTrueConfirmsRender() {
+        val harness = Harness()
+        harness.overlay.hasContent = true
+        harness.bridge.callback.overlayScrollChanged(0.5f)
+
+        assertEquals(true, harness.bridge.queryHasContent())
+
+        val trace = harness.bridge.protocolTrace()
+        assertTrue(trace.sessionConfirmed)
+        assertTrue(trace.contentConfirmed)
+        assertTrue(harness.protocolFailures.isEmpty())
+        assertEquals(0, harness.losses.get())
+    }
+
+    @Test
+    fun queryHasContentFalseAfterSessionReportsRenderStage() {
+        val harness = Harness()
+        harness.bridge.callback.overlayScrollChanged(0.5f)
+
+        // Explicit provider no-content signal after a confirmed session: the only
+        // observed render-stage failure.
+        assertEquals(false, harness.bridge.queryHasContent())
+
+        assertEquals(
+            listOf(
+                FeedDiagnosticStatus.RENDERING_FAILED to
+                    FeedDiagnosticCause.CONTENT_ABSENT,
+            ),
+            harness.protocolFailures.toList(),
+        )
+        assertTrue(harness.bridge.protocolTrace().contentConfirmed.not())
+        assertEquals(
+            FeedDiagnosticStatus.RENDERING_FAILED,
+            harness.bridge.protocolTrace().firstFailure?.status,
+        )
+    }
+
+    @Test
+    fun queryHasContentFalseWithoutSessionStaysUnconfirmed() {
+        val harness = Harness()
+
+        // No callback was ever observed: absence of a signal is unconfirmed, never
+        // a render failure.
+        assertEquals(false, harness.bridge.queryHasContent())
+
+        assertTrue(harness.protocolFailures.isEmpty())
+        assertEquals(0, harness.losses.get())
+    }
+
+    @Test
+    fun queryHasContentFailureReturnsNullWithoutLoss() {
+        val harness = Harness()
+        harness.overlay.failWith = RemoteException("dead")
+
+        // A failed poll answers nothing and kills nothing: the next control or
+        // window transact owns transport-loss reporting.
+        assertEquals(null, harness.bridge.queryHasContent())
+
+        assertTrue(harness.protocolFailures.isEmpty())
+        assertEquals(0, harness.losses.get())
+    }
+
+    @Test
+    fun protocolFailureReportedAtMostOnce() {
+        val harness = Harness()
+        harness.overlay.failWith = RemoteException("dead")
+
+        harness.bridge.windowAttached(WindowManager.LayoutParams(), 0)
+        harness.bridge.setProgress(0.5f)
+        harness.bridge.setVisible(true)
+
+        // First failure (session stage) wins; the later collapse adds no verdict.
+        assertEquals(1, harness.protocolFailures.size)
+        assertEquals(
+            FeedDiagnosticStatus.SURFACE_SESSION_FAILED,
+            harness.protocolFailures.single().first,
+        )
+        assertEquals(1, harness.losses.get())
+    }
+
+    @Test
+    fun protocolFailureSilentAfterClose() {
+        val harness = Harness()
+        harness.bridge.close()
+        harness.overlay.failWith = RemoteException("dead")
+
+        harness.bridge.windowAttached(WindowManager.LayoutParams(), 0)
+        harness.bridge.setProgress(0.5f)
+
+        assertTrue(harness.protocolFailures.isEmpty())
+        assertEquals(0, harness.losses.get())
+        assertTrue(harness.bridge.protocolTrace().firstFailure == null)
+    }
+
     private class Harness(
         linkThrows: Exception? = null,
         failQuery: Boolean = false,
@@ -785,11 +978,20 @@ class AidlFeedBridgeTest {
         val overlay = FakeOverlay()
         val service = FakeService(overlay, linkThrows = linkThrows, failQuery = failQuery)
         val losses = AtomicInteger(0)
-        val bridge = AidlFeedBridge(service.binder) {
-            beforeLoss?.invoke()
-            losses.incrementAndGet()
-            listenerThrows?.let { throw it }
-        }
+        val protocolFailures = Collections.synchronizedList(
+            mutableListOf<Pair<FeedDiagnosticStatus, FeedDiagnosticCause>>(),
+        )
+        val bridge = AidlFeedBridge(
+            service.binder,
+            onConnectionLost = {
+                beforeLoss?.invoke()
+                losses.incrementAndGet()
+                listenerThrows?.let { throw it }
+            },
+            onProtocolFailure = { status, cause ->
+                protocolFailures += status to cause
+            },
+        )
     }
 
     private class FakeOverlay : ILauncherOverlay {
@@ -812,6 +1014,10 @@ class AidlFeedBridgeTest {
 
         @Volatile
         var failWith: Exception? = null
+
+        /** Explicit provider content signal for [hasOverlayContent]; false by default. */
+        @Volatile
+        var hasContent: Boolean = false
 
         @Volatile
         var blockScrolls = false
@@ -901,7 +1107,10 @@ class AidlFeedBridgeTest {
 
         override fun isVoiceDetectionRunning(): Boolean = false
 
-        override fun hasOverlayContent(): Boolean = false
+        override fun hasOverlayContent(): Boolean {
+            failWith?.let { throw it }
+            return hasContent
+        }
 
         override fun windowAttached2(bundle: Bundle?, cb: ILauncherOverlayCallback?) = Unit
 

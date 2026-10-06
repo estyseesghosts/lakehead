@@ -1,0 +1,1 @@
+Implementation validation requires focused Gradle tests, ./gradlew assembleDebug, ./gradlew test, ./gradlew lint, plus relevant audits per AGENTS.md. Distinguish NO-SOURCE from passing and report device validation separately.

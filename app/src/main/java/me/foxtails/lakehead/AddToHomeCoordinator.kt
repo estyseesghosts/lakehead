@@ -22,7 +22,7 @@ sealed interface AddToHomeResult {
     data class Added(val position: LogicalPosition) : AddToHomeResult
     /** The app is already on the home screen. */
     data object AlreadyOnHome : AddToHomeResult
-    /** No free 1×1 cell is available within the grid bounds. */
+    /** No representable free 1×1 cell is available. */
     data object HomeFull : AddToHomeResult
     /** An unexpected error occurred during the add operation. */
     data class Error(val message: String, val cause: Throwable? = null) : AddToHomeResult
@@ -38,14 +38,13 @@ internal class AddToHomeCoordinator(
     private val homeId: HomeId,
     private val repository: HomePlacementRepository,
     private val columns: Int = 5,
-    private val rows: Int = 4096,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) {
     suspend fun add(appIdentity: AppIdentity): AddToHomeResult = withContext(ioDispatcher) {
         try {
             repository.ensureHome(homeId)
 
-            val loadResult = repository.load(homeId, columns, rows)
+            val loadResult = repository.load(homeId, columns)
             if (loadResult !is LoadResult.Loaded) {
                 return@withContext AddToHomeResult.Error("Home not found after ensureHome")
             }
@@ -56,12 +55,16 @@ internal class AddToHomeCoordinator(
             }
 
             val occupied = placements.map { PlacementRect(it.position, it.span) }
-            val position = firstFreeCell(occupied, columns, rows - 1)
+            val maxRow = occupied.maxOfOrNull { rect ->
+                (rect.position.row.toLong() + rect.span.rows.toLong())
+                    .coerceAtLeast(0L)
+            }?.coerceAtMost(Int.MAX_VALUE.toLong())?.toInt() ?: 0
+            val position = firstFreeCell(occupied, columns, maxRow)
                 ?: return@withContext AddToHomeResult.HomeFull
 
             val itemId = ItemId(UUID.randomUUID().toString())
             val span = LogicalSpan(1, 1)
-            when (val result = repository.place(homeId, itemId, appIdentity, position, span, columns, rows)) {
+            when (val result = repository.place(homeId, itemId, appIdentity, position, span, columns)) {
                 is MutationResult.Accepted -> AddToHomeResult.Added(position)
                 is MutationResult.Rejected -> AddToHomeResult.Error("Grid rejected placement")
                 is MutationResult.NotFound -> AddToHomeResult.Error("Home disappeared during place")

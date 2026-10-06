@@ -41,7 +41,7 @@ import me.foxtails.lakehead.core.model.ItemId
  * Edit-mode shortcut menu above the selected tile (B4).
  *
  * Transient presentation only: the menu follows
- * `[HomeInteractionController.Editing.selectedId][HomeInteractionController.Editing.selectedId]`
+ * [HomeEditState.selectedTileId]
  * and never owns selection, inventory, platform access, persistence or grid
  * legality. Swipe-to-open stays removed (B1): no flick ever shows this menu.
  *
@@ -51,7 +51,7 @@ import me.foxtails.lakehead.core.model.ItemId
  *   menu performs no ordering (`ShortcutOrdering` visible/overflow stays a
  *   tile-strip concern and is never applied here).
  * - Dismiss with zero activation: empty-tap/`Back`/navigate exits to `Normal`,
- *   move/resize start enters [HomeEditSession.Active], and removal/uninstall
+ *   move/resize start begins a [DragState], and removal/uninstall
  *   clears the selection or the tile lookup — every path uncomposes the menu,
  *   and only a row tap ever reports [onSurfaceExecute]/[onSurfaceTogglePin].
  *   The menu itself never moves, resizes or pages tiles.
@@ -91,10 +91,7 @@ import me.foxtails.lakehead.core.model.ItemId
 internal fun EditShortcutMenu(
     tile: HomeRenderTile,
     entries: List<ShortcutSurfaceEntry>,
-    geometry: SquareCellGeometry,
-    originX: Int,
-    rowOrigin: Long,
-    originYPx: Long,
+    metrics: HomeGridMetrics,
     availableWidthPx: Int,
     visibleTopPx: Int,
     visibleBottomPx: Int,
@@ -107,15 +104,7 @@ internal fun EditShortcutMenu(
     }
     val density = LocalDensity.current
     val scheme = MaterialTheme.colorScheme
-    val tileFrame = TileBounds.signedBounds(
-        column = tile.position.column,
-        row = tile.position.row.toLong(),
-        span = GridSpan(tile.span.columns, tile.span.rows),
-        geometry = geometry,
-        originX = originX,
-        originRow = rowOrigin,
-        originYPx = originYPx,
-    )
+    val tileFrame = metrics.signedFrame(tile.position, tile.span)
     // Single measured content size: the width cap and the natural height are
     // derived once from the shared row height plus the exact vertical padding
     // rendered below (two half-pads, one computation, so math and render
@@ -258,11 +247,11 @@ internal fun isSurfaceEntriesForSelection(
  * framework-free and unit-testable.
  */
 internal fun isEditShortcutMenuVisible(
-    active: HomeEditSession.Active?,
+    isDragging: Boolean,
     selectedId: ItemId?,
     tiles: List<HomeRenderTile>,
     entries: List<ShortcutSurfaceEntry>,
-): Boolean = active == null &&
+): Boolean = !isDragging &&
     editShortcutMenuEntries(selectedId, tiles, entries).isNotEmpty()
 
 /**

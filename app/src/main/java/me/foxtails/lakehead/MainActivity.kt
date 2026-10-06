@@ -156,7 +156,6 @@ class MainActivity : ComponentActivity() {
                     visibleRows = GridRowWindow(0L, viewportRows),
                 ),
                 columnsBound = 5,
-                rowsBound = 4096,
             ),
             ioDispatcher = Dispatchers.IO,
         )
@@ -170,7 +169,6 @@ class MainActivity : ComponentActivity() {
             encodedIcons = allAppsIconSnapshots,
             decodedIcons = decodedAllAppsIcons,
             columnsBound = 5,
-            rowsBound = 4096,
             ioDispatcher = Dispatchers.IO,
         )
     }
@@ -179,7 +177,6 @@ class MainActivity : ComponentActivity() {
             homeId = PRODUCTION_HOME_ID,
             repository = placementRepository,
             columns = 5,
-            rows = 4096,
             ioDispatcher = Dispatchers.IO,
         )
     }

@@ -61,13 +61,36 @@ import java.util.concurrent.TimeUnit
  * to complete before returning, while the listener itself still runs outside the
  * guard; a re-entrant [close] from the delivery thread never waits.
  *
+ * D4 protocol trace: this bridge owns the [FeedProtocolTrace] for its connection —
+ * binder (construction + death link) → negotiation (control transacts) →
+ * window/session (`windowAttached` signal vs observed provider callbacks) → render
+ * (explicit `hasOverlayContent` signal). A transact failure is attributed to the
+ * earliest stage it proves broken and reported once via [onProtocolFailure] alongside
+ * the transport-loss signal:
+ * - `windowAttached` transact failure → `SURFACE_SESSION_FAILED`/`WINDOW_TRANSACT_FAILED`;
+ * - control transact failure before any provider callback → `NEGOTIATION_FAILED`/
+ *   `CONTROL_TRANSACT_FAILED` (the handshake itself broke, not a live session);
+ * - control transact failure after a callback → transport loss only (the gateway's
+ *   `DISCONNECTED` path owns live-session loss);
+ * - explicit `hasOverlayContent() == false` after a confirmed session (observed only
+ *   via [queryHasContent], never by timeout) → `RENDERING_FAILED`/`CONTENT_ABSENT`.
+ * A completed `windowAttached` transact is oneway with no acknowledgement, so it
+ * marks "signal sent" only — session proof requires an observed provider callback,
+ * and the host surface tag is never render proof. Unobserved stages stay
+ * unconfirmed, never invented.
+ *
  * @param service the connected overlay service binder, from `onServiceConnected`.
  * @param onConnectionLost terminal loss signal (binder death or failed transact), invoked
  * at most once and never after [close]; must itself never suspend.
+ * @param onProtocolFailure first protocol-stage failure, invoked at most once and never
+ * after [close]; carries the earliest broken stage so the gateway can diagnose it
+ * instead of a generic disconnect. Must itself never suspend; defaults to a no-op so
+ * callers that only track transport loss keep their behavior.
  */
 internal class AidlFeedBridge(
     private val service: IBinder,
     private val onConnectionLost: () -> Unit,
+    private val onProtocolFailure: (FeedDiagnosticStatus, FeedDiagnosticCause) -> Unit = { _, _ -> },
 ) : FeedOverlayConnection, FeedOverlayWindowConnection {
 
     private val mutex = Mutex()
@@ -95,6 +118,19 @@ internal class AidlFeedBridge(
     /** Thread currently running the loss listener, if any; skipped by re-entrant [close]. */
     @Volatile
     private var lossDeliveryThread: Thread? = null
+
+    /**
+     * D4 protocol trace snapshot for this connection.
+     *
+     * Immutable value behind a volatile: every stage transition publishes a new snapshot,
+     * so readers ([protocolTrace]) always see a consistent trace without locking.
+     */
+    @Volatile
+    private var trace = FeedProtocolTrace()
+
+    /** Whether [onProtocolFailure] has fired; first protocol failure wins, like loss. */
+    @Volatile
+    private var protocolFailureReported = false
 
     /** Newest visibility requested; the drain delivers it even if an older value is in flight. */
     @Volatile
@@ -167,6 +203,9 @@ internal class AidlFeedBridge(
     internal val callback: ILauncherOverlayCallback = object : ILauncherOverlayCallback.Stub() {
         override fun overlayScrollChanged(progress: Float) {
             try {
+                // An observed provider callback is the only session proof: the
+                // oneway windowAttached transact below can never confirm it.
+                trace = trace.withSessionConfirmed()
                 _scrollEvents.tryEmit(coerceOverlayProgress(progress))
             } catch (_: Throwable) {
                 // Binder threads must never observe an exception from this callback.
@@ -175,6 +214,7 @@ internal class AidlFeedBridge(
 
         override fun overlayStatusChanged(status: Int) {
             try {
+                trace = trace.withSessionConfirmed()
                 _statusEvents.tryEmit(status)
             } catch (_: Throwable) {
                 // Binder threads must never observe an exception from this callback.
@@ -296,6 +336,57 @@ internal class AidlFeedBridge(
     }
 
     /**
+     * Current D4 protocol-trace snapshot for this connection.
+     *
+     * A consistent immutable value: `windowSignalSent` proves only that the oneway
+     * attach left the host, `sessionConfirmed` proves an observed provider callback,
+     * `contentConfirmed` proves an explicit provider content signal, and `firstFailure`
+     * names the earliest broken stage (null while unfailed). Never throws.
+     */
+    fun protocolTrace(): FeedProtocolTrace =
+        try {
+            trace
+        } catch (_: Throwable) {
+            FeedProtocolTrace()
+        }
+
+    /**
+     * Best-effort poll of the provider's explicit content signal.
+     *
+     * Returns `true` when the provider reports it holds overlay content (and marks
+     * the trace content-confirmed), `false` when it explicitly reports no content
+     * after a confirmed session — the only observed render-stage failure, reported
+     * once as `RENDERING_FAILED`/`CONTENT_ABSENT` — and null when the query itself
+     * cannot answer (no proxy, torn down, or failed transact). A `false` without a
+     * confirmed session, and any failure of this poll, stays unconfirmed: absence of
+     * a signal is never a failure, and this poll never reports transport loss (the
+     * next control or window transact owns that).
+     *
+     * Blocking binder call: invoke off the main thread (device and D5 tooling only).
+     * Never throws.
+     */
+    fun queryHasContent(): Boolean? {
+        return try {
+            val overlay = proxy ?: return null
+            if (closed) return null
+            val hasContent = overlay.hasOverlayContent()
+            if (hasContent) {
+                trace = trace.withContentConfirmed()
+            } else if (trace.sessionConfirmed) {
+                notifyProtocolFailureOnce(
+                    FeedDiagnosticStatus.RENDERING_FAILED,
+                    FeedDiagnosticCause.CONTENT_ABSENT,
+                )
+            }
+            hasContent
+        } catch (_: Exception) {
+            null
+        } catch (_: Throwable) {
+            null
+        }
+    }
+
+    /**
      * Delivers every pending latest value under [Mutex.tryLock].
      *
      * The caller always caches first, so a `tryLock` failure is safe via handoff:
@@ -371,6 +462,17 @@ internal class AidlFeedBridge(
                     deliveredProgress = latestProgress
                 }
             } catch (_: Exception) {
+                // First-failure attribution: a control transact that fails before any
+                // provider callback broke the negotiation itself
+                // (NEGOTIATION_FAILED); after a callback the same failure is
+                // transport loss on a live session, owned by the gateway's
+                // DISCONNECTED path, so no protocol failure is reported.
+                if (!trace.sessionConfirmed) {
+                    notifyProtocolFailureOnce(
+                        FeedDiagnosticStatus.NEGOTIATION_FAILED,
+                        FeedDiagnosticCause.CONTROL_TRANSACT_FAILED,
+                    )
+                }
                 notifyLossOnce()
                 return
             }
@@ -406,6 +508,9 @@ internal class AidlFeedBridge(
                     try {
                         overlay.windowDetached(detachChanging)
                     } catch (_: Exception) {
+                        // The window was live, so this is transport loss on an
+                        // established session (the gateway's DISCONNECTED path),
+                        // never a session-stage failure.
                         notifyLossOnce()
                         return false
                     }
@@ -422,9 +527,19 @@ internal class AidlFeedBridge(
                 try {
                     overlay.windowAttached(params, callback, lastWindowFlags)
                 } catch (_: Exception) {
+                    // The host window was never registered, so the provider holds
+                    // no session: this is the first failure at the session stage,
+                    // reported alongside the transport loss below.
+                    notifyProtocolFailureOnce(
+                        FeedDiagnosticStatus.SURFACE_SESSION_FAILED,
+                        FeedDiagnosticCause.WINDOW_TRANSACT_FAILED,
+                    )
                     notifyLossOnce()
                     return false
                 }
+                // Oneway with no acknowledgement: the signal left the host, but only
+                // an observed provider callback (see [callback]) proves a session.
+                trace = trace.withWindowSignalSent()
                 windowAttachedLive = true
                 lastWindowParams = null
                 continue
@@ -483,6 +598,42 @@ internal class AidlFeedBridge(
             }
         } catch (_: Throwable) {
             // Loss reporting itself never throws.
+        }
+    }
+
+    /**
+     * Reports the first protocol-stage failure at most once, never after [close],
+     * and never throws — including when invoked on a binder thread or when the
+     * listener itself misbehaves.
+     *
+     * Shares [tearDownGuard] with [close] and [notifyLossOnce] so the at-most-once
+     * decision is atomic against teardown: a transact failure racing a deliberate
+     * teardown reports nothing after the teardown has taken effect. Records the
+     * verdict in [trace] first so [protocolTrace] agrees with the listener even if
+     * the listener itself throws. The listener runs outside the guard.
+     */
+    private fun notifyProtocolFailureOnce(
+        status: FeedDiagnosticStatus,
+        cause: FeedDiagnosticCause,
+    ) {
+        try {
+            val first = synchronized(tearDownGuard) {
+                if (closed || protocolFailureReported) {
+                    false
+                } else {
+                    protocolFailureReported = true
+                    true
+                }
+            }
+            if (!first) return
+            trace = trace.withFirstFailure(FeedDiagnostic(status = status, cause = cause))
+            try {
+                onProtocolFailure(status, cause)
+            } catch (_: Throwable) {
+                // Listener failures must not surface on binder threads.
+            }
+        } catch (_: Throwable) {
+            // Failure reporting itself never throws.
         }
     }
 

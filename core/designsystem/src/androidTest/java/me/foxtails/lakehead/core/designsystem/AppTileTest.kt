@@ -93,11 +93,13 @@ class AppTileTest {
     fun blankContentDescriptionOverrideIsRejected() {
         assertThrows(IllegalArgumentException::class.java) {
             composeRule.setContent {
-                AppTile(
-                    state = AppTileState(label = "Calendar", span = GridSpan(1, 1)),
-                    onBodyClick = {}, onSymbolClick = {},
-                    contentDescription = "  ",
-                )
+                LauncherTheme {
+                    AppTile(
+                        state = AppTileState(label = "Calendar", span = GridSpan(1, 1)),
+                        onBodyClick = {}, onSymbolClick = {},
+                        contentDescription = "  ",
+                    )
+                }
             }
         }
     }
@@ -105,11 +107,13 @@ class AppTileTest {
     @Test
     fun suppliedIconIsComposed() {
         composeRule.setContent {
-            AppTile(
-                state = AppTileState(label = "Calendar", span = GridSpan(1, 1)),
-                onBodyClick = {}, onSymbolClick = {},
-                icon = { _ -> Box(Modifier.testTag("tile-icon").size(24.dp)) },
-            )
+            LauncherTheme {
+                AppTile(
+                    state = AppTileState(label = "Calendar", span = GridSpan(1, 1)),
+                    onBodyClick = {}, onSymbolClick = {},
+                    icon = { _ -> Box(Modifier.testTag("tile-icon").size(24.dp)) },
+                )
+            }
         }
 
         composeRule.onNodeWithTag("tile-icon", useUnmergedTree = true).assertExists()
@@ -244,10 +248,12 @@ class AppTileTest {
     @Test
     fun selectedTileReportsSelectedOnBodyOnly() {
         composeRule.setContent {
-            AppTile(
-                state = AppTileState(label = "Calendar", span = GridSpan(1, 1), isSelected = true),
-                onBodyClick = {}, onSymbolClick = {},
-            )
+            LauncherTheme {
+                AppTile(
+                    state = AppTileState(label = "Calendar", span = GridSpan(1, 1), isSelected = true),
+                    onBodyClick = {}, onSymbolClick = {},
+                )
+            }
         }
 
         val nodes = composeRule.onAllNodesWithContentDescription("Calendar")
@@ -260,10 +266,12 @@ class AppTileTest {
     @Test
     fun defaultTileReportsNotSelectedAndNoPressedDescription() {
         composeRule.setContent {
-            AppTile(
-                state = AppTileState(label = "Calendar", span = GridSpan(1, 1)),
-                onBodyClick = {}, onSymbolClick = {},
-            )
+            LauncherTheme {
+                AppTile(
+                    state = AppTileState(label = "Calendar", span = GridSpan(1, 1)),
+                    onBodyClick = {}, onSymbolClick = {},
+                )
+            }
         }
 
         val nodes = composeRule.onAllNodesWithContentDescription("Calendar")
@@ -280,10 +288,12 @@ class AppTileTest {
     @Test
     fun pressedTileExposesPressedStateDescription() {
         composeRule.setContent {
-            AppTile(
-                state = AppTileState(label = "Calendar", span = GridSpan(1, 1), isPressed = true),
-                onBodyClick = {}, onSymbolClick = {},
-            )
+            LauncherTheme {
+                AppTile(
+                    state = AppTileState(label = "Calendar", span = GridSpan(1, 1), isPressed = true),
+                    onBodyClick = {}, onSymbolClick = {},
+                )
+            }
         }
 
         composeRule.onNode(hasStateDescription(AppTileDefaults.PressedStateDescription)).assertExists()
@@ -294,19 +304,31 @@ class AppTileTest {
         var bodyClicks = 0
         var symbolClicks = 0
         composeRule.setContent {
-            AppTile(
-                state = AppTileState(label = "Calendar", span = GridSpan(1, 1)),
-                onBodyClick = { bodyClicks++ },
-                onSymbolClick = { symbolClicks++ },
-            )
+            LauncherTheme {
+                Box(Modifier.size(160.dp)) {
+                    AppTile(
+                        state = AppTileState(label = "Calendar", span = GridSpan(1, 1)),
+                        onBodyClick = { bodyClicks++ },
+                        onSymbolClick = { symbolClicks++ },
+                        symbolContentDescription = "Launch Calendar",
+                    )
+                }
+            }
         }
+        composeRule.waitForIdle()
 
-        // Two distinct Role.Button nodes share the label; each click routes to exactly
-        // one callback, so (1, 1) totals prove distinct routing regardless of order.
-        val nodes = composeRule.onAllNodesWithContentDescription("Calendar")
-        nodes.assertCountEquals(2)
-        nodes[0].assert(hasClickAction()).performClick()
-        nodes[1].assert(hasClickAction()).performClick()
+        // Distinct accessible names disambiguate the two Role.Button regions
+        // without relying on node order; the body tap targets the top-left
+        // padding band so it clears the centered symbol glyph.
+        val bodyTap = with(composeRule.density) {
+            Offset(4.dp.toPx(), 4.dp.toPx())
+        }
+        composeRule.onNodeWithContentDescription("Calendar")
+            .performTouchInput { click(bodyTap) }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithContentDescription("Launch Calendar")
+            .performTouchInput { click() }
+        composeRule.waitForIdle()
         composeRule.runOnIdle {
             assertEquals(1, bodyClicks)
             assertEquals(1, symbolClicks)
@@ -316,10 +338,12 @@ class AppTileTest {
     @Test
     fun tileExposesButtonRoleOnBothRegionsAndDefaultsToLabelDescription() {
         composeRule.setContent {
-            AppTile(
-                state = AppTileState(label = "Calendar", span = GridSpan(1, 1)),
-                onBodyClick = {}, onSymbolClick = {},
-            )
+            LauncherTheme {
+                AppTile(
+                    state = AppTileState(label = "Calendar", span = GridSpan(1, 1)),
+                    onBodyClick = {}, onSymbolClick = {},
+                )
+            }
         }
 
         val nodes = composeRule.onAllNodesWithContentDescription("Calendar")
@@ -332,11 +356,13 @@ class AppTileTest {
     @Test
     fun customContentDescriptionOverridesLabelOnBothRegions() {
         composeRule.setContent {
-            AppTile(
-                state = AppTileState(label = "Calendar", span = GridSpan(1, 1)),
-                onBodyClick = {}, onSymbolClick = {},
-                contentDescription = "Open Calendar",
-            )
+            LauncherTheme {
+                AppTile(
+                    state = AppTileState(label = "Calendar", span = GridSpan(1, 1)),
+                    onBodyClick = {}, onSymbolClick = {},
+                    contentDescription = "Open Calendar",
+                )
+            }
         }
 
         composeRule.onAllNodesWithContentDescription("Open Calendar").assertCountEquals(2)
@@ -345,11 +371,13 @@ class AppTileTest {
     @Test
     fun customSymbolDescriptionOverridesSymbolNodeOnly() {
         composeRule.setContent {
-            AppTile(
-                state = AppTileState(label = "Calendar", span = GridSpan(1, 1)),
-                onBodyClick = {}, onSymbolClick = {},
-                symbolContentDescription = "Launch Calendar",
-            )
+            LauncherTheme {
+                AppTile(
+                    state = AppTileState(label = "Calendar", span = GridSpan(1, 1)),
+                    onBodyClick = {}, onSymbolClick = {},
+                    symbolContentDescription = "Launch Calendar",
+                )
+            }
         }
 
         composeRule.onAllNodesWithContentDescription("Calendar").assertCountEquals(1)
@@ -360,11 +388,13 @@ class AppTileTest {
     fun blankSymbolContentDescriptionOverrideIsRejected() {
         assertThrows(IllegalArgumentException::class.java) {
             composeRule.setContent {
-                AppTile(
-                    state = AppTileState(label = "Calendar", span = GridSpan(1, 1)),
-                    onBodyClick = {}, onSymbolClick = {},
-                    symbolContentDescription = "  ",
-                )
+                LauncherTheme {
+                    AppTile(
+                        state = AppTileState(label = "Calendar", span = GridSpan(1, 1)),
+                        onBodyClick = {}, onSymbolClick = {},
+                        symbolContentDescription = "  ",
+                    )
+                }
             }
         }
     }
@@ -529,11 +559,13 @@ class AppTileTest {
     fun negativeOverflowCountRejected() {
         assertThrows(IllegalArgumentException::class.java) {
             composeRule.setContent {
-                AppTile(
-                    state = AppTileState(label = "Calendar", span = GridSpan(1, 1)),
-                    onBodyClick = {}, onSymbolClick = {},
-                    overflowCount = -1,
-                )
+                LauncherTheme {
+                    AppTile(
+                        state = AppTileState(label = "Calendar", span = GridSpan(1, 1)),
+                        onBodyClick = {}, onSymbolClick = {},
+                        overflowCount = -1,
+                    )
+                }
             }
         }
     }
@@ -894,28 +926,24 @@ class AppTileTest {
         // Both regions keep their accessible names but expose no actions.
         val nodes = composeRule.onAllNodesWithContentDescription("Calendar")
         nodes.assertCountEquals(2)
-        composeRule.runOnIdle {
-            nodes.fetchSemanticsNodes().forEach { node ->
-                assertFalse(
-                    "disabled tile must expose no click action",
-                    node.config.contains(SemanticsActions.OnClick),
-                )
-                assertFalse(
-                    "disabled tile must expose no long-click action",
-                    node.config.contains(SemanticsActions.OnLongClick),
-                )
-                assertEquals(Role.Button, node.config[SemanticsProperties.Role])
-            }
+        nodes.fetchSemanticsNodes().forEach { node ->
+            assertFalse(
+                "disabled tile must expose no click action",
+                node.config.contains(SemanticsActions.OnClick),
+            )
+            assertFalse(
+                "disabled tile must expose no long-click action",
+                node.config.contains(SemanticsActions.OnLongClick),
+            )
+            assertEquals(Role.Button, node.config[SemanticsProperties.Role])
         }
         // Minima survive: both hit regions still meet 48dp.
         val minTouchPx = with(composeRule.density) { 48.dp.roundToPx() }
         nodes.fetchSemanticsNodes().forEach { node ->
-            composeRule.runOnIdle {
-                assertTrue(
-                    "disabled region must keep 48dp minima (size=${node.size})",
-                    node.size.width >= minTouchPx && node.size.height >= minTouchPx,
-                )
-            }
+            assertTrue(
+                "disabled region must keep 48dp minima (size=${node.size})",
+                node.size.width >= minTouchPx && node.size.height >= minTouchPx,
+            )
         }
     }
 
@@ -944,25 +972,24 @@ class AppTileTest {
 
     @Test
     fun selectedContainer_neverHardcodesBlackOrWhite() {
-        var lightSelected: TileColors? = null
-        var darkSelected: TileColors? = null
+        val darkTheme = mutableStateOf(false)
+        var selected: TileColors? = null
         composeRule.setContent {
-            LauncherTheme(darkTheme = false) {
-                lightSelected = resolveTileColors(TileColorRole.Normal, isPressed = false, isSelected = true)
+            LauncherTheme(darkTheme = darkTheme.value) {
+                selected = resolveTileColors(TileColorRole.Normal, isPressed = false, isSelected = true)
             }
         }
         composeRule.runOnIdle {
-            assertNotEquals(androidx.compose.ui.graphics.Color.Black, lightSelected!!.container)
-            assertNotEquals(androidx.compose.ui.graphics.Color.White, lightSelected!!.container)
-        }
-        composeRule.setContent {
-            LauncherTheme(darkTheme = true) {
-                darkSelected = resolveTileColors(TileColorRole.Normal, isPressed = false, isSelected = true)
-            }
+            assertNotEquals(androidx.compose.ui.graphics.Color.Black, selected!!.container)
+            assertNotEquals(androidx.compose.ui.graphics.Color.White, selected!!.container)
         }
         composeRule.runOnIdle {
-            assertNotEquals(androidx.compose.ui.graphics.Color.Black, darkSelected!!.container)
-            assertNotEquals(androidx.compose.ui.graphics.Color.White, darkSelected!!.container)
+            darkTheme.value = true
+        }
+        composeRule.waitForIdle()
+        composeRule.runOnIdle {
+            assertNotEquals(androidx.compose.ui.graphics.Color.Black, selected!!.container)
+            assertNotEquals(androidx.compose.ui.graphics.Color.White, selected!!.container)
         }
     }
 

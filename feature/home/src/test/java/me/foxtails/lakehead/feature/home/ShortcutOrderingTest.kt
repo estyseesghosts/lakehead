@@ -41,7 +41,7 @@ class ShortcutOrderingTest {
 
     @Test
     fun visibleReturnsEmptyForEmptyList() {
-        assertEquals(emptyList<ShortcutRef>(), ShortcutOrdering.visibleShortcuts(emptyList(), 3))
+        assertEquals(emptyList<ShortcutRef>(), ShortcutOrdering.visibleShortcuts<ShortcutRef>(emptyList(), 3))
     }
 
     @Test
@@ -207,7 +207,7 @@ class ShortcutOrderingTest {
 
     @Test
     fun restoreFromEmptyReturnsEmpty() {
-        assertEquals(emptyList<ShortcutRef>(), ShortcutOrdering.restore(emptyList(), 5))
+        assertEquals(emptyList<ShortcutRef>(), ShortcutOrdering.restore<ShortcutRef>(emptyList(), 5))
     }
 
     // --- layout ---

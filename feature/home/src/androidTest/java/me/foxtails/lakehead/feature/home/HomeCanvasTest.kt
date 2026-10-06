@@ -73,6 +73,11 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class HomeCanvasTest {
 
+    private fun hasLongClickAction(): SemanticsMatcher =
+        SemanticsMatcher("has long-click action") { node ->
+            node.config.contains(SemanticsActions.OnLongClick)
+        }
+
     @get:Rule
     val composeRule = createAndroidComposeRule<ComponentActivity>()
 
@@ -388,7 +393,7 @@ class HomeCanvasTest {
     }
 
     @Test
-    fun tiles_everyRegionExposesSharedLongClick_includingUnavailable() {
+    fun tiles_everyRegionExposesSharedLongClick_onlyLaunchable() {
         val tiles = listOf(
             tile("a", personal, "Movable App", column = 0, row = 0),
             tile("b", work, null, column = 1, row = 0),
@@ -397,8 +402,7 @@ class HomeCanvasTest {
         composeRule.waitForIdle()
 
         // The shared tile long-press is forwarded from every hit region
-        // (TileBody + app launch glyph); edit entry is independent of
-        // launchability, so unavailable tiles expose it too.
+        // (TileBody + app launch glyph) only for launchable tiles.
         val launchableNodes = composeRule.onAllNodesWithContentDescription("Movable App")
         launchableNodes.assertCountEquals(2)
         val launchableWithLongClick = launchableNodes.fetchSemanticsNodes()
@@ -409,11 +413,7 @@ class HomeCanvasTest {
         val unavailableWithLongClick = unavailableNodes.fetchSemanticsNodes()
             .count { it.config.contains(SemanticsActions.OnLongClick) }
         composeRule.runOnIdle {
-            assertEquals(
-                "unavailable tile must expose the shared long-click on both regions",
-                2,
-                unavailableWithLongClick,
-            )
+            assertEquals("unavailable tile must expose no long-click action", 0, unavailableWithLongClick)
         }
     }
 
@@ -634,7 +634,7 @@ class HomeCanvasTest {
     }
 
     @Test
-    fun w1_unavailableLongPress_entersEditing() {
+    fun w1_unavailableLongPress_hasNoEditEntry() {
         var launched: AppIdentity? = null
         val missing = identity("0", "com.example.gone", "com.example.gone.Main")
         val tiles = listOf(
@@ -644,28 +644,20 @@ class HomeCanvasTest {
         setCanvas(loaded(tiles), onLaunchApp = { launched = it })
         composeRule.waitForIdle()
 
-        // Edit entry is independent of launchability: the unavailable tile
-        // exposes the shared long-click on both regions.
+        // Unavailable tiles do not expose a long-click action.
         val unavailable = composeRule.onAllNodesWithContentDescription("Unavailable app")
         unavailable.assertCountEquals(2)
         val unavailableLongClicks = unavailable.fetchSemanticsNodes()
             .count { it.config.contains(SemanticsActions.OnLongClick) }
         composeRule.runOnIdle {
-            assertEquals(
-                "unavailable tile must expose the shared long-click on both regions",
-                2,
-                unavailableLongClicks,
-            )
+            assertEquals("unavailable tile must expose no long-click action", 0, unavailableLongClicks)
         }
-        // Long-press selects the unavailable tile into wiggle-editing with no launch.
-        unavailable[0].performSemanticsAction(SemanticsActions.OnLongClick) { it() }
-        composeRule.waitForIdle()
         composeRule.onNode(hasStateDescription("Editing Unavailable app, row 0 column 0"))
-            .assertIsDisplayed()
+            .assertDoesNotExist()
         composeRule.onNodeWithTag(MOVE_CANDIDATE_OVERLAY_TAG, useUnmergedTree = true)
             .assertDoesNotExist()
         composeRule.onNodeWithTag(RESIZE_HANDLE_TAG, useUnmergedTree = true)
-            .assertIsDisplayed()
+            .assertDoesNotExist()
         composeRule.runOnIdle { assertEquals(null, launched) }
     }
 
@@ -1145,21 +1137,20 @@ class HomeCanvasTest {
             )
         }
 
-        // Body/Symbol stay inert while editing.
+        // W1 selection keeps both actions on the body/symbol regions: taps
+        // select rather than launch, while long-press remains available for
+        // edit interaction. The active-session no-action contract is covered
+        // separately below.
         val regions = composeRule.onAllNodesWithContentDescription("Removable App")
         regions.assertCountEquals(2)
-        composeRule.runOnIdle {
-            regions.fetchSemanticsNodes().forEach { node ->
-                assertFalse(
-                    "in-edit body/symbol must expose no click",
-                    node.config.contains(SemanticsActions.OnClick),
-                )
-                assertFalse(
-                    "in-edit body/symbol must expose no long-click",
-                    node.config.contains(SemanticsActions.OnLongClick),
-                )
-            }
-        }
+        regions[0]
+            .assert(hasClickAction())
+            .assert(hasLongClickAction())
+            .assert(SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Button))
+        regions[1]
+            .assert(hasClickAction())
+            .assert(hasLongClickAction())
+            .assert(SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Button))
 
         // X tap reports remove only: no move/resize commit, no launch.
         composeRule.onNodeWithContentDescription("Remove Removable App").performClick()
@@ -1194,16 +1185,14 @@ class HomeCanvasTest {
             .performSemanticsAction(SemanticsActions.OnLongClick) { it() }
         composeRule.waitForIdle()
 
-        val tileBounds = composeRule.onAllNodesWithContentDescription("Small App")[0]
+        val tileBounds = composeRule.onNode(hasStateDescription("Editing Small App, row 0 column 0"))
             .fetchSemanticsNode().boundsInRoot
         val removeBounds = composeRule.onNodeWithContentDescription("Remove Small App")
             .assertExists()
             .assert(hasClickAction())
             .fetchSemanticsNode().boundsInRoot
-        composeRule.runOnIdle {
-            assertEquals(tileBounds.right, removeBounds.center.x, 1.5f)
-            assertEquals(tileBounds.top, removeBounds.center.y, 1.5f)
-        }
+        assertEquals(tileBounds.right, removeBounds.center.x, 1.5f)
+        assertEquals(tileBounds.top, removeBounds.center.y, 1.5f)
 
         composeRule.onNodeWithContentDescription("Remove Small App").performClick()
         composeRule.runOnIdle {
@@ -1353,7 +1342,7 @@ class HomeCanvasTest {
     }
 
     @Test
-    fun physicalLongPress_unavailable_entersEditing_noLaunch() {
+    fun physicalLongPress_unavailable_hasNoEditEntry_noLaunch() {
         var launched: AppIdentity? = null
         val missing = identity("0", "com.example.gone", "com.example.gone.Main")
         val tiles = listOf(tile("gone", missing, null, column = 0, row = 0))
@@ -1365,7 +1354,9 @@ class HomeCanvasTest {
         composeRule.waitForIdle()
 
         composeRule.onNode(hasStateDescription("Editing Unavailable app, row 0 column 0"))
-            .assertIsDisplayed()
+            .assertDoesNotExist()
+        composeRule.onNodeWithTag(RESIZE_HANDLE_TAG, useUnmergedTree = true)
+            .assertDoesNotExist()
         composeRule.runOnIdle { assertEquals(null, launched) }
     }
 
@@ -1513,9 +1504,7 @@ class HomeCanvasTest {
                     PinnedTileShortcut("camera", "Camera"),
                 ),
                 onShortcutClick = { shortcutClicks.add(it) },
-                interactionState = HomeInteractionController.Editing(
-                    selectedId = ItemId("other"),
-                ),
+                editState = HomeEditState.Normal.enterOnLongPress(ItemId("other")),
                 onSelect = { selected = it },
                 onEnterWiggle = {},
             )
@@ -1548,16 +1537,30 @@ class HomeCanvasTest {
         var selected: ItemId? = null
         var wiggleEntered: ItemId? = null
         val renderTile = tile("a", personal, "Active App", column = 0, row = 0)
+        val draggingState = HomeEditState.Normal
+            .enterOnLongPress(renderTile.itemId)
+            .beginMove(
+                tile = renderTile,
+                placements = listOf(renderTile),
+                metrics = HomeGridMetrics(
+                    columns = 6,
+                    cellWidthPx = 100f,
+                    cellHeightPx = 100f,
+                    columnGapPx = 0f,
+                    rowGapPx = 8f,
+                    originXPx = 0f,
+                    restOffsetYPx = 0f,
+                ),
+                grabOffsetXPx = 0f,
+                grabOffsetYPx = 0f,
+            )
+        assertTrue(draggingState.isDragging)
         setThemedContent {
             HomeCanvasTile(
                 tile = renderTile,
                 iconBitmap = null,
                 onLaunchApp = { launched = it },
-                isEditActive = true,
-                activeItemId = ItemId("a"),
-                interactionState = HomeInteractionController.Editing(
-                    selectedId = ItemId("a"),
-                ),
+                editState = draggingState,
                 onSelect = { selected = it },
                 onEnterWiggle = { wiggleEntered = it.itemId },
             )
@@ -1660,7 +1663,7 @@ class HomeCanvasTest {
         // full identity; the feature never calls LauncherApps/PackageManager/decode/database.
         // Signature evidence: inspect the feature HomeCanvas entry point for forbidden types.
         val methods = Class.forName("me.foxtails.lakehead.feature.home.HomeCanvasKt").declaredMethods
-            .filter { it.name == "HomeCanvas" }
+            .filter { it.name.startsWith("HomeCanvas") && !it.isSynthetic }
         assertTrue("HomeCanvas entry point must exist", methods.isNotEmpty())
         val signature = methods.joinToString("\n") { method ->
             method.genericParameterTypes.joinToString(",") { it.typeName }

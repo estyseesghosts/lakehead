@@ -24,6 +24,49 @@ data class ContentBounds(
 object GridContentBounds {
 
     /**
+     * Returns absolute row-zero content bounds for nonnegative [GridPlacement]s.
+     *
+     * Unlike [contentBoundsOf], this helper never derives a renderer origin from the
+     * occupied minimum row: a placement at row 5 retains rows 0 through 4 as real
+     * logical content. The signed overload remains available for shared windowing
+     * primitives that explicitly use signed coordinates.
+     */
+    fun <T : Any> absoluteContentBoundsOf(
+        placements: List<GridPlacement<T>>,
+        columns: Int = 5,
+    ): ContentBounds? {
+        require(columns > 0) { "columns must be positive" }
+        if (placements.isEmpty()) return null
+
+        var minCol = Long.MAX_VALUE
+        var maxColExclusive = Long.MIN_VALUE
+        var maxRowExclusive = 0L
+        for (placement in placements) {
+            val column = placement.position.column
+            require(column >= 0) { "column must be non-negative" }
+            val colExclusive = Math.addExact(column.toLong(), placement.span.columns.toLong())
+            require(colExclusive <= columns.toLong()) {
+                "placement '${placement.id}' extends to column $colExclusive, exceeding columns=$columns"
+            }
+            minCol = minOf(minCol, column.toLong())
+            maxColExclusive = maxOf(maxColExclusive, colExclusive)
+            maxRowExclusive = maxOf(
+                maxRowExclusive,
+                Math.addExact(
+                    placement.position.row.toLong(),
+                    placement.span.rows.toLong(),
+                ),
+            )
+        }
+        return ContentBounds(
+            minRow = 0L,
+            maxRowExclusive = maxRowExclusive,
+            minCol = minCol,
+            maxColExclusive = maxColExclusive,
+        )
+    }
+
+    /**
      * Returns the bounding box of [placements], or `null` when the list is empty.
      *
      * The [columns] parameter sets the valid column range `0 ..< columns`; any placement that

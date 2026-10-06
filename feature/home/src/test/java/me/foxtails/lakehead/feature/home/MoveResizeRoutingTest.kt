@@ -116,43 +116,47 @@ class MoveResizeRoutingTest {
         assertEquals(resizeRoute, routeDownDrag(arrowHit = true, armed = true, hasTile = true))
     }
 
-    // ---- snapshotResizeArmed: arm owned by the selected item ----
+    // ---- isResizeArmedFor: arm owned by the selected item ----
+
+    private val armedA = HomeEditState.Normal.enterOnLongPress(tileA).toggleResizeArmed()
 
     @Test
-    fun snapshotArmed_trueForArmedSelection() {
-        val interaction = HomeInteractionController.Editing(selectedId = tileA, resizeArmed = true)
-        assertTrue(snapshotResizeArmed(interaction, tileA))
+    fun armed_trueForArmedSelection() {
+        assertTrue(armedA.isResizeArmedFor(tileA))
     }
 
     @Test
-    fun snapshotArmed_falseForDifferentTile() {
+    fun armed_falseForDifferentTile() {
         // A stale arm never authorizes another tile.
-        val interaction = HomeInteractionController.Editing(selectedId = tileA, resizeArmed = true)
-        assertFalse(snapshotResizeArmed(interaction, tileB))
+        assertFalse(armedA.isResizeArmedFor(tileB))
     }
 
     @Test
-    fun snapshotArmed_falseWhenDisarmed() {
-        val interaction = HomeInteractionController.Editing(selectedId = tileA)
-        assertFalse(snapshotResizeArmed(interaction, tileA))
+    fun armed_falseWhenDisarmed() {
+        assertFalse(HomeEditState.Normal.enterOnLongPress(tileA).isResizeArmedFor(tileA))
     }
 
     @Test
-    fun snapshotArmed_falseWhenNoSelection() {
-        val interaction = HomeInteractionController.Editing(selectedId = null, resizeArmed = false)
-        assertFalse(snapshotResizeArmed(interaction, tileA))
-        assertFalse(snapshotResizeArmed(interaction, null))
+    fun armed_falseWhenNoSelection() {
+        val unselected = armedA.onTileRemoved(tileA)
+        assertFalse(unselected.isResizeArmedFor(tileA))
+        assertFalse(unselected.isResizeArmedFor(null))
     }
 
     @Test
-    fun snapshotArmed_falseFromNormal() {
-        assertFalse(snapshotResizeArmed(HomeInteractionController.Normal, tileA))
+    fun armed_falseFromNormal() {
+        assertFalse(HomeEditState.Normal.isResizeArmedFor(tileA))
     }
 
     @Test
-    fun snapshotArmed_falseForNullTile() {
-        val interaction = HomeInteractionController.Editing(selectedId = tileA, resizeArmed = true)
-        assertFalse(snapshotResizeArmed(interaction, null))
+    fun armed_falseForNullTile() {
+        assertFalse(armedA.isResizeArmedFor(null))
+    }
+
+    @Test
+    fun armed_clearedWhenSelectionTransfers() {
+        assertFalse(armedA.selectOnTap(tileB).isResizeArmedFor(tileA))
+        assertFalse(armedA.selectOnTap(tileB).isResizeArmedFor(tileB))
     }
 
     // ---- A2-S1 P2: small-tile (at/below 48px) hit + route end to end ----

@@ -1,6 +1,6 @@
 package me.foxtails.lakehead.core.grid
 
-/** Pure generic legality checks for placements on an explicitly-sized finite grid. */
+/** Pure generic legality checks for placements on a horizontally bounded grid. */
 object GridRules {
     /** A successful operation returns a fresh list, retaining unrelated entries and their order. */
     sealed class Result<out T : Any> {
@@ -20,10 +20,9 @@ object GridRules {
         placements: List<GridPlacement<T>>,
         placement: GridPlacement<T>,
         columns: Int,
-        rows: Int,
         replacingId: T? = null,
     ): Result<T> {
-        requireValidGridSize(columns, rows)
+        requireValidColumns(columns)
         val replaceIndex = if (replacingId == null) {
             -1
         } else {
@@ -35,7 +34,7 @@ object GridRules {
         if (placements.any { it.id == placement.id } && placement.id != replacingId) {
             return Result.Rejected(Rejection.COLLISION)
         }
-        return insertOrReplace(placements, placement, replaceIndex, columns, rows)
+        return insertOrReplace(placements, placement, replaceIndex, columns)
     }
 
     /** Moves an existing item's position, ignoring its own current occupied cells. */
@@ -44,14 +43,13 @@ object GridRules {
         id: T,
         position: GridPosition,
         columns: Int,
-        rows: Int,
     ): Result<T> {
-        requireValidGridSize(columns, rows)
+        requireValidColumns(columns)
         val index = placements.indexOfFirst { it.id == id }
         if (index == -1) return Result.Rejected(Rejection.UNKNOWN_ITEM)
         val current = placements[index]
         val moved = current.copy(position = position)
-        return replaceExisting(placements, index, moved, columns, rows)
+        return replaceExisting(placements, index, moved, columns)
     }
 
     /** Resizes an existing item, ignoring its own current occupied cells. */
@@ -60,14 +58,13 @@ object GridRules {
         id: T,
         span: GridSpan,
         columns: Int,
-        rows: Int,
     ): Result<T> {
-        requireValidGridSize(columns, rows)
+        requireValidColumns(columns)
         val index = placements.indexOfFirst { it.id == id }
         if (index == -1) return Result.Rejected(Rejection.UNKNOWN_ITEM)
         val current = placements[index]
         val resized = current.copy(span = span)
-        return replaceExisting(placements, index, resized, columns, rows)
+        return replaceExisting(placements, index, resized, columns)
     }
 
     private fun <T : Any> insertOrReplace(
@@ -75,9 +72,8 @@ object GridRules {
         candidate: GridPlacement<T>,
         replaceIndex: Int,
         columns: Int,
-        rows: Int,
     ): Result<T> {
-        val rejection = legality(candidate, placements, columns, rows, replaceIndex)
+        val rejection = legality(candidate, placements, columns, replaceIndex)
         if (rejection != null) return Result.Rejected(rejection)
         val result = placements.toMutableList()
         if (replaceIndex >= 0) {
@@ -93,9 +89,8 @@ object GridRules {
         index: Int,
         candidate: GridPlacement<T>,
         columns: Int,
-        rows: Int,
     ): Result<T> {
-        val rejection = legality(candidate, placements, columns, rows, index)
+        val rejection = legality(candidate, placements, columns, index)
         if (rejection != null) return Result.Rejected(rejection)
         val result = placements.toMutableList()
         result[index] = candidate
@@ -106,10 +101,9 @@ object GridRules {
         candidate: GridPlacement<T>,
         placements: List<GridPlacement<T>>,
         columns: Int,
-        rows: Int,
         ignoredIndex: Int,
     ): Rejection? {
-        if (!isWithinBounds(candidate.position, candidate.span, columns, rows)) return Rejection.OUT_OF_BOUNDS
+        if (!isWithinBounds(candidate.position, candidate.span, columns)) return Rejection.OUT_OF_BOUNDS
         if (placements.indices.any { index ->
                 index != ignoredIndex && overlaps(candidate, placements[index])
             }
@@ -119,12 +113,11 @@ object GridRules {
         return null
     }
 
-    /** Returns whether a signed position and its complete span fit the grid. */
+    /** Returns whether a nonnegative position and its complete span fit the grid. */
     fun isWithinBounds(
         position: GridPosition,
         span: GridSpan,
         columns: Int,
-        rows: Int,
     ): Boolean =
         isWithinBounds(
             column = position.column.toLong(),
@@ -132,7 +125,6 @@ object GridRules {
             spanColumns = span.columns,
             spanRows = span.rows,
             columns = columns,
-            rows = rows.toLong(),
         )
 
     /** Signed, overflow-safe rectangle bounds predicate shared by grid callers. */
@@ -142,12 +134,10 @@ object GridRules {
         spanColumns: Int,
         spanRows: Int,
         columns: Int,
-        rows: Long,
     ): Boolean =
         column >= 0L && row >= 0L &&
-            spanColumns > 0 && spanRows > 0 && columns > 0 && rows > 0L &&
-            column <= columns.toLong() - spanColumns.toLong() &&
-            row <= rows - spanRows.toLong()
+            spanColumns > 0 && spanRows > 0 && columns > 0 &&
+            column <= columns.toLong() - spanColumns.toLong()
 
     private fun overlaps(first: GridPlacement<*>, second: GridPlacement<*>): Boolean {
         val firstRight = first.position.column.toLong() + first.span.columns
@@ -160,8 +150,7 @@ object GridRules {
             second.position.row < firstBottom
     }
 
-    private fun requireValidGridSize(columns: Int, rows: Int) {
+    private fun requireValidColumns(columns: Int) {
         require(columns > 0) { "columns must be positive" }
-        require(rows > 0) { "rows must be positive" }
     }
 }

@@ -338,17 +338,17 @@ class AllAppsRouteLoaderTest {
     ) : HomePlacementRepository {
         var reads = 0
             private set
-        override fun load(homeId: HomeId, columns: Int, rows: Int): LoadResult {
+        override fun load(homeId: HomeId, columns: Int): LoadResult {
             reads++
             return result
         }
         override fun place(
             homeId: HomeId, itemId: ItemId, appIdentity: AppIdentity,
-            position: LogicalPosition, span: LogicalSpan, columns: Int, rows: Int, replacingId: ItemId?,
+            position: LogicalPosition, span: LogicalSpan, columns: Int, replacingId: ItemId?,
         ): MutationResult = error("loader must not write")
-        override fun move(homeId: HomeId, itemId: ItemId, position: LogicalPosition, columns: Int, rows: Int): MutationResult =
+        override fun move(homeId: HomeId, itemId: ItemId, position: LogicalPosition, columns: Int): MutationResult =
             error("loader must not write")
-        override fun resize(homeId: HomeId, itemId: ItemId, span: LogicalSpan, columns: Int, rows: Int): MutationResult =
+        override fun resize(homeId: HomeId, itemId: ItemId, span: LogicalSpan, columns: Int): MutationResult =
             error("loader must not write")
         override fun remove(homeId: HomeId, itemId: ItemId): RemoveResult = error("loader must not write")
         override fun ensureHome(homeId: HomeId): Boolean = error("loader must not write")

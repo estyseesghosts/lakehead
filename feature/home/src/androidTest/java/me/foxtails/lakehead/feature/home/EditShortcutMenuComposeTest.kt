@@ -2,9 +2,12 @@ package me.foxtails.lakehead.feature.home
 
 import androidx.activity.ComponentActivity
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.width
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.assertCountEquals
@@ -56,6 +59,10 @@ import org.junit.runner.RunWith
  */
 @RunWith(AndroidJUnit4::class)
 class EditShortcutMenuComposeTest {
+
+    private companion object {
+        const val TEST_VIEWPORT_TAG = "edit-shortcut-menu-test-viewport"
+    }
 
     @get:Rule
     val composeRule = createAndroidComposeRule<ComponentActivity>()
@@ -171,14 +178,28 @@ class EditShortcutMenuComposeTest {
         fun shortEntries(count: Int) = List(count) { index ->
             ShortcutSurfaceEntry(id = "s${index + 1}", label = "Go", isPinned = false)
         }
-        setMenuCanvas(loaded(listOf(tile("a", personal, "Deep App"))), shortEntries(1))
+        val holder = androidx.compose.runtime.mutableStateOf(shortEntries(1))
+        executed.clear()
+        pinned.clear()
+        composeRule.setContent {
+            LauncherTheme {
+                HomeCanvas(
+                    state = loaded(listOf(tile("a", personal, "Deep App"))),
+                    iconsByIdentity = emptyMap(),
+                    onLaunchApp = {},
+                    onRequestDefaultHome = {},
+                    surfaceEntries = holder.value,
+                    onSurfaceExecute = { itemId, entryId -> executed.add(itemId to entryId) },
+                    onSurfaceTogglePin = { itemId, entryId -> pinned.add(itemId to entryId) },
+                )
+            }
+        }
         composeRule.waitForIdle()
         longPressBody("Deep App")
         val one = menuSizePx()
 
-        setMenuCanvas(loaded(listOf(tile("a", personal, "Deep App"))), shortEntries(3))
+        composeRule.runOnIdle { holder.value = shortEntries(3) }
         composeRule.waitForIdle()
-        longPressBody("Deep App")
         val three = menuSizePx()
 
         val oneRowPx = with(composeRule.density) { 48.dp.roundToPx() }
@@ -197,23 +218,39 @@ class EditShortcutMenuComposeTest {
     @Test
     fun longLabel_capsAtFrameNotWider() {
         val narrow = ShortcutSurfaceEntry(id = "s1", label = "Go", isPinned = false)
-        setMenuCanvas(loaded(listOf(tile("a", personal, "Deep App"))), listOf(narrow))
+        val holder = androidx.compose.runtime.mutableStateOf(listOf(narrow))
+        executed.clear()
+        pinned.clear()
+        composeRule.setContent {
+            LauncherTheme {
+                Box(modifier = Modifier.fillMaxSize().testTag(TEST_VIEWPORT_TAG)) {
+                    HomeCanvas(
+                        state = loaded(listOf(tile("a", personal, "Deep App"))),
+                        iconsByIdentity = emptyMap(),
+                        onLaunchApp = {},
+                        onRequestDefaultHome = {},
+                        surfaceEntries = holder.value,
+                        onSurfaceExecute = { itemId, entryId -> executed.add(itemId to entryId) },
+                        onSurfaceTogglePin = { itemId, entryId -> pinned.add(itemId to entryId) },
+                    )
+                }
+            }
+        }
         composeRule.waitForIdle()
         longPressBody("Deep App")
         val narrowWidth = menuSizePx().width
 
         val long = ShortcutSurfaceEntry(id = "s1", label = "L".repeat(160), isPinned = false)
-        setMenuCanvas(loaded(listOf(tile("a", personal, "Deep App"))), listOf(long))
+        composeRule.runOnIdle { holder.value = listOf(long) }
         composeRule.waitForIdle()
-        longPressBody("Deep App")
         val capped = menuSizePx()
-        val gridWidth = composeRule.onNodeWithTag(HOME_CANVAS_GRID_TAG, useUnmergedTree = true)
+        val outerWidth = composeRule.onNodeWithTag(TEST_VIEWPORT_TAG, useUnmergedTree = true)
             .assertIsDisplayed()
             .fetchSemanticsNode().size.width
         val edgePx = with(composeRule.density) { 16.dp.roundToPx() }
         val frameCapPx = minOf(
             with(composeRule.density) { 320.dp.roundToPx() },
-            gridWidth - 2 * edgePx,
+            outerWidth - 2 * edgePx,
         )
         val tolerancePx = with(composeRule.density) { 8.dp.roundToPx() }
         composeRule.runOnIdle {
@@ -503,21 +540,33 @@ class EditShortcutMenuComposeTest {
     @Test
     fun pinnedAndUnpinned_sameLabelSameHeight() {
         val label = "Shared label"
-        setMenuCanvas(
-            loaded(listOf(tile("a", personal, "Deep App"))),
+        val holder = androidx.compose.runtime.mutableStateOf(
             listOf(ShortcutSurfaceEntry(id = "s1", label = label, isPinned = false)),
         )
+        executed.clear()
+        pinned.clear()
+        composeRule.setContent {
+            LauncherTheme {
+                HomeCanvas(
+                    state = loaded(listOf(tile("a", personal, "Deep App"))),
+                    iconsByIdentity = emptyMap(),
+                    onLaunchApp = {},
+                    onRequestDefaultHome = {},
+                    surfaceEntries = holder.value,
+                    onSurfaceExecute = { itemId, entryId -> executed.add(itemId to entryId) },
+                    onSurfaceTogglePin = { itemId, entryId -> pinned.add(itemId to entryId) },
+                )
+            }
+        }
         composeRule.waitForIdle()
         longPressBody("Deep App")
         val unpinned = composeRule.onAllNodesWithTag(SHORTCUT_SURFACE_ROW_TAG, useUnmergedTree = true)[0]
             .fetchSemanticsNode().size.height
 
-        setMenuCanvas(
-            loaded(listOf(tile("a", personal, "Deep App"))),
-            listOf(ShortcutSurfaceEntry(id = "s1", label = label, isPinned = true)),
-        )
+        composeRule.runOnIdle {
+            holder.value = listOf(ShortcutSurfaceEntry(id = "s1", label = label, isPinned = true))
+        }
         composeRule.waitForIdle()
-        longPressBody("Deep App")
         val pinnedHeight = composeRule.onAllNodesWithTag(SHORTCUT_SURFACE_ROW_TAG, useUnmergedTree = true)[0]
             .fetchSemanticsNode().size.height
 
@@ -579,17 +628,19 @@ class EditShortcutMenuComposeTest {
         )
         val menuTile = tile("a", personal, "Deep App")
         val narrow = ShortcutSurfaceEntry(id = "s1", label = "Go", isPinned = false)
+        val holder = androidx.compose.runtime.mutableStateOf(listOf(narrow))
         val visibleBottomPx = with(composeRule.density) { 800.dp.roundToPx() }
         composeRule.setContent {
             LauncherTheme {
-                Box(modifier = Modifier.width(availDp)) {
+                Box(
+                    modifier = Modifier
+                        .width(availDp)
+                        .height(with(composeRule.density) { visibleBottomPx.toDp() }),
+                ) {
                     EditShortcutMenu(
                         tile = menuTile,
-                        entries = listOf(narrow),
-                        geometry = geometry,
-                        originX = 0,
-                        rowOrigin = 0L,
-                        originYPx = 0L,
+                        entries = holder.value,
+                        metrics = homeGridMetricsFor(geometry, geometry.columnCount, 0, 0f),
                         availableWidthPx = availPx,
                         visibleTopPx = 0,
                         visibleBottomPx = visibleBottomPx,

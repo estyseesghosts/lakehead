@@ -8,11 +8,22 @@ import org.junit.Test
 class GridRulesTest {
     @Test
     fun signedBoundsRejectNegativeAndPartialSpanButAcceptEdges() {
-        assertTrue(GridRules.isWithinBounds(0L, 0L, 1, 1, 4, 4))
-        assertTrue(GridRules.isWithinBounds(2L, 2L, 2, 2, 4, 4))
-        assertTrue(!GridRules.isWithinBounds(-1L, 0L, 1, 1, 4, 4))
-        assertTrue(!GridRules.isWithinBounds(3L, 0L, 2, 1, 4, 4))
-        assertTrue(!GridRules.isWithinBounds(0L, 3L, 1, 2, 4, 4))
+        assertTrue(GridRules.isWithinBounds(0L, 0L, 1, 1, 4))
+        assertTrue(GridRules.isWithinBounds(2L, 2L, 2, 2, 4))
+        assertTrue(!GridRules.isWithinBounds(-1L, 0L, 1, 1, 4))
+        assertTrue(!GridRules.isWithinBounds(3L, 0L, 2, 1, 4))
+        assertTrue(GridRules.isWithinBounds(0L, Long.MAX_VALUE, 1, 2, 4))
+    }
+
+    @Test
+    fun rawBoundsRejectNegativeRows() {
+        assertTrue(!GridRules.isWithinBounds(0L, -1L, 1, 1, 4))
+    }
+
+    @Test
+    fun rawBoundsRejectInvalidSpans() {
+        assertTrue(!GridRules.isWithinBounds(0L, 0L, 0, 1, 4))
+        assertTrue(!GridRules.isWithinBounds(0L, 0L, 1, 0, 4))
     }
 
     @Test
@@ -33,7 +44,7 @@ class GridRulesTest {
         )
         cornerPositions.forEachIndexed { index, position ->
             assertAccepted(
-                GridRules.place(emptyList(), placement("corner-$index", position, 2, 2), 4, 4),
+                GridRules.place(emptyList(), placement("corner-$index", position, 2, 2), 4),
             )
         }
 
@@ -43,7 +54,7 @@ class GridRulesTest {
             placement("left", GridPosition(0, 1), 1, 2),
             placement("right", GridPosition(3, 1), 1, 2),
         )
-        edgeCandidates.forEach { assertAccepted(GridRules.place(emptyList(), it, 4, 4)) }
+        edgeCandidates.forEach { assertAccepted(GridRules.place(emptyList(), it, 4)) }
     }
 
     @Test
@@ -52,7 +63,6 @@ class GridRulesTest {
             emptyList(),
             placement("wide", GridPosition(0, 0), 3, 1),
             6,
-            4,
         )
         assertAccepted(wide)
 
@@ -60,26 +70,18 @@ class GridRulesTest {
             emptyList(),
             placement("right", GridPosition(3, 0), 2, 1),
             4,
-            4,
         )
         assertRejected(outsideRight, GridRules.Rejection.OUT_OF_BOUNDS)
-        val outsideBottom = GridRules.place(
-            emptyList(),
-            placement("bottom", GridPosition(0, 3), 1, 2),
-            4,
-            4,
-        )
-        assertRejected(outsideBottom, GridRules.Rejection.OUT_OF_BOUNDS)
+        assertAccepted(GridRules.place(emptyList(), placement("bottom", GridPosition(0, Int.MAX_VALUE), 1, 2), 4))
     }
 
     @Test
-    fun fourByTwoSpanFitsSixColumnsButRejectsRightAndBottomOverflow() {
+    fun fourByTwoSpanFitsSixColumnsAndAcceptsHighRowsButRejectsRightOverflow() {
         assertAccepted(
             GridRules.place(
                 emptyList(),
                 placement("fits", GridPosition(2, 0), 4, 2),
                 columns = 6,
-                rows = 4,
             ),
         )
         assertRejected(
@@ -87,19 +89,10 @@ class GridRulesTest {
                 emptyList(),
                 placement("right", GridPosition(3, 0), 4, 2),
                 columns = 6,
-                rows = 4,
             ),
             GridRules.Rejection.OUT_OF_BOUNDS,
         )
-        assertRejected(
-            GridRules.place(
-                emptyList(),
-                placement("bottom", GridPosition(0, 3), 4, 2),
-                columns = 6,
-                rows = 4,
-            ),
-            GridRules.Rejection.OUT_OF_BOUNDS,
-        )
+        assertAccepted(GridRules.place(emptyList(), placement("bottom", GridPosition(0, Int.MAX_VALUE), 4, 2), columns = 6))
     }
 
     @Test
@@ -109,7 +102,6 @@ class GridRulesTest {
             existing,
             placement("overlap", GridPosition(2, 2), 2, 1),
             5,
-            5,
         )
         assertRejected(overlap, GridRules.Rejection.COLLISION)
 
@@ -117,13 +109,11 @@ class GridRulesTest {
             existing,
             placement("touch-right", GridPosition(3, 1), 2, 2),
             5,
-            5,
         )
         assertAccepted(horizontalTouch)
         val verticalTouch = GridRules.place(
             existing,
             placement("touch-below", GridPosition(1, 3), 2, 1),
-            5,
             5,
         )
         assertAccepted(verticalTouch)
@@ -135,7 +125,7 @@ class GridRulesTest {
         val last = placement("last", GridPosition(2, 0))
         val existing = listOf(first, last)
 
-        val result = accepted(GridRules.place(existing, placement("hole", GridPosition(1, 0)), 4, 3))
+        val result = accepted(GridRules.place(existing, placement("hole", GridPosition(1, 0)), 4))
 
         assertEquals(listOf(first, last, placement("hole", GridPosition(1, 0))), result)
     }
@@ -147,7 +137,7 @@ class GridRulesTest {
         val existing = listOf(unrelated, moving)
 
         val result = accepted(
-            GridRules.move(existing, "moving", GridPosition(1, 1), columns = 5, rows = 4),
+            GridRules.move(existing, "moving", GridPosition(1, 1), columns = 5),
         )
 
         assertEquals(listOf(unrelated, moving.copy(position = GridPosition(1, 1))), result)
@@ -161,7 +151,7 @@ class GridRulesTest {
         val existing = listOf(moving, unrelated)
 
         val result = accepted(
-            GridRules.move(existing, "moving", GridPosition(1, 0), columns = 6, rows = 4),
+            GridRules.move(existing, "moving", GridPosition(1, 0), columns = 6),
         )
 
         assertEquals(
@@ -178,7 +168,7 @@ class GridRulesTest {
         val existing = listOf(resizing, unrelated)
 
         val result = accepted(
-            GridRules.resize(existing, "resizing", GridSpan(2, 1), columns = 5, rows = 4),
+            GridRules.resize(existing, "resizing", GridSpan(2, 1), columns = 5),
         )
 
         assertEquals(listOf(resizing.copy(span = GridSpan(2, 1)), unrelated), result)
@@ -192,11 +182,11 @@ class GridRulesTest {
         val existing = listOf(moving, blocker)
 
         assertRejected(
-            GridRules.move(existing, "moving", GridPosition(1, 0), 5, 4),
+            GridRules.move(existing, "moving", GridPosition(1, 0), 5),
             GridRules.Rejection.COLLISION,
         )
         assertRejected(
-            GridRules.resize(existing, "moving", GridSpan(2, 1), 5, 4),
+            GridRules.resize(existing, "moving", GridSpan(2, 1), 5),
             GridRules.Rejection.COLLISION,
         )
         assertEquals(listOf(moving, blocker), existing)
@@ -206,11 +196,11 @@ class GridRulesTest {
     fun genericResizeIsAcceptedWhenInBoundsAndMoveRejectsOutOfBounds() {
         val existing = listOf(placement("item", GridPosition(0, 0)))
         val resizeResult = accepted(
-            GridRules.resize(existing, "item", GridSpan(3, 1), 5, 4),
+            GridRules.resize(existing, "item", GridSpan(3, 1), 5),
         )
         assertEquals(listOf(placement("item", GridPosition(0, 0), 3, 1)), resizeResult)
         assertRejected(
-            GridRules.move(existing, "item", GridPosition(5, 0), 5, 4),
+            GridRules.move(existing, "item", GridPosition(5, 0), 5),
             GridRules.Rejection.OUT_OF_BOUNDS,
         )
     }
@@ -224,7 +214,7 @@ class GridRulesTest {
         val replacement = placement("replacement", GridPosition(1, 0), 2, 1)
 
         val result = accepted(
-            GridRules.place(existing, replacement, 6, 4, replacingId = "replace-me"),
+            GridRules.place(existing, replacement, 6, replacingId = "replace-me"),
         )
         assertEquals(listOf(first, replacement, last), result)
 
@@ -232,7 +222,6 @@ class GridRulesTest {
             existing,
             placement("replacement", GridPosition(0, 0)),
             6,
-            4,
             replacingId = "replace-me",
         )
         assertRejected(otherCollision, GridRules.Rejection.COLLISION)
@@ -244,7 +233,7 @@ class GridRulesTest {
         val existing = listOf(placement("duplicate", GridPosition(0, 0)))
 
         assertRejected(
-            GridRules.place(existing, placement("duplicate", GridPosition(2, 0)), 4, 4),
+            GridRules.place(existing, placement("duplicate", GridPosition(2, 0)), 4),
             GridRules.Rejection.COLLISION,
         )
     }
@@ -260,7 +249,6 @@ class GridRulesTest {
                 existing,
                 placement("replacement", GridPosition(2, 0)),
                 columns = 5,
-                rows = 4,
                 replacingId = "target",
             ),
             GridRules.Rejection.COLLISION,
@@ -279,7 +267,6 @@ class GridRulesTest {
                 existing,
                 replacement,
                 columns = 6,
-                rows = 4,
                 replacingId = "target",
             ),
         )
@@ -290,7 +277,6 @@ class GridRulesTest {
                 existing,
                 placement("replacement", GridPosition(3, 0), 4, 2),
                 columns = 6,
-                rows = 4,
                 replacingId = "target",
             ),
             GridRules.Rejection.OUT_OF_BOUNDS,
@@ -303,19 +289,12 @@ class GridRulesTest {
         val existing = listOf(placement("item", GridPosition(0, 0)))
         val candidate = placement("new", GridPosition(1, 0))
 
-        assertIllegalArgument { GridRules.place(existing, candidate, columns = 0, rows = 4) }
-        assertIllegalArgument { GridRules.place(existing, candidate, columns = 4, rows = 0) }
+        assertIllegalArgument { GridRules.place(existing, candidate, columns = 0) }
         assertIllegalArgument {
-            GridRules.move(existing, "item", GridPosition(1, 0), columns = -1, rows = 4)
+            GridRules.move(existing, "item", GridPosition(1, 0), columns = -1)
         }
         assertIllegalArgument {
-            GridRules.move(existing, "item", GridPosition(1, 0), columns = 4, rows = -1)
-        }
-        assertIllegalArgument {
-            GridRules.resize(existing, "item", GridSpan(2, 1), columns = 0, rows = 4)
-        }
-        assertIllegalArgument {
-            GridRules.resize(existing, "item", GridSpan(2, 1), columns = 4, rows = 0)
+            GridRules.resize(existing, "item", GridSpan(2, 1), columns = 0)
         }
     }
 
@@ -323,15 +302,15 @@ class GridRulesTest {
     fun unknownItemsAreReportedForMoveResizeAndReplacement() {
         val existing = listOf(placement("known", GridPosition(0, 0)))
         assertRejected(
-            GridRules.move(existing, "missing", GridPosition(1, 0), 4, 4),
+            GridRules.move(existing, "missing", GridPosition(1, 0), 4),
             GridRules.Rejection.UNKNOWN_ITEM,
         )
         assertRejected(
-            GridRules.resize(existing, "missing", GridSpan(2, 1), 4, 4),
+            GridRules.resize(existing, "missing", GridSpan(2, 1), 4),
             GridRules.Rejection.UNKNOWN_ITEM,
         )
         assertRejected(
-            GridRules.place(existing, placement("new", GridPosition(2, 0)), 4, 4, "missing"),
+            GridRules.place(existing, placement("new", GridPosition(2, 0)), 4, "missing"),
             GridRules.Rejection.UNKNOWN_ITEM,
         )
     }
@@ -344,15 +323,15 @@ class GridRulesTest {
         val before = mutableInput.toList()
 
         assertRejected(
-            GridRules.place(mutableInput, placement("blocked", GridPosition(0, 0)), 5, 4),
+            GridRules.place(mutableInput, placement("blocked", GridPosition(0, 0)), 5),
             GridRules.Rejection.COLLISION,
         )
         assertRejected(
-            GridRules.move(mutableInput, "first", GridPosition(1, 0), 5, 4),
+            GridRules.move(mutableInput, "first", GridPosition(1, 0), 5),
             GridRules.Rejection.COLLISION,
         )
         assertRejected(
-            GridRules.resize(mutableInput, "first", GridSpan(2, 1), 5, 4),
+            GridRules.resize(mutableInput, "first", GridSpan(2, 1), 5),
             GridRules.Rejection.COLLISION,
         )
         assertEquals(before, mutableInput)
@@ -365,7 +344,7 @@ class GridRulesTest {
         val after = placement("after", GridPosition(4, 2))
         val existing = listOf(before, moved, after)
 
-        val result = accepted(GridRules.move(existing, "moved", GridPosition(1, 0), 6, 4))
+        val result = accepted(GridRules.move(existing, "moved", GridPosition(1, 0), 6))
 
         assertEquals(listOf(before, moved.copy(position = GridPosition(1, 0)), after), result)
         assertEquals(existing, listOf(before, moved, after))
@@ -374,9 +353,9 @@ class GridRulesTest {
 
     @Test
     fun genericSpansPlaceSuccessfullyWhenInBoundsAndFree() {
-        assertAccepted(GridRules.place(emptyList(), placement("a", GridPosition(0, 0), 3, 2), 6, 6))
-        assertAccepted(GridRules.place(emptyList(), placement("b", GridPosition(0, 0), 3, 3), 6, 6))
-        assertAccepted(GridRules.place(emptyList(), placement("c", GridPosition(0, 0), 4, 3), 6, 6))
+        assertAccepted(GridRules.place(emptyList(), placement("a", GridPosition(0, 0), 3, 2), 6))
+        assertAccepted(GridRules.place(emptyList(), placement("b", GridPosition(0, 0), 3, 3), 6))
+        assertAccepted(GridRules.place(emptyList(), placement("c", GridPosition(0, 0), 4, 3), 6))
     }
 
     @Test
@@ -385,36 +364,30 @@ class GridRulesTest {
             placement("m", GridPosition(0, 0), 3, 2),
             placement("u", GridPosition(4, 4)),
         )
-        assertAccepted(GridRules.move(existing, "m", GridPosition(1, 1), 6, 6))
-        assertAccepted(GridRules.resize(existing, "m", GridSpan(3, 3), 6, 6))
-        assertAccepted(GridRules.resize(existing, "m", GridSpan(4, 3), 6, 6))
+        assertAccepted(GridRules.move(existing, "m", GridPosition(1, 1), 6))
+        assertAccepted(GridRules.resize(existing, "m", GridSpan(3, 3), 6))
+        assertAccepted(GridRules.resize(existing, "m", GridSpan(4, 3), 6))
     }
 
     @Test
-    fun oversizedGenericSpansRejectOutOfBounds() {
+    fun oversizedGenericSpansRejectHorizontalOverflowAndAcceptHighRows() {
         assertRejected(
-            GridRules.place(emptyList(), placement("r", GridPosition(4, 0), 3, 2), 6, 4),
+            GridRules.place(emptyList(), placement("r", GridPosition(4, 0), 3, 2), 6),
             GridRules.Rejection.OUT_OF_BOUNDS,
         )
-        assertRejected(
-            GridRules.place(emptyList(), placement("b", GridPosition(0, 3), 4, 3), 6, 4),
-            GridRules.Rejection.OUT_OF_BOUNDS,
-        )
-        assertRejected(
-            GridRules.place(emptyList(), placement("o", GridPosition(0, Int.MAX_VALUE - 1), 1, 2), 6, Int.MAX_VALUE),
-            GridRules.Rejection.OUT_OF_BOUNDS,
-        )
+        assertAccepted(GridRules.place(emptyList(), placement("b", GridPosition(0, Int.MAX_VALUE), 4, 3), 6))
+        assertAccepted(GridRules.place(emptyList(), placement("o", GridPosition(0, Int.MAX_VALUE - 1), 1, 2), 6))
     }
 
     @Test
     fun genericSpanCollisionVsEdgeTouch() {
         val existing = listOf(placement("e", GridPosition(0, 0), 3, 2))
         assertRejected(
-            GridRules.place(existing, placement("overlap", GridPosition(2, 1), 3, 2), 6, 4),
+            GridRules.place(existing, placement("overlap", GridPosition(2, 1), 3, 2), 6),
             GridRules.Rejection.COLLISION,
         )
-        assertAccepted(GridRules.place(existing, placement("touchR", GridPosition(3, 0), 3, 2), 6, 4))
-        assertAccepted(GridRules.place(existing, placement("touchB", GridPosition(0, 2), 3, 2), 6, 4))
+        assertAccepted(GridRules.place(existing, placement("touchR", GridPosition(3, 0), 3, 2), 6))
+        assertAccepted(GridRules.place(existing, placement("touchB", GridPosition(0, 2), 3, 2), 6))
     }
 
     @Test
@@ -423,8 +396,8 @@ class GridRulesTest {
             placement("s", GridPosition(0, 0), 3, 2),
             placement("u", GridPosition(5, 0)),
         )
-        assertAccepted(GridRules.move(existing, "s", GridPosition(1, 0), 6, 4))
-        assertAccepted(GridRules.resize(existing, "s", GridSpan(4, 3), 6, 4))
+        assertAccepted(GridRules.move(existing, "s", GridPosition(1, 0), 6))
+        assertAccepted(GridRules.resize(existing, "s", GridSpan(4, 3), 6))
     }
 
     @Test
@@ -436,12 +409,12 @@ class GridRulesTest {
         val replacement = placement("replacement", GridPosition(1, 0), 3, 2)
 
         val result = accepted(
-            GridRules.place(existing, replacement, 6, 4, replacingId = "target"),
+            GridRules.place(existing, replacement, 6, replacingId = "target"),
         )
         assertEquals(listOf(before, replacement, after), result)
 
         assertRejected(
-            GridRules.place(existing, placement("missing", GridPosition(1, 0)), 6, 4, replacingId = "missing"),
+            GridRules.place(existing, placement("missing", GridPosition(1, 0)), 6, replacingId = "missing"),
             GridRules.Rejection.UNKNOWN_ITEM,
         )
     }
@@ -454,11 +427,11 @@ class GridRulesTest {
         )
         val mutableInput = before.toMutableList()
         assertRejected(
-            GridRules.place(mutableInput, placement("blocked", GridPosition(4, 0)), 6, 4),
+            GridRules.place(mutableInput, placement("blocked", GridPosition(4, 0)), 6),
             GridRules.Rejection.COLLISION,
         )
         assertRejected(
-            GridRules.move(mutableInput, "a", GridPosition(3, 0), 6, 4),
+            GridRules.move(mutableInput, "a", GridPosition(3, 0), 6),
             GridRules.Rejection.COLLISION,
         )
         assertEquals(before, mutableInput)
@@ -470,7 +443,7 @@ class GridRulesTest {
     fun move_toSamePosition_isAccepted() {
         // Moving to the current position is a valid no-op.
         val existing = listOf(placement("item", GridPosition(2, 3)))
-        val result = accepted(GridRules.move(existing, "item", GridPosition(2, 3), 6, 6))
+        val result = accepted(GridRules.move(existing, "item", GridPosition(2, 3), 6))
         assertEquals(listOf(placement("item", GridPosition(2, 3))), result)
     }
 
@@ -478,7 +451,7 @@ class GridRulesTest {
     fun move_preservesSpan() {
         // Move only changes position; span is untouched.
         val existing = listOf(placement("wide", GridPosition(0, 0), 3, 2))
-        val result = accepted(GridRules.move(existing, "wide", GridPosition(2, 2), 6, 6))
+        val result = accepted(GridRules.move(existing, "wide", GridPosition(2, 2), 6))
         assertEquals(GridSpan(3, 2), result[0].span)
         assertEquals(GridPosition(2, 2), result[0].position)
     }
@@ -488,7 +461,7 @@ class GridRulesTest {
         // A 2x2 at (0,0) can move to (1,1) which overlaps its old cells — own
         // footprint is ignored.
         val existing = listOf(placement("self", GridPosition(0, 0), 2, 2))
-        val result = accepted(GridRules.move(existing, "self", GridPosition(1, 1), 6, 6))
+        val result = accepted(GridRules.move(existing, "self", GridPosition(1, 1), 6))
         assertEquals(GridPosition(1, 1), result[0].position)
     }
 
@@ -499,7 +472,7 @@ class GridRulesTest {
             placement("blocker", GridPosition(2, 0)),
         )
         assertRejected(
-            GridRules.move(existing, "mover", GridPosition(2, 0), 6, 4),
+            GridRules.move(existing, "mover", GridPosition(2, 0), 6),
             GridRules.Rejection.COLLISION,
         )
     }
@@ -511,7 +484,7 @@ class GridRulesTest {
         val after = placement("after", GridPosition(0, 3))
         val existing = listOf(before, mover, after)
 
-        val result = accepted(GridRules.move(existing, "mover", GridPosition(4, 2), 6, 6))
+        val result = accepted(GridRules.move(existing, "mover", GridPosition(4, 2), 6))
 
         // Order and unrelated entries preserved.
         assertEquals(before, result[0])
@@ -522,7 +495,7 @@ class GridRulesTest {
     @Test
     fun move_toOriginCorner_isAccepted() {
         val existing = listOf(placement("item", GridPosition(3, 3)))
-        val result = accepted(GridRules.move(existing, "item", GridPosition(0, 0), 6, 6))
+        val result = accepted(GridRules.move(existing, "item", GridPosition(0, 0), 6))
         assertEquals(GridPosition(0, 0), result[0].position)
     }
 
@@ -534,7 +507,7 @@ class GridRulesTest {
         val before = mutableInput.toList()
 
         assertRejected(
-            GridRules.move(mutableInput, "mover", GridPosition(3, 0), 6, 4),
+            GridRules.move(mutableInput, "mover", GridPosition(3, 0), 6),
             GridRules.Rejection.COLLISION,
         )
         assertEquals(before, mutableInput)

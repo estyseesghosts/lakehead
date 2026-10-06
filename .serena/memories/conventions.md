@@ -1,0 +1,1 @@
+Respect module ownership and dependency direction. Keep core:grid platform-agnostic and feature state separate from rendering. Do not add generic Utils files; preserve unfamiliar uncommitted work.

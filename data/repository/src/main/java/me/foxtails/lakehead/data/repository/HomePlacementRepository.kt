@@ -20,7 +20,7 @@ import me.foxtails.lakehead.data.database.toEntity
 /** Explicitly Home-scoped persistence operations; this contract has no platform types. */
 interface HomePlacementRepository {
     /** Loads a home and normalizes persisted excess empty row gaps in the same transaction. */
-    fun load(homeId: HomeId, columns: Int, rows: Int): LoadResult
+    fun load(homeId: HomeId, columns: Int): LoadResult
 
     /** Accepted mutations return the final (possibly row-shifted) placements. */
     fun place(
@@ -30,13 +30,12 @@ interface HomePlacementRepository {
         position: LogicalPosition,
         span: LogicalSpan,
         columns: Int,
-        rows: Int,
         replacingId: ItemId? = null,
     ): MutationResult
 
-    fun move(homeId: HomeId, itemId: ItemId, position: LogicalPosition, columns: Int, rows: Int): MutationResult
+    fun move(homeId: HomeId, itemId: ItemId, position: LogicalPosition, columns: Int): MutationResult
 
-    fun resize(homeId: HomeId, itemId: ItemId, span: LogicalSpan, columns: Int, rows: Int): MutationResult
+    fun resize(homeId: HomeId, itemId: ItemId, span: LogicalSpan, columns: Int): MutationResult
 
     fun remove(homeId: HomeId, itemId: ItemId): RemoveResult
 
@@ -72,15 +71,14 @@ sealed interface RemoveResult {
     data object WrongHome : RemoveResult
 }
 
-/** Caller supplies finite grid dimensions; the database remains the serialized state owner. */
+/** Caller supplies horizontal dimensions; the database remains the serialized state owner. */
 class RoomHomePlacementRepository(
     private val database: me.foxtails.lakehead.data.database.PlacementDatabase,
 ) : HomePlacementRepository {
     private val dao get() = database.placementDao()
 
-    override fun load(homeId: HomeId, columns: Int, rows: Int): LoadResult {
+    override fun load(homeId: HomeId, columns: Int): LoadResult {
         require(columns > 0) { "columns must be positive" }
-        require(rows > 0) { "rows must be positive" }
         return database.runInTransaction<LoadResult> {
             if (dao.home(homeId.value) == null) return@runInTransaction LoadResult.NotFound
             val entities = dao.placementsForHome(homeId.value)
@@ -101,7 +99,6 @@ class RoomHomePlacementRepository(
         position: LogicalPosition,
         span: LogicalSpan,
         columns: Int,
-        rows: Int,
         replacingId: ItemId?,
     ): MutationResult = database.runInTransaction<MutationResult> {
         if (dao.home(homeId.value) == null) return@runInTransaction MutationResult.NotFound
@@ -119,7 +116,7 @@ class RoomHomePlacementRepository(
 
         val current = homeGrid(homeId)
         val candidate = GridPlacement(itemId, position.toGrid(), span.toGrid())
-        when (val result = GridRules.place(current, candidate, columns, rows, replacingId)) {
+        when (val result = GridRules.place(current, candidate, columns, replacingId)) {
             is GridRules.Result.Rejected -> MutationResult.Rejected(result)
             is GridRules.Result.Accepted -> {
                 ensureAppReference(appIdentity)
@@ -164,9 +161,8 @@ class RoomHomePlacementRepository(
         itemId: ItemId,
         position: LogicalPosition,
         columns: Int,
-        rows: Int,
     ): MutationResult = edit(homeId, itemId, { current ->
-        GridRules.move(current, itemId, position.toGrid(), columns, rows)
+        GridRules.move(current, itemId, position.toGrid(), columns)
         }, { accepted ->
         val normalized = normalize(accepted.placements)
         persistShifted(dao.placementsForHome(homeId.value), normalized)
@@ -178,9 +174,8 @@ class RoomHomePlacementRepository(
         itemId: ItemId,
         span: LogicalSpan,
         columns: Int,
-        rows: Int,
     ): MutationResult = edit(homeId, itemId, { current ->
-        GridRules.resize(current, itemId, span.toGrid(), columns, rows)
+        GridRules.resize(current, itemId, span.toGrid(), columns)
         }, { accepted ->
         val normalized = normalize(accepted.placements)
         persistShifted(dao.placementsForHome(homeId.value), normalized)

@@ -1977,6 +1977,183 @@ class FeedOverlayGatewayTest {
         }
     }
 
+    // D4 AIDL/surface/render trace: the bridge's first-failure listener lands here
+    // with the earliest broken stage, and the gateway reports that verdict with the
+    // attempted target's identity instead of a generic disconnect. Epoch scoping
+    // keeps the first failure: the teardown bumps the epoch, so the transport loss
+    // reported alongside arrives stale and never overwrites the stage verdict.
+
+    @Test
+    fun protocolFailureReportsNegotiationStageWithTargetIdentity() = runTest {
+        val harness = Harness(this, installed = setOf(LAWNFEED_PACKAGE))
+        harness.gateway.start(this)
+        advanceUntilIdle()
+        val epoch = harness.gateway.bindEpoch
+
+        harness.gateway.onProtocolFailureForEpoch(
+            epoch,
+            FeedDiagnosticStatus.NEGOTIATION_FAILED,
+            FeedDiagnosticCause.CONTROL_TRANSACT_FAILED,
+        )
+        advanceUntilIdle()
+
+        val diagnostic = harness.gateway.diagnostic.value
+        assertEquals(FeedDiagnosticStatus.NEGOTIATION_FAILED, diagnostic?.status)
+        assertEquals(FeedDiagnosticStage.NEGOTIATION, diagnostic?.stage)
+        assertEquals(FeedDiagnosticCause.CONTROL_TRANSACT_FAILED, diagnostic?.cause)
+        assertEquals(FeedProviderId.Lawnfeed, diagnostic?.provider)
+        assertEquals(LAWNFEED_PACKAGE, diagnostic?.packageName)
+        assertEquals(harness.lawnfeedTarget().component, diagnostic?.component)
+        assertEquals(
+            FeedAvailability.Unavailable(FeedAvailability.Unavailable.Reason.QUERY_FAILED),
+            harness.gateway.state.value,
+        )
+        val evidence = harness.gateway.bindingEvidence.value
+        assertEquals(harness.lawnfeedTarget(), evidence.target)
+        assertTrue(evidence.attempted)
+        assertTrue(!evidence.connected)
+        assertTrue(!evidence.active)
+        assertEquals(1, harness.connector.unbindCalls)
+    }
+
+    @Test
+    fun protocolFailureReportsSessionStage() = runTest {
+        val harness = Harness(this, installed = setOf(LAWNFEED_PACKAGE))
+        harness.gateway.start(this)
+        advanceUntilIdle()
+        val epoch = harness.gateway.bindEpoch
+
+        harness.gateway.onProtocolFailureForEpoch(
+            epoch,
+            FeedDiagnosticStatus.SURFACE_SESSION_FAILED,
+            FeedDiagnosticCause.WINDOW_TRANSACT_FAILED,
+        )
+        advanceUntilIdle()
+
+        val diagnostic = harness.gateway.diagnostic.value
+        assertEquals(FeedDiagnosticStatus.SURFACE_SESSION_FAILED, diagnostic?.status)
+        assertEquals(FeedDiagnosticStage.SURFACE_SESSION, diagnostic?.stage)
+        assertEquals(FeedDiagnosticCause.WINDOW_TRANSACT_FAILED, diagnostic?.cause)
+        assertEquals(harness.lawnfeedTarget().component, diagnostic?.component)
+        assertTrue(harness.gateway.state.value is FeedAvailability.Unavailable)
+        assertEquals(1, harness.connector.unbindCalls)
+    }
+
+    @Test
+    fun protocolFailureReportsRenderStage() = runTest {
+        val harness = Harness(this, installed = setOf(LAWNFEED_PACKAGE))
+        harness.gateway.start(this)
+        advanceUntilIdle()
+        val epoch = harness.gateway.bindEpoch
+
+        harness.gateway.onProtocolFailureForEpoch(
+            epoch,
+            FeedDiagnosticStatus.RENDERING_FAILED,
+            FeedDiagnosticCause.CONTENT_ABSENT,
+        )
+        advanceUntilIdle()
+
+        val diagnostic = harness.gateway.diagnostic.value
+        assertEquals(FeedDiagnosticStatus.RENDERING_FAILED, diagnostic?.status)
+        assertEquals(FeedDiagnosticStage.RENDERING, diagnostic?.stage)
+        assertEquals(FeedDiagnosticCause.CONTENT_ABSENT, diagnostic?.cause)
+        assertEquals(harness.lawnfeedTarget().component, diagnostic?.component)
+        assertTrue(harness.gateway.state.value is FeedAvailability.Unavailable)
+        assertEquals(1, harness.connector.unbindCalls)
+    }
+
+    @Test
+    fun protocolFailureThenLossKeepsFirstVerdict() = runTest {
+        val harness = Harness(this, installed = setOf(LAWNFEED_PACKAGE))
+        harness.gateway.start(this)
+        advanceUntilIdle()
+        val epoch = harness.gateway.bindEpoch
+
+        // The bridge reports the stage failure alongside the transport loss: the
+        // loss arrives stale after the failure's teardown bumped the epoch.
+        harness.gateway.onProtocolFailureForEpoch(
+            epoch,
+            FeedDiagnosticStatus.NEGOTIATION_FAILED,
+            FeedDiagnosticCause.CONTROL_TRANSACT_FAILED,
+        )
+        harness.gateway.onBindingDiedForEpoch(epoch)
+        harness.gateway.onConnectionLost()
+        advanceUntilIdle()
+
+        val diagnostic = harness.gateway.diagnostic.value
+        assertEquals(FeedDiagnosticStatus.NEGOTIATION_FAILED, diagnostic?.status)
+        assertEquals(FeedDiagnosticCause.CONTROL_TRANSACT_FAILED, diagnostic?.cause)
+        assertEquals(1, harness.connector.unbindCalls)
+    }
+
+    @Test
+    fun staleProtocolFailureAfterReplaceIsIgnoredWithoutOverwrite() = runTest {
+        val harness = Harness(this, installed = setOf(LAWNFEED_PACKAGE))
+        harness.gateway.start(this)
+        advanceUntilIdle()
+        val staleEpoch = harness.gateway.bindEpoch
+
+        harness.installed = setOf(NEO_FEED_PACKAGE)
+        harness.firePackageChange()
+        advanceUntilIdle()
+        assertEquals(
+            FeedAvailability.Available(FeedProviderId.NeoFeed),
+            harness.gateway.state.value,
+        )
+        val unbindsBefore = harness.connector.unbindCalls
+
+        harness.gateway.onProtocolFailureForEpoch(
+            staleEpoch,
+            FeedDiagnosticStatus.NEGOTIATION_FAILED,
+            FeedDiagnosticCause.CONTROL_TRANSACT_FAILED,
+        )
+        advanceUntilIdle()
+
+        assertEquals(
+            FeedAvailability.Available(FeedProviderId.NeoFeed),
+            harness.gateway.state.value,
+        )
+        assertEquals(null, harness.gateway.diagnostic.value)
+        assertEquals(unbindsBefore, harness.connector.unbindCalls)
+        assertEquals(harness.neoTarget(), harness.gateway.bindingEvidence.value.target)
+    }
+
+    @Test
+    fun contendedProtocolFailureIsDrainedWithVerdict() = runTest {
+        val harness = Harness(this, installed = setOf(LAWNFEED_PACKAGE))
+        harness.gateway.start(this)
+        advanceUntilIdle()
+        val epoch = harness.gateway.bindEpoch
+
+        val mutex = gatewayMutex(harness)
+        assertTrue(mutex.tryLock())
+        try {
+            harness.gateway.onProtocolFailureForEpoch(
+                epoch,
+                FeedDiagnosticStatus.SURFACE_SESSION_FAILED,
+                FeedDiagnosticCause.WINDOW_TRANSACT_FAILED,
+            )
+            // Deferred, not yet torn down.
+            assertEquals(
+                FeedAvailability.Available(FeedProviderId.Lawnfeed),
+                harness.gateway.state.value,
+            )
+            assertEquals(0, harness.connector.unbindCalls)
+        } finally {
+            mutex.unlock()
+        }
+        advanceUntilIdle()
+
+        // The drain reports the stored session verdict — never a defaulted
+        // DISCONNECTED/BINDER_DIED.
+        val diagnostic = harness.gateway.diagnostic.value
+        assertEquals(FeedDiagnosticStatus.SURFACE_SESSION_FAILED, diagnostic?.status)
+        assertEquals(FeedDiagnosticCause.WINDOW_TRANSACT_FAILED, diagnostic?.cause)
+        assertEquals(harness.lawnfeedTarget().component, diagnostic?.component)
+        assertTrue(harness.gateway.state.value is FeedAvailability.Unavailable)
+        assertEquals(1, harness.connector.unbindCalls)
+    }
+
     /**
      * Reports transport loss synchronously from the window catch-up transact,
      * modeling an [AidlFeedBridge] whose first `windowAttached` fails while

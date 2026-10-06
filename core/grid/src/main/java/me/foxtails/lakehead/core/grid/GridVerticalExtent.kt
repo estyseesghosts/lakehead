@@ -3,10 +3,12 @@ package me.foxtails.lakehead.core.grid
 /**
  * Vertical measurements of a logical grid.
  *
- * [occupiedBottomRowExclusive] is retained as the legacy name for the signed maximum boundary.
- * [occupiedMinRow] and [occupiedMaxRowExclusive] are the complete signed bounds; neither is a
- * row count. [occupiedHeightRows] and [totalScrollableRows] are counts. Normal measurement makes
- * the latter an intrinsic content height; viewport and edit margins are imposed by their owners.
+ * [occupiedBottomRowExclusive] is the absolute row-zero content boundary for nonnegative
+ * [GridPlacement] measurement. [occupiedMinRow] remains informational for that mode, while
+ * [occupiedMaxRowExclusive] is the same exclusive boundary. For shared signed placement callers,
+ * the min/max fields remain signed bounds and the count fields retain signed-bound distance
+ * semantics. [occupiedHeightRows] and [totalScrollableRows] are counts; viewport and edit margins
+ * are imposed by their owners.
  */
 data class GridVerticalExtent(
     val occupiedBottomRowExclusive: Long,

@@ -27,7 +27,7 @@ class GridRowGapNormalizerTest {
     }
 
     @Test
-    fun leadingSpaceIsPreservedAndTrailingSpaceIsIgnored() {
+    fun leadingLogicalRowsArePreservedAndTrailingSpaceIsIgnored() {
         val placements = listOf(tile("a", 10), tile("b", 14))
 
         assertEquals(listOf(10, 13), rows(GridRowGapNormalizer.normalize(placements)))

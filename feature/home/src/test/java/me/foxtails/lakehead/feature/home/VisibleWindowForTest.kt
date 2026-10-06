@@ -95,18 +95,16 @@ class VisibleWindowForTest {
     }
 
     @Test
-    fun nonZeroOrigin_scrollZeroSelectsAbsoluteRows() {
-        // Regression: tiles on rows 5-6 rebased around origin 5 must stay
-        // selected at scroll 0. A zero-based window [0,5) would cull them even
-        // though their rebased top is 0.
+    fun scrolledToAbsoluteRow_selectsThoseRows() {
+        // Row 0 is the permanent origin: scrolling five strides down makes
+        // absolute rows 5-6 visible, with no row-origin parameter involved.
         val stride = 100L
         val overscan = 0L
         val window = visibleWindowFor(
-            scrollPx = 0,
+            scrollPx = 500,
             viewportHeightPx = 500,
             rowStridePx = stride,
             overscanRows = overscan,
-            rowOrigin = 5L,
         )
         assertEquals(5L, window.firstRow)
         val placements = listOf(5, 6).map { row ->

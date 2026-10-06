@@ -39,9 +39,8 @@ class AddToHomeCoordinatorTest {
         val repository = FakePlacingRepository(
             initialPlacements = emptyList(),
             columns = 6,
-            rows = 4096,
         )
-        val coordinator = AddToHomeCoordinator(homeId, repository, 6, 4096, dispatcher)
+        val coordinator = AddToHomeCoordinator(homeId, repository, 6, dispatcher)
         val result = coordinator.add(appA)
         assertTrue(result is AddToHomeResult.Added)
         assertEquals(LogicalPosition(0, 0), (result as AddToHomeResult.Added).position)
@@ -58,18 +57,16 @@ class AddToHomeCoordinatorTest {
         val repository = FakePlacingRepository(
             initialPlacements = listOf(existing),
             columns = 6,
-            rows = 4096,
         )
-        val coordinator = AddToHomeCoordinator(homeId, repository, 6, 4096, dispatcher)
+        val coordinator = AddToHomeCoordinator(homeId, repository, 6, dispatcher)
         val result = coordinator.add(appA)
         assertTrue(result is AddToHomeResult.AlreadyOnHome)
         assertEquals(0, repository.placedCount)
     }
 
     @Test
-    fun returnsHomeFullWhenGridIsExhausted() = runTest {
+    fun addsBelowExistingCellWithoutFiniteRowCapacity() = runTest {
         val dispatcher = StandardTestDispatcher(testScheduler)
-        // Fill a tiny 1x1 grid completely
         val existing = AppPlacement(
             homeId, ItemId("existing"), appB,
             LogicalPosition(0, 0), LogicalSpan(1, 1), ItemAvailability.AVAILABLE,
@@ -77,11 +74,29 @@ class AddToHomeCoordinatorTest {
         val repository = FakePlacingRepository(
             initialPlacements = listOf(existing),
             columns = 1,
-            rows = 1,
         )
-        val coordinator = AddToHomeCoordinator(homeId, repository, 1, 1, dispatcher)
+        val coordinator = AddToHomeCoordinator(homeId, repository, 1, dispatcher)
         val result = coordinator.add(appA)
-        assertTrue(result is AddToHomeResult.HomeFull)
+        assertEquals(LogicalPosition(0, 1), (result as AddToHomeResult.Added).position)
+    }
+
+    @Test
+    fun addsAfterOccupiedRowsBeyondFormerCapacity() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val existing = AppPlacement(
+            homeId,
+            ItemId("existing-tall"),
+            appB,
+            LogicalPosition(0, 0),
+            LogicalSpan(1, 4097),
+            ItemAvailability.AVAILABLE,
+        )
+        val repository = FakePlacingRepository(listOf(existing), columns = 1)
+        val coordinator = AddToHomeCoordinator(homeId, repository, 1, dispatcher)
+
+        val result = coordinator.add(appA)
+
+        assertEquals(LogicalPosition(0, 4097), (result as AddToHomeResult.Added).position)
     }
 
     @Test
@@ -90,9 +105,8 @@ class AddToHomeCoordinatorTest {
         val repository = FakePlacingRepository(
             initialPlacements = null, // NotFound
             columns = 6,
-            rows = 4096,
         )
-        val coordinator = AddToHomeCoordinator(homeId, repository, 6, 4096, dispatcher)
+        val coordinator = AddToHomeCoordinator(homeId, repository, 6, dispatcher)
         val result = coordinator.add(appA)
         assertTrue(result is AddToHomeResult.Error)
     }
@@ -101,7 +115,7 @@ class AddToHomeCoordinatorTest {
     fun returnsErrorOnUnexpectedException() = runTest {
         val dispatcher = StandardTestDispatcher(testScheduler)
         val repository = ExplodingRepository()
-        val coordinator = AddToHomeCoordinator(homeId, repository, 6, 4096, dispatcher)
+        val coordinator = AddToHomeCoordinator(homeId, repository, 6, dispatcher)
         val result = coordinator.add(appA)
         assertTrue(result is AddToHomeResult.Error)
     }
@@ -114,13 +128,12 @@ class AddToHomeCoordinatorTest {
     private class FakePlacingRepository(
         private val initialPlacements: List<AppPlacement>?,
         private val columns: Int,
-        private val rows: Int,
     ) : HomePlacementRepository {
         private val placements = initialPlacements?.toMutableList() ?: mutableListOf()
         var placedCount = 0
             private set
 
-        override fun load(homeId: HomeId, columns: Int, rows: Int): LoadResult =
+        override fun load(homeId: HomeId, columns: Int): LoadResult =
             if (initialPlacements == null) LoadResult.NotFound
             else LoadResult.Loaded(placements.toList())
 
@@ -131,7 +144,6 @@ class AddToHomeCoordinatorTest {
             position: LogicalPosition,
             span: LogicalSpan,
             columns: Int,
-            rows: Int,
             replacingId: ItemId?,
         ): MutationResult {
             placedCount++
@@ -139,7 +151,7 @@ class AddToHomeCoordinatorTest {
             val current = placements.map {
                 GridPlacement(it.itemId, GridPosition(it.position.column, it.position.row), GridSpan(it.span.columns, it.span.rows))
             }
-            val result = GridRules.place(current, candidate, columns, rows, replacingId)
+            val result = GridRules.place(current, candidate, columns, replacingId)
             return when (result) {
                 is GridRules.Result.Accepted -> {
                     val accepted = result.placements.first { it.id == itemId }
@@ -157,9 +169,9 @@ class AddToHomeCoordinatorTest {
             }
         }
 
-        override fun move(homeId: HomeId, itemId: ItemId, position: LogicalPosition, columns: Int, rows: Int): MutationResult =
+        override fun move(homeId: HomeId, itemId: ItemId, position: LogicalPosition, columns: Int): MutationResult =
             error("not implemented")
-        override fun resize(homeId: HomeId, itemId: ItemId, span: LogicalSpan, columns: Int, rows: Int): MutationResult =
+        override fun resize(homeId: HomeId, itemId: ItemId, span: LogicalSpan, columns: Int): MutationResult =
             error("not implemented")
         override fun remove(homeId: HomeId, itemId: ItemId): RemoveResult =
             error("not implemented")
@@ -171,15 +183,15 @@ class AddToHomeCoordinatorTest {
 
     /** Repository that throws on load to test error wrapping. */
     private class ExplodingRepository : HomePlacementRepository {
-        override fun load(homeId: HomeId, columns: Int, rows: Int): LoadResult =
+        override fun load(homeId: HomeId, columns: Int): LoadResult =
             throw RuntimeException("boom")
         override fun place(
             homeId: HomeId, itemId: ItemId, appIdentity: AppIdentity,
-            position: LogicalPosition, span: LogicalSpan, columns: Int, rows: Int, replacingId: ItemId?,
+            position: LogicalPosition, span: LogicalSpan, columns: Int, replacingId: ItemId?,
         ): MutationResult = error("not implemented")
-        override fun move(homeId: HomeId, itemId: ItemId, position: LogicalPosition, columns: Int, rows: Int): MutationResult =
+        override fun move(homeId: HomeId, itemId: ItemId, position: LogicalPosition, columns: Int): MutationResult =
             error("not implemented")
-        override fun resize(homeId: HomeId, itemId: ItemId, span: LogicalSpan, columns: Int, rows: Int): MutationResult =
+        override fun resize(homeId: HomeId, itemId: ItemId, span: LogicalSpan, columns: Int): MutationResult =
             error("not implemented")
         override fun remove(homeId: HomeId, itemId: ItemId): RemoveResult = error("not implemented")
         override fun ensureHome(homeId: HomeId): Boolean = true

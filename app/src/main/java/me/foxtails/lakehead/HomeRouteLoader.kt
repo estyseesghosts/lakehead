@@ -98,7 +98,7 @@ internal class HomeRouteLoader(
         loadJob?.cancel()
         loadJob = routeScope.launch {
             val result = withContext(ioDispatcher) {
-                repository.load(homeId, viewport.columnsBound, viewport.rowsBound)
+                repository.load(homeId, viewport.columnsBound)
             }
             synchronized(this@HomeRouteLoader) {
                 if (requestGeneration != generation || scope !== routeScope) return@launch
@@ -139,7 +139,6 @@ internal class HomeRouteLoader(
                 itemId = itemId,
                 position = position,
                 columns = viewport.columnsBound,
-                rows = viewport.rowsBound,
             )
             if (result is MutationResult.Accepted) {
                 reload()
@@ -164,7 +163,6 @@ internal class HomeRouteLoader(
                 itemId = itemId,
                 span = span,
                 columns = viewport.columnsBound,
-                rows = viewport.rowsBound,
             )
             if (result is MutationResult.Accepted) {
                 reload()
@@ -229,11 +227,10 @@ internal class HomeRouteLoader(
     }
 }
 
-/** Finite repository bounds and explicit normal-phone visual inputs (not a responsive policy). */
+/** Explicit normal-phone visual inputs (not a responsive policy). */
 internal data class HomeRouteViewport(
     val inputs: HomeViewportInputs,
     val columnsBound: Int = 5,
-    val rowsBound: Int = 4096,
 ) {
-    init { require(columnsBound > 0 && rowsBound > 0) }
+    init { require(columnsBound > 0) }
 }

@@ -196,7 +196,7 @@ class ShortcutSurfaceLoaderTest {
         var bindingReads = 0
         var saveCount = 0
         fun binding(tileId: ItemId): TileBinding = mutableBindings[tileId] ?: TileBinding(tileId)
-        override fun load(homeId: HomeId, columns: Int, rows: Int): LoadResult = LoadResult.NotFound
+        override fun load(homeId: HomeId, columns: Int): LoadResult = LoadResult.NotFound
         override fun place(
             homeId: HomeId,
             itemId: ItemId,
@@ -204,12 +204,11 @@ class ShortcutSurfaceLoaderTest {
             position: LogicalPosition,
             span: LogicalSpan,
             columns: Int,
-            rows: Int,
             replacingId: ItemId?,
         ): MutationResult = error("surface loader must not write")
-        override fun move(homeId: HomeId, itemId: ItemId, position: LogicalPosition, columns: Int, rows: Int): MutationResult =
+        override fun move(homeId: HomeId, itemId: ItemId, position: LogicalPosition, columns: Int): MutationResult =
             error("surface loader must not write")
-        override fun resize(homeId: HomeId, itemId: ItemId, span: LogicalSpan, columns: Int, rows: Int): MutationResult =
+        override fun resize(homeId: HomeId, itemId: ItemId, span: LogicalSpan, columns: Int): MutationResult =
             error("surface loader must not write")
         override fun remove(homeId: HomeId, itemId: ItemId): RemoveResult = error("surface loader must not write")
         override fun ensureHome(homeId: HomeId): Boolean = error("surface loader must not write")

@@ -13,10 +13,10 @@ import me.foxtails.lakehead.core.model.LogicalPosition
  * home key). It is created from the normal boundary plus a bounded margin when a
  * MOVE drag becomes active, extended one bounded margin at a time via
  * [GridVerticalLayout.advanceEditBoundary] during bottom-edge auto-scroll, and
- * discarded on cancel/exit. It is a legality bound ONLY for MOVE candidates;
- * RESIZE keeps the normal bound ([resizeLegalityRows] ignores it). No second
- * placement engine lives here: every helper below delegates row arithmetic to
- * `core:grid` or performs saturating pixel math.
+ * discarded on cancel/exit. It controls edit-time scroll reachability only; grid
+ * legality remains owned by `core:grid`. No second placement engine lives here:
+ * every helper below delegates row arithmetic to `core:grid` or performs
+ * saturating pixel math.
  */
 object HomeEditFrontier {
     /** Bounded working margin appended to the normal boundary at MOVE entry. */
@@ -39,21 +39,9 @@ const val MARGIN_ROWS: Long = 4L
 }
 
 /**
- * Viewport rows for the edit-boundary policy: usable height over row stride,
- * floored, with a minimum of one so [GridVerticalLayout.createEditBoundary]'s
- * positive-viewport requirement never fails (including zero-height viewports).
- */
-fun viewportRowsFor(usableHeightPx: Int, rowStridePx: Long): Long {
-    require(usableHeightPx >= 0) { "usableHeightPx must be non-negative" }
-    require(rowStridePx > 0L) { "rowStridePx must be positive" }
-    if (usableHeightPx == 0) return 1L
-    return maxOf(1L, usableHeightPx.toLong() / rowStridePx)
-}
-
-/**
  * Creates the transient MOVE frontier from the normal intrinsic extent plus the
- * bounded working margin. The 4096-row cap inside `core:grid` bounds only the
- * temporary margin ahead of the frontier, never the logical grid.
+ * bounded working margin. The margin bounds temporary edit-time scroll reach,
+ * never the logical grid.
  */
 fun initEditFrontier(
     extent: GridVerticalExtent,
@@ -103,38 +91,13 @@ fun rebaseEditFrontier(
 }
 
 /**
- * MOVE legality row bound: the transient frontier's exclusive end when present
- * (saturating to [Int]), otherwise the normal bound. Floors at 1 so
- * `core:grid` size validation never fails.
- */
-fun moveLegalityRows(normalRows: Int, frontier: GridVerticalLayout.EditBoundary?): Int {
-    require(normalRows > 0) { "normalRows must be positive" }
-    val boundary = frontier ?: return normalRows
-    return boundary.exclusiveRow.coerceIn(1L, Int.MAX_VALUE.toLong()).toInt()
-}
-
-/**
- * RESIZE legality row bound: always the normal bound. The transient frontier
- * never authorizes resize expansion; the parameter is accepted only so call
- * sites document that the frontier was considered and deliberately ignored.
- */
-@Suppress("UNUSED_PARAMETER")
-fun resizeLegalityRows(normalRows: Int, frontier: GridVerticalLayout.EditBoundary?): Int {
-    require(normalRows > 0) { "normalRows must be positive" }
-    return normalRows
-}
-
-/**
  * Edit-only layout row count: the frontier's absolute exclusive end measured
- * from the signed occupied minimum (rebasing preserves counts, so a non-zero
- * `minRow` is subtracted, not ignored), or the intrinsic count when larger.
+ * from logical row zero, or the intrinsic count when larger.
  * Null frontier yields the intrinsic count. Saturates instead of overflowing.
  */
 fun editLayoutRows(extent: GridVerticalExtent, frontier: GridVerticalLayout.EditBoundary?): Long {
     val boundary = frontier ?: return extent.totalScrollableRows
-    val fromMin = saturatingSubtract(boundary.exclusiveRow, extent.occupiedMinRow)
-        .coerceAtLeast(0L)
-    return maxOf(extent.totalScrollableRows, fromMin)
+    return maxOf(extent.totalScrollableRows, boundary.exclusiveRow.coerceAtLeast(0L))
 }
 
 /**
@@ -278,59 +241,6 @@ fun autoScrollIntervalMs(
 }
 
 /**
- * P1 stationary-hold ticker remap: maps the retained viewport-local pointer
- * ([pointerXPx]/[pointerYPx]) with the CURRENT [scrollPx] (post-step actual)
- * and folds it into [session] via MOVE validity (`core:grid` owns legality).
- * The caller retains the latest pointer position across ticks (including ticks
- * with no new pointer events) and invokes this after every scroll step, so a
- * stationary hold's candidate follows the viewport instead of freezing at the
- * pre-scroll cell that release would otherwise commit. Pure and
- * framework-free; the drag loop's per-event path stays authoritative while the
- * pointer moves.
- */
-// This is a step-request remap, not ticker-budget accounting: the budget is
-// local to the LaunchedEffect MOVE generation; successful ScrollState changes
-// count in either direction including exits/re-entry, no-ops are free, and
-// the cap stops only the ticker.
-fun remapMoveCandidateAfterScroll(
-    session: HomeEditSession,
-    pointerXPx: Float,
-    pointerYPx: Float,
-    scrollPx: Int,
-    cellSizePx: Int,
-    columnGapPx: Int,
-    rowGapPx: Int,
-    rowOrigin: Long,
-    originXPx: Int,
-    originYPx: Long,
-    grabOffsetXPx: Float,
-    grabOffsetYPx: Float,
-    tiles: List<HomeRenderTile>,
-    columns: Int,
-    moveRows: Int,
-): HomeEditSession {
-    require(scrollPx >= 0) { "scrollPx must be non-negative" }
-    val result = MoveDragMath.cellForPixel(
-        xPx = pointerXPx,
-        yPx = pointerYPx,
-        cellSizePx = cellSizePx.toFloat(),
-        columnGapPx = columnGapPx.toFloat(),
-        rowGapPx = rowGapPx.toFloat(),
-        windowFirstRow = rowOrigin,
-        originXPx = originXPx.toFloat(),
-        originYPxPx = originYPx.toFloat(),
-        scrollYPx = scrollPx.toFloat(),
-        grabOffsetXPx = grabOffsetXPx,
-        grabOffsetYPx = grabOffsetYPx,
-        columns = columns,
-        rows = moveRows.toLong(),
-        spanColumns = (session as? HomeEditSession.Active)?.candidateSpan?.columns ?: 1,
-        spanRows = (session as? HomeEditSession.Active)?.candidateSpan?.rows ?: 1,
-    )
-    return session.updateMoveCandidate(result, tiles, columns, moveRows)
-}
-
-/**
  * P1 ticker steal-baseline: the post-step baseline is the ACTUAL
  * `ScrollState.value` after the scroll, never the requested target.
  *
@@ -348,10 +258,3 @@ fun tickerScrollBaseline(actualScrollPx: Int, @Suppress("UNUSED_PARAMETER") requ
     require(actualScrollPx >= 0) { "actualScrollPx must be non-negative" }
     return actualScrollPx
 }
-
-private fun saturatingSubtract(value: Long, decrement: Long): Long =
-    try {
-        Math.subtractExact(value, decrement)
-    } catch (e: ArithmeticException) {
-        if (value >= 0L) Long.MAX_VALUE else Long.MIN_VALUE
-    }

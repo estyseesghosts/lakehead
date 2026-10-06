@@ -3,6 +3,7 @@ package me.foxtails.lakehead.feature.home
 import me.foxtails.lakehead.core.model.LogicalPosition
 import me.foxtails.lakehead.core.model.LogicalSpan
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertThrows
 import org.junit.Test
 
 class ResizeDragMathTest {
@@ -10,18 +11,29 @@ class ResizeDragMathTest {
     private val gap = 4f
     private val stride = cellSize + gap // 52f
 
+    // Reference grid: six square 1x1 cells across, 4px gaps, caller-supplied
+    // originX and rest offset. Scroll is applied once inside rawSpan.
+    private fun metrics(originXPx: Float = 0f, restOffsetYPx: Float = 0f): HomeGridMetrics =
+        HomeGridMetrics(
+            columns = 6,
+            cellWidthPx = 48f,
+            cellHeightPx = 48f,
+            columnGapPx = 4f,
+            rowGapPx = 4f,
+            originXPx = originXPx,
+            restOffsetYPx = restOffsetYPx,
+        )
+
     // ---- rawSpan ----
 
     @Test
     fun rawSpan_pointerAtOrigin_returns1x1() {
         // pointer at origin cell's top-left: span = 1x1
         val span = ResizeDragMath.rawSpan(
-            pointerXPx = 0f,
-            pointerYPx = 0f,
+            metrics = metrics(),
             originPosition = LogicalPosition(0, 0),
-            cellSizePx = cellSize,
-            columnGapPx = gap,
-            rowGapPx = gap,
+            pointerXPx = 0f,
+            pointerYPxViewport = 0f,
         )
         assertEquals(LogicalSpan(1, 1), span)
     }
@@ -30,12 +42,10 @@ class ResizeDragMathTest {
     fun rawSpan_oneCellRight_returns2x1() {
         // pointer at column 1's top-left: span = 2x1
         val span = ResizeDragMath.rawSpan(
-            pointerXPx = stride,
-            pointerYPx = 0f,
+            metrics = metrics(),
             originPosition = LogicalPosition(0, 0),
-            cellSizePx = cellSize,
-            columnGapPx = gap,
-            rowGapPx = gap,
+            pointerXPx = stride,
+            pointerYPxViewport = 0f,
         )
         assertEquals(LogicalSpan(2, 1), span)
     }
@@ -43,12 +53,10 @@ class ResizeDragMathTest {
     @Test
     fun rawSpan_oneCellDown_returns1x2() {
         val span = ResizeDragMath.rawSpan(
-            pointerXPx = 0f,
-            pointerYPx = stride,
+            metrics = metrics(),
             originPosition = LogicalPosition(0, 0),
-            cellSizePx = cellSize,
-            columnGapPx = gap,
-            rowGapPx = gap,
+            pointerXPx = 0f,
+            pointerYPxViewport = stride,
         )
         assertEquals(LogicalSpan(1, 2), span)
     }
@@ -56,12 +64,10 @@ class ResizeDragMathTest {
     @Test
     fun rawSpan_diagonalOneCell_returns2x2() {
         val span = ResizeDragMath.rawSpan(
-            pointerXPx = stride,
-            pointerYPx = stride,
+            metrics = metrics(),
             originPosition = LogicalPosition(0, 0),
-            cellSizePx = cellSize,
-            columnGapPx = gap,
-            rowGapPx = gap,
+            pointerXPx = stride,
+            pointerYPxViewport = stride,
         )
         assertEquals(LogicalSpan(2, 2), span)
     }
@@ -70,12 +76,10 @@ class ResizeDragMathTest {
     fun rawSpan_subCellJitter_returns1x1() {
         // pointer still within the origin cell
         val span = ResizeDragMath.rawSpan(
-            pointerXPx = cellSize - 1f,
-            pointerYPx = cellSize - 1f,
+            metrics = metrics(),
             originPosition = LogicalPosition(0, 0),
-            cellSizePx = cellSize,
-            columnGapPx = gap,
-            rowGapPx = gap,
+            pointerXPx = cellSize - 1f,
+            pointerYPxViewport = cellSize - 1f,
         )
         assertEquals(LogicalSpan(1, 1), span)
     }
@@ -85,12 +89,10 @@ class ResizeDragMathTest {
         // origin at column=2, row=3; pointer at column=3, row=4 → span 2x2
         val origin = LogicalPosition(2, 3)
         val span = ResizeDragMath.rawSpan(
-            pointerXPx = 2 * stride + stride,  // column 3
-            pointerYPx = 3 * stride + stride,  // row 4
+            metrics = metrics(),
             originPosition = origin,
-            cellSizePx = cellSize,
-            columnGapPx = gap,
-            rowGapPx = gap,
+            pointerXPx = 2 * stride + stride,  // column 3
+            pointerYPxViewport = 3 * stride + stride,  // row 4
         )
         assertEquals(LogicalSpan(2, 2), span)
     }
@@ -99,91 +101,89 @@ class ResizeDragMathTest {
     fun rawSpan_pointerBeforeOrigin_returns1x1() {
         // pointer before origin (negative delta) → clamped to 1x1
         val span = ResizeDragMath.rawSpan(
-            pointerXPx = -10f,
-            pointerYPx = -20f,
+            metrics = metrics(),
             originPosition = LogicalPosition(0, 0),
-            cellSizePx = cellSize,
-            columnGapPx = gap,
-            rowGapPx = gap,
+            pointerXPx = -10f,
+            pointerYPxViewport = -20f,
         )
         assertEquals(LogicalSpan(1, 1), span)
     }
 
     @Test
-    fun rawSpan_zeroCellSize_returns1x1() {
-        val span = ResizeDragMath.rawSpan(
-            pointerXPx = 100f,
-            pointerYPx = 100f,
-            originPosition = LogicalPosition(0, 0),
-            cellSizePx = 0f,
-            columnGapPx = 0f,
-            rowGapPx = 0f,
-        )
-        assertEquals(LogicalSpan(1, 1), span)
+    fun homeGridMetrics_zeroCellSize_throws() {
+        // HomeGridMetrics rejects non-positive cell sizes, so rawSpan never sees
+        // a zero cell (the retired rawSpan_zeroCellSize_returns1x1 contract).
+        assertThrows(IllegalArgumentException::class.java) {
+            HomeGridMetrics(
+                columns = 6,
+                cellWidthPx = 0f,
+                cellHeightPx = 48f,
+                columnGapPx = 4f,
+                rowGapPx = 4f,
+                originXPx = 0f,
+                restOffsetYPx = 0f,
+            )
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            HomeGridMetrics(
+                columns = 6,
+                cellWidthPx = 48f,
+                cellHeightPx = 0f,
+                columnGapPx = 4f,
+                rowGapPx = 4f,
+                originXPx = 0f,
+                restOffsetYPx = 0f,
+            )
+        }
     }
 
     @Test
     fun rawSpan_threeCellsRight_returns4x1() {
         val span = ResizeDragMath.rawSpan(
-            pointerXPx = 3 * stride,
-            pointerYPx = 0f,
+            metrics = metrics(),
             originPosition = LogicalPosition(0, 0),
-            cellSizePx = cellSize,
-            columnGapPx = gap,
-            rowGapPx = gap,
+            pointerXPx = 3 * stride,
+            pointerYPxViewport = 0f,
         )
         assertEquals(LogicalSpan(4, 1), span)
     }
 
     @Test
-    fun rawSpan_nonZeroRowOriginAndRest_pointerAtOriginTop_returns1x1() {
-        // Signed frame: originTop = rest + (originRow - rowOrigin) * stride.
-        // origin row 3, rowOrigin 1, rest 26f → top = 26 + 2*52 = 130.
-        // Pointer exactly at the origin top → 1x1.
+    fun rawSpan_absoluteRow5WithRest_pointerAtOriginTop_returns1x1() {
+        // Absolute-row equivalent of the retired rowOrigin-relative test:
+        // origin row 5, rest 26 → top = 26 + 5*52 = 286. Pointer exactly at
+        // the origin top → 1x1.
         val span = ResizeDragMath.rawSpan(
+            metrics = metrics(restOffsetYPx = 26f),
+            originPosition = LogicalPosition(0, 5),
             pointerXPx = 0f,
-            pointerYPx = 130f,
-            originPosition = LogicalPosition(0, 3),
-            cellSizePx = cellSize,
-            columnGapPx = gap,
-            rowGapPx = gap,
-            rowOrigin = 1L,
-            originYPxRestPx = 26f,
+            pointerYPxViewport = 26f + 5 * stride,
         )
         assertEquals(LogicalSpan(1, 1), span)
     }
 
     @Test
-    fun rawSpan_nonZeroRowOriginAndRest_oneStrideDown_returns1x2() {
-        // Same origin (top = 130): pointer one stride below (y=182) → rows = 2.
-        // With the old row*stride top (156) the delta would be 26 → rows = 1.
+    fun rawSpan_absoluteRow5WithRest_oneStrideDown_returns1x2() {
+        // Same origin (top = 286): pointer one stride below (y=338) → rows = 2.
         val span = ResizeDragMath.rawSpan(
+            metrics = metrics(restOffsetYPx = 26f),
+            originPosition = LogicalPosition(0, 5),
             pointerXPx = 0f,
-            pointerYPx = 182f,
-            originPosition = LogicalPosition(0, 3),
-            cellSizePx = cellSize,
-            columnGapPx = gap,
-            rowGapPx = gap,
-            rowOrigin = 1L,
-            originYPxRestPx = 26f,
+            pointerYPxViewport = 26f + 5 * stride + stride,
         )
         assertEquals(LogicalSpan(1, 2), span)
     }
 
     @Test
-    fun rawSpan_originAtRowOriginWithRest_offsetsByRestOnly() {
-        // origin row == rowOrigin: top = rest. origin (2,1), rowOrigin 1,
-        // rest 26f → top = 26; pointer at y=26+52=78 → dy=52 → rows = 2,
-        // columns: pointer x one stride right of column-2 left → 2.
+    fun rawSpan_absoluteRow50WithRest_offsetsByRestOnly() {
+        // Absolute-row equivalent of the retired originAtRowOrigin test:
+        // origin (2,50), rest 26 → top = 26 + 50*52 = 2626; pointer one
+        // stride down and one stride right of the origin top-left → 2x2.
         val span = ResizeDragMath.rawSpan(
+            metrics = metrics(restOffsetYPx = 26f),
+            originPosition = LogicalPosition(2, 50),
             pointerXPx = 2 * stride + stride,
-            pointerYPx = 78f,
-            originPosition = LogicalPosition(2, 1),
-            cellSizePx = cellSize,
-            columnGapPx = gap,
-            rowGapPx = gap,
-            rowOrigin = 1L,
-            originYPxRestPx = 26f,
+            pointerYPxViewport = 26f + 50 * stride + stride,
         )
         assertEquals(LogicalSpan(2, 2), span)
     }
@@ -258,12 +258,10 @@ class ResizeDragMathTest {
         // W3 gate drag: from a 2x2 origin, pointer two strides right and one
         // stride down of the origin top-left → raw 3x2.
         val span = ResizeDragMath.rawSpan(
-            pointerXPx = 2 * stride,
-            pointerYPx = stride,
+            metrics = metrics(),
             originPosition = LogicalPosition(0, 0),
-            cellSizePx = cellSize,
-            columnGapPx = gap,
-            rowGapPx = gap,
+            pointerXPx = 2 * stride,
+            pointerYPxViewport = stride,
         )
         assertEquals(LogicalSpan(3, 2), span)
     }
@@ -278,12 +276,10 @@ class ResizeDragMathTest {
     fun rawThenQuantize_gatePath_commits3x2() {
         // End-to-end W3 gate math: raw drag span quantizes to the 3x2 target.
         val raw = ResizeDragMath.rawSpan(
-            pointerXPx = 2 * stride,
-            pointerYPx = stride,
+            metrics = metrics(),
             originPosition = LogicalPosition(0, 0),
-            cellSizePx = cellSize,
-            columnGapPx = gap,
-            rowGapPx = gap,
+            pointerXPx = 2 * stride,
+            pointerYPxViewport = stride,
         )
         assertEquals(LogicalSpan(3, 2), RenderableSpans.quantize(raw, columns = 5))
     }
@@ -296,12 +292,10 @@ class ResizeDragMathTest {
         // an 11x11 raw span. Clamping to the allowlist/columns and legality
         // stays with RenderableSpans.quantize + core:grid; rawSpan never clips.
         val span = ResizeDragMath.rawSpan(
-            pointerXPx = 10 * stride,
-            pointerYPx = 10 * stride,
+            metrics = metrics(),
             originPosition = LogicalPosition(0, 0),
-            cellSizePx = cellSize,
-            columnGapPx = gap,
-            rowGapPx = gap,
+            pointerXPx = 10 * stride,
+            pointerYPxViewport = 10 * stride,
         )
         assertEquals(LogicalSpan(11, 11), span)
     }
@@ -311,12 +305,10 @@ class ResizeDragMathTest {
         // B3: far out-of-bounds above/left of the origin still floors at 1x1 —
         // the minimum guarantee holds no matter how negative the delta is.
         val span = ResizeDragMath.rawSpan(
-            pointerXPx = -500f,
-            pointerYPx = -500f,
+            metrics = metrics(),
             originPosition = LogicalPosition(0, 0),
-            cellSizePx = cellSize,
-            columnGapPx = gap,
-            rowGapPx = gap,
+            pointerXPx = -500f,
+            pointerYPxViewport = -500f,
         )
         assertEquals(LogicalSpan(1, 1), span)
     }
@@ -328,24 +320,18 @@ class ResizeDragMathTest {
         // origin cell (dx=47 < stride 52) → 1 column. Without the offset the
         // same pointer (dx=60) would read as 2 columns — the offset matters.
         val span = ResizeDragMath.rawSpan(
-            pointerXPx = 60f,
-            pointerYPx = 0f,
+            metrics = metrics(originXPx = 13f),
             originPosition = LogicalPosition(0, 0),
-            cellSizePx = cellSize,
-            columnGapPx = gap,
-            rowGapPx = gap,
-            originXPx = 13f,
+            pointerXPx = 60f,
+            pointerYPxViewport = 0f,
         )
         assertEquals(LogicalSpan(1, 1), span)
         // One stride right of the shifted origin left → 2 columns.
         val twoWide = ResizeDragMath.rawSpan(
-            pointerXPx = 13f + stride,
-            pointerYPx = 0f,
+            metrics = metrics(originXPx = 13f),
             originPosition = LogicalPosition(0, 0),
-            cellSizePx = cellSize,
-            columnGapPx = gap,
-            rowGapPx = gap,
-            originXPx = 13f,
+            pointerXPx = 13f + stride,
+            pointerYPxViewport = 0f,
         )
         assertEquals(LogicalSpan(2, 1), twoWide)
     }
@@ -353,28 +339,22 @@ class ResizeDragMathTest {
     @Test
     fun rawSpan_negativeRestOffset_regression() {
         // B3 rest-offset regression: tall content anchors above with a negative
-        // rest. Origin (0,0), rowOrigin 0, rest -20 → top = -20. Pointer y=32
-        // gives dy=52 → rows = 2. Under the old rest-agnostic top (0) the same
-        // pointer (dy=32) would read rows = 1 — the rest offset is load-bearing.
+        // rest. Origin (0,0), rest -20 → top = -20. Pointer y=32 gives
+        // dy=52 → rows = 2. Under a rest-agnostic top (0) the same pointer
+        // (dy=32) would read rows = 1 — the rest offset is load-bearing.
         val span = ResizeDragMath.rawSpan(
-            pointerXPx = 0f,
-            pointerYPx = 32f,
+            metrics = metrics(restOffsetYPx = -20f),
             originPosition = LogicalPosition(0, 0),
-            cellSizePx = cellSize,
-            columnGapPx = gap,
-            rowGapPx = gap,
-            rowOrigin = 0L,
-            originYPxRestPx = -20f,
+            pointerXPx = 0f,
+            pointerYPxViewport = 32f,
         )
         assertEquals(LogicalSpan(1, 2), span)
         // Same pointer with zero rest → still inside the origin cell.
         val withoutRest = ResizeDragMath.rawSpan(
-            pointerXPx = 0f,
-            pointerYPx = 32f,
+            metrics = metrics(),
             originPosition = LogicalPosition(0, 0),
-            cellSizePx = cellSize,
-            columnGapPx = gap,
-            rowGapPx = gap,
+            pointerXPx = 0f,
+            pointerYPxViewport = 32f,
         )
         assertEquals(LogicalSpan(1, 1), withoutRest)
     }
@@ -385,32 +365,48 @@ class ResizeDragMathTest {
         // (20, 52) renders it at viewport (84, 104). One cell down/right
         // therefore still produces a 2x2 span after restoring the scroll.
         val span = ResizeDragMath.rawSpan(
-            pointerXPx = 84f + stride,
-            pointerYPx = 104f + stride,
+            metrics = metrics(),
             originPosition = LogicalPosition(2, 3),
-            cellSizePx = cellSize,
-            columnGapPx = gap,
-            rowGapPx = gap,
-            scrollXPx = 20f,
-            scrollYPx = 52f,
+            pointerXPx = 84f + stride,
+            pointerYPxViewport = 104f + stride,
+            currentScrollXPx = 20f,
+            currentScrollYPx = 52f,
         )
         assertEquals(LogicalSpan(2, 2), span)
     }
 
     @Test
     fun rawSpan_viewportScroll_withSignedNegativeOrigin() {
-        // A negative signed frame remains meaningful after scroll conversion:
+        // A negative rest offset remains meaningful after scroll conversion:
         // origin top is -20, and viewport y=-8 with scroll 40 is one stride down.
         val span = ResizeDragMath.rawSpan(
-            pointerXPx = 0f,
-            pointerYPx = -8f,
+            metrics = metrics(restOffsetYPx = -20f),
             originPosition = LogicalPosition(0, 0),
-            cellSizePx = cellSize,
-            columnGapPx = gap,
-            rowGapPx = gap,
-            originYPxRestPx = -20f,
-            scrollYPx = 40f,
+            pointerXPx = 0f,
+            pointerYPxViewport = -8f,
+            currentScrollYPx = 40f,
         )
         assertEquals(LogicalSpan(1, 2), span)
+    }
+
+    @Test
+    fun rawSpan_sameStrideOffsetFromDifferentOriginRows_yieldsIdenticalSpans() {
+        // A pointer a whole number of strides from the origin top-left reads
+        // the same span no matter which absolute row the origin sits in: the
+        // rest offset shifts both origin and pointer bands equally.
+        val spanFromRow5 = ResizeDragMath.rawSpan(
+            metrics = metrics(restOffsetYPx = 26f),
+            originPosition = LogicalPosition(2, 5),
+            pointerXPx = 2 * stride + stride,
+            pointerYPxViewport = 26f + 5 * stride + 2 * stride,
+        )
+        val spanFromRow50 = ResizeDragMath.rawSpan(
+            metrics = metrics(restOffsetYPx = 26f),
+            originPosition = LogicalPosition(2, 50),
+            pointerXPx = 2 * stride + stride,
+            pointerYPxViewport = 26f + 50 * stride + 2 * stride,
+        )
+        assertEquals(LogicalSpan(2, 3), spanFromRow5)
+        assertEquals(spanFromRow5, spanFromRow50)
     }
 }

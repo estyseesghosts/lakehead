@@ -64,7 +64,6 @@ class HomeRouteLoaderTest {
             visibleRows = GridRowWindow(0, 10),
         ),
         columnsBound = 6,
-        rowsBound = 4096,
     )
     private val profileA = ProfileId("personal")
     private val profileB = ProfileId("work")
@@ -696,23 +695,23 @@ class HomeRouteLoaderTest {
         var removeAction: (HomeId, ItemId) -> RemoveResult = { _, _ ->
             error("loader must not write")
         }
-        override fun load(homeId: HomeId, columns: Int, rows: Int): LoadResult {
+        override fun load(homeId: HomeId, columns: Int): LoadResult {
             reads++
-            return read(homeId, columns, rows)
+            return read(homeId, columns, 4096)
         }
         override fun place(homeId: HomeId, itemId: ItemId, appIdentity: AppIdentity, position: LogicalPosition,
-            span: LogicalSpan, columns: Int, rows: Int, replacingId: ItemId?): MutationResult {
+            span: LogicalSpan, columns: Int, replacingId: ItemId?): MutationResult {
             mutations++; error("loader must not write")
         }
-        override fun move(homeId: HomeId, itemId: ItemId, position: LogicalPosition, columns: Int, rows: Int): MutationResult {
+        override fun move(homeId: HomeId, itemId: ItemId, position: LogicalPosition, columns: Int): MutationResult {
             mutations++
             moveCalls += Triple(homeId, itemId, position)
-            return moveAction(homeId, itemId, position, columns, rows)
+            return moveAction(homeId, itemId, position, columns, 4096)
         }
-        override fun resize(homeId: HomeId, itemId: ItemId, span: LogicalSpan, columns: Int, rows: Int): MutationResult {
+        override fun resize(homeId: HomeId, itemId: ItemId, span: LogicalSpan, columns: Int): MutationResult {
             mutations++
-            resizeCalls += ResizeCall(homeId, itemId, span, columns, rows)
-            return resizeAction(homeId, itemId, span, columns, rows)
+            resizeCalls += ResizeCall(homeId, itemId, span, columns, 4096)
+            return resizeAction(homeId, itemId, span, columns, 4096)
         }
         override fun remove(homeId: HomeId, itemId: ItemId): RemoveResult {
             mutations++

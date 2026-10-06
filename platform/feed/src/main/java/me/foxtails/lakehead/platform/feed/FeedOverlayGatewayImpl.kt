@@ -984,6 +984,79 @@ class FeedOverlayGatewayImpl internal constructor(
     }
 
     /**
+     * D4 protocol-stage failure for the epoch-scoped [OverlayConnection] path.
+     *
+     * Called by the [AidlFeedBridge]'s first-failure listener with the earliest broken
+     * stage (`NEGOTIATION_FAILED`, `SURFACE_SESSION_FAILED` or `RENDERING_FAILED` with
+     * its D4 cause): tears down the bind and reports that verdict with the attempted
+     * target's identity instead of a generic disconnect. Production callers send only
+     * the three D4 statuses; any status still tears down honestly, never throws, and
+     * never invents a component.
+     *
+     * First failure wins via epoch scoping: the teardown bumps [bindEpoch], so the
+     * transport loss the bridge reports alongside (or a later loss for the same dead
+     * bind) arrives stale and is dropped without overwriting the stage verdict. A
+     * contended call defers through the epoch-scoped [pendingLosses] verdict handoff
+     * (which already carries status + cause) and the background
+     * [schedulePendingLossDrain] instead of overwriting. A call with no bind and no
+     * live bridge is consumed without publishing. Never throws.
+     */
+    internal fun onProtocolFailureForEpoch(
+        epoch: Long,
+        status: FeedDiagnosticStatus,
+        cause: FeedDiagnosticCause,
+    ) {
+        try {
+            if (epoch != bindEpoch) return
+            if (!mutex.tryLock()) {
+                if (markPendingLoss(epoch, cause, status)) {
+                    schedulePendingLossDrain(epoch)
+                }
+                return
+            }
+            try {
+                if (epoch != bindEpoch) return
+                val lost = boundTarget
+                // Idle gateway (no bind, no bridge): a spurious current-epoch mark is
+                // consumed without publishing — nothing to tear down.
+                if (lost == null && overlayBridge == null && boundConnection == null) return
+                unbindLocked()
+                boundTarget = null
+                val diagnostic = FeedDiagnostic(
+                    status = status,
+                    cause = cause,
+                    provider = lost?.provider,
+                    packageName = lost?.component?.packageName,
+                    component = lost?.component,
+                )
+                _diagnostic.tryEmit(diagnostic)
+                _bindingEvidence.tryEmit(
+                    FeedBindingEvidence(
+                        target = lost,
+                        attempted = lost != null,
+                        resolvability = if (lost != null) {
+                            FeedTargetResolvability.RESOLVABLE
+                        } else {
+                            null
+                        },
+                        accepted = lost != null,
+                        connected = false,
+                        active = false,
+                        epoch = epoch,
+                    ),
+                )
+                _state.tryEmit(
+                    FeedAvailability.Unavailable(FeedAvailability.Unavailable.Reason.QUERY_FAILED),
+                )
+            } finally {
+                mutex.unlock()
+            }
+        } catch (_: Exception) {
+            // Binder threads must never observe an exception from this callback.
+        }
+    }
+
+    /**
      * Epoch-scoped transport loss for bridges created by [OverlayConnection].
      *
      * Kept for the deferred-loss tests that drive binder death by epoch: delegates to
@@ -1679,7 +1752,10 @@ class FeedOverlayGatewayImpl internal constructor(
      * binder here) stay distinct until [onOverlayConnected] correlates both for the
      * same target + epoch. Disconnect/death delegate to the epoch-scoped
      * [onServiceDisconnectedForEpoch]/[onBindingDiedForEpoch] so a stale generation
-     * never tears down its replacement.
+     * never tears down its replacement. Protocol-stage failures from the bridge's
+     * first-failure listener delegate to [onProtocolFailureForEpoch] with the same
+     * epoch scoping, so the earliest broken stage wins over the accompanying
+     * transport loss.
      */
     private inner class OverlayConnection(
         private val target: FeedProviderTarget,
@@ -1707,9 +1783,16 @@ class FeedOverlayGatewayImpl internal constructor(
             // a free lock that loss path clears the stale bind first, so the install below
             // then sees no bind and drops the dead channel instead of keeping it.
             // The loss callback is epoch-scoped so a stale generation's death never tears
-            // down the current generation.
+            // down the current generation. The protocol-failure callback carries the
+            // same epoch so the earliest broken stage wins over the accompanying loss.
             val bridge = try {
-                AidlFeedBridge(service) { onBindingDiedForEpoch(epoch) }
+                AidlFeedBridge(
+                    service,
+                    onConnectionLost = { onBindingDiedForEpoch(epoch) },
+                    onProtocolFailure = { status, cause ->
+                        onProtocolFailureForEpoch(epoch, status, cause)
+                    },
+                )
             } catch (_: Exception) {
                 onBindingDiedForEpoch(epoch)
                 return

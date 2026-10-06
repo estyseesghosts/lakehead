@@ -61,10 +61,13 @@ object GridVerticalLayout {
     }
 
     /**
-     * Measures the signed intrinsic content bounds and height.
+     * Measures intrinsic content bounds and height.
      *
-     * The normal policy does not add a working margin or inflate content to the viewport. The
-     * viewport minimum and the transient edit frontier belong to their respective owners.
+     * Nonnegative [GridPlacement] rows are measured from logical row zero, so their content count
+     * is the absolute maximum row-exclusive boundary. [SignedGridPlacement] rows retain their
+     * shared signed-coordinate semantics and use the distance between their bounds. The two
+     * coordinate families must not be mixed in one call. The viewport minimum and transient edit
+     * frontier belong to their respective owners.
      *
      * @throws IllegalArgumentException if [viewportRows] is not positive or [workingMarginRows]
      * is negative
@@ -81,15 +84,19 @@ object GridVerticalLayout {
 
         var minRow = Long.MAX_VALUE
         var maxRowExclusive = Long.MIN_VALUE
+        var usesAbsoluteRows = false
+        var usesSignedRows = false
         for (placement in placements) {
             val row: Int
             val spanRows: Int
             when (placement) {
                 is GridPlacement<*> -> {
+                    usesAbsoluteRows = true
                     row = placement.position.row
                     spanRows = placement.span.rows
                 }
                 is SignedGridPlacement<*> -> {
+                    usesSignedRows = true
                     row = placement.row
                     spanRows = placement.span.rows
                 }
@@ -101,11 +108,20 @@ object GridVerticalLayout {
             if (rowLong < minRow) minRow = rowLong
             if (rowExclusive > maxRowExclusive) maxRowExclusive = rowExclusive
         }
+        require(!usesAbsoluteRows || !usesSignedRows) {
+            "GridVerticalLayout.measure cannot mix absolute and signed placements"
+        }
         if (placements.isEmpty()) {
             minRow = 0L
             maxRowExclusive = 0L
         }
-        val occupiedHeightRows = Math.subtractExact(maxRowExclusive, minRow)
+        // Signed callers measure their signed bounds. Absolute Home content starts at row zero
+        // even when its first tile is lower, preserving leading logical rows.
+        val occupiedHeightRows = if (usesSignedRows) {
+            Math.subtractExact(maxRowExclusive, minRow)
+        } else {
+            maxRowExclusive
+        }
         return GridVerticalExtent(
             occupiedBottomRowExclusive = maxRowExclusive,
             totalScrollableRows = occupiedHeightRows,

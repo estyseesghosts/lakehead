@@ -24,6 +24,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.disabled
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
@@ -147,9 +148,10 @@ fun isLargeTileSpan(span: GridSpan): Boolean =
  * selection border only; never a gesture detector). Its children are siblings,
  * never nested clickables, in TalkBack order:
  *
- * - TileBody: full-size [Box.combinedClickable] (`onClick = onBodyClick`,
- *   `onLongClick` = tile callback, [Role.Button]) with `semantics(mergeDescendants = true)`.
- *   Owns empty-area taps and long-press; glyph siblings drawn above it cover
+ * - TileBody: full-size [Box] (conditional `combinedClickable` only when interaction
+ *   is enabled: `onClick = onBodyClick`, `onLongClick` = tile callback, [Role.Button])
+ *   with `semantics(mergeDescendants = true)` exposing [Role.Button] plus `disabled()`
+ *   while disabled. Owns empty-area taps and long-press; glyph siblings drawn above it cover
  *   their own boxes and forward the same tile long-press.
  * - AppLaunchButton: [Box.combinedClickable] (`onClick = onSymbolClick`,
  *   `onLongClick` = tile callback, [Role.Button])
@@ -239,9 +241,8 @@ fun isLargeTileSpan(span: GridSpan): Boolean =
  * toggling and persistence stay with the caller and never execute here.
  * @param isInteractionEnabled when false every hit region keeps its minima,
  * merged-descendants semantics, [Role.Button], descriptions and border visuals
- * but exposes no click/long-click actions (no gesture detector while disabled;
- * TileBody keeps its `combinedClickable` with `enabled = false`), so in-edit
- * drag gestures win
+ * but exposes no click/long-click actions (no gesture detector while disabled),
+ * so in-edit drag gestures win
  * the slop race. Defaults to true (fully interactive).  Shortcut glyphs follow
  * the same gate: disabled in edit mode so the tile drags as one object and
  * shortcut invocation never interferes with tile editing.
@@ -347,12 +348,15 @@ fun AppTile(
         // TileBody: primary hit region and fallback empty-area long-press
         // target; glyph regions (AppLaunchRegion/AppStripGlyph/ShortcutGlyph)
         // also forward the shared onLongClick via their own combinedClickable.
+        // No gesture detector while disabled (conditional combinedClickable
+        // only when enabled); disabled semantics stay exposed.
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
                 .semantics(mergeDescendants = true) {
                     this.contentDescription = resolvedDescription
+                    this.role = Role.Button
                     this.selected = state.isSelected
                     val markers = listOfNotNull(
                         if (state.isPressed) AppTileDefaults.PressedStateDescription else null,
@@ -361,12 +365,20 @@ fun AppTile(
                     if (markers.isNotEmpty()) {
                         this.stateDescription = markers.joinToString(", ")
                     }
+                    if (!isInteractionEnabled) {
+                        disabled()
+                    }
                 }
-                .combinedClickable(
-                    enabled = isInteractionEnabled,
-                    onLongClick = onLongClick,
-                    onClick = onBodyClick,
-                    role = Role.Button,
+                .then(
+                    if (isInteractionEnabled) {
+                        Modifier.combinedClickable(
+                            onClick = onBodyClick,
+                            onLongClick = onLongClick,
+                            role = Role.Button,
+                        )
+                    } else {
+                        Modifier
+                    },
                 ),
         )
         if (!hasPinned) {

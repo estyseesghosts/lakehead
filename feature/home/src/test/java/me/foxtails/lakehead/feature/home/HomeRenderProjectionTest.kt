@@ -413,8 +413,7 @@ class HomeRenderProjectionTest {
     @Test
     fun measureExtent_ignoresWorkingMarginInNormal() {
         // Normal policy: the working margin is validated but never added. Rows 18..20
-        // measure as the signed bounds (min 18, max-exclusive 20, height 2), identical
-        // with a zero margin.
+        // measure from logical row zero through row 20, identical with a zero margin.
         val id = identity("p0", "com.a", "A")
         val placements = listOf(placement("a", id, row = 18, spanRows = 2))
         val extent = HomeRenderProjection.measureExtent(placements, 10L, 2L)
@@ -426,8 +425,20 @@ class HomeRenderProjectionTest {
         assertEquals(oracle, extent)
         assertEquals(20L, extent.occupiedBottomRowExclusive)
         assertEquals(18L, extent.occupiedMinRow)
-        assertEquals(2L, extent.totalScrollableRows)
+        assertEquals(20L, extent.totalScrollableRows)
         assertEquals(extent, HomeRenderProjection.measureExtent(placements, 10L, 0L))
+    }
+
+    @Test
+    fun measureExtent_preservesAbsoluteLeadingRowsAcrossViewportSizes() {
+        val id = identity("p0", "com.a", "A")
+        val oneRow = listOf(placement("one", id, row = 5, spanRows = 1))
+        val twoRows = listOf(placement("two", id, row = 5, spanRows = 2))
+
+        assertEquals(6L, HomeRenderProjection.measureExtent(oneRow, 1L, 0L).occupiedHeightRows)
+        assertEquals(6L, HomeRenderProjection.measureExtent(oneRow, 20L, 0L).occupiedHeightRows)
+        assertEquals(7L, HomeRenderProjection.measureExtent(twoRows, 1L, 0L).occupiedHeightRows)
+        assertEquals(7L, HomeRenderProjection.measureExtent(twoRows, 20L, 0L).occupiedHeightRows)
     }
 
     // ---- resolveWindow: overscan, span-crossing, saturation ----
@@ -567,12 +578,12 @@ class HomeRenderProjectionTest {
             viewport.viewportRows,
             viewport.workingMarginRows,
         )
-        // Height is maxExcl - min: far ends at row 20, min is 5 → 15 rows.
+        // Absolute height runs from logical row zero to the far exclusive boundary at row 20.
         assertEquals(20L, extent.occupiedMaxRowExclusive)
         assertEquals(5L, extent.occupiedMinRow)
-        assertEquals(15L, extent.occupiedHeightRows)
-        assertEquals(15L, extent.totalScrollableRows)
-        // Same height via the bounds policy (no second measurement).
+        assertEquals(20L, extent.occupiedHeightRows)
+        assertEquals(20L, extent.totalScrollableRows)
+        // The signed bounds helper remains a separate compatibility policy.
         val bounds = me.foxtails.lakehead.core.grid.GridContentBounds.contentBoundsOf(
             placements.map {
                 me.foxtails.lakehead.core.grid.SignedGridPlacement(
@@ -587,10 +598,7 @@ class HomeRenderProjectionTest {
             },
             columns = 6,
         )!!
-        assertEquals(
-            me.foxtails.lakehead.core.grid.GridContentBounds.contentHeightRows(bounds),
-            extent.occupiedHeightRows,
-        )
+        assertEquals(15L, me.foxtails.lakehead.core.grid.GridContentBounds.contentHeightRows(bounds))
     }
 
     @Test

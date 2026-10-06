@@ -9,9 +9,9 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import me.foxtails.lakehead.core.designsystem.SquareCellGeometry
-import me.foxtails.lakehead.core.designsystem.TileBounds
 import me.foxtails.lakehead.core.grid.GridRest
-import me.foxtails.lakehead.core.grid.GridSpan
+import me.foxtails.lakehead.core.model.LogicalPosition
+import me.foxtails.lakehead.core.model.LogicalSpan
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertSame
@@ -70,26 +70,13 @@ class HomeCanvasOriginAnimTest {
 
         // One object: every kept tile shifts down by exactly the target delta,
         // and relative offsets between tiles are unchanged (placements untouched).
-        val rowOrigin = 0L
+        val beforeMetrics = homeGridMetricsFor(geometry, geometry.columnCount, 0, beforeRest.gridOriginY.toFloat())
+        val afterMetrics = homeGridMetricsFor(geometry, geometry.columnCount, 0, afterRest.gridOriginY.toFloat())
         val beforeTops = mutableListOf<Int>()
         val afterTops = mutableListOf<Int>()
-        for (row in 0L..2L) {
-            val before = TileBounds.signedBounds(
-                column = 0,
-                row = row,
-                span = GridSpan(1, 1),
-                geometry = geometry,
-                originRow = rowOrigin,
-                originYPx = beforeRest.gridOriginY,
-            )
-            val after = TileBounds.signedBounds(
-                column = 0,
-                row = row,
-                span = GridSpan(1, 1),
-                geometry = geometry,
-                originRow = rowOrigin,
-                originYPx = afterRest.gridOriginY,
-            )
+        for (row in 0..2) {
+            val before = beforeMetrics.signedFrame(LogicalPosition(0, row), LogicalSpan(1, 1))
+            val after = afterMetrics.signedFrame(LogicalPosition(0, row), LogicalSpan(1, 1))
             assertEquals(delta, (after.top - before.top).toLong())
             assertEquals(delta, (after.bottom - before.bottom).toLong())
             beforeTops += before.top

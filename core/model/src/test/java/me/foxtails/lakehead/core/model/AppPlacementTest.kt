@@ -51,12 +51,16 @@ class AppPlacementTest {
     @Test
     fun logicalPositionAndSpanValidatePrimitiveCoordinatesAndDimensions() {
         assertInvalid { LogicalPosition(-1, 0) }
-        assertInvalid { LogicalPosition(0, -1) }
         assertInvalid { LogicalSpan(0, 1) }
         assertInvalid { LogicalSpan(1, 0) }
 
         assertEquals(LogicalPosition(2, 7), LogicalPosition(2, 7))
         assertEquals(LogicalSpan(4, 2), LogicalSpan(4, 2))
+    }
+
+    @Test
+    fun logicalPositionRejectsNegativeRows() {
+        assertInvalid { LogicalPosition(column = 0, row = -1) }
     }
 
     @Test

@@ -1,7 +1,6 @@
 package me.foxtails.lakehead.feature.home
 
 import me.foxtails.lakehead.core.designsystem.SquareCellGeometry
-import me.foxtails.lakehead.core.designsystem.resizeCandidateFrame
 import me.foxtails.lakehead.core.grid.GridSpan
 import me.foxtails.lakehead.core.model.AppIdentity
 import me.foxtails.lakehead.core.model.ComponentIdentity
@@ -50,17 +49,29 @@ class ResizePreviewSpanTest {
         rowGapPx = 8,
     )
 
+    private val metrics = homeGridMetricsFor(geometry, columns = 5, originXPx = 0, restOffsetYPx = 0f)
+
+    /** Starts an armed RESIZE of [t] and requests each of [requests] in order. */
+    private fun resizeDrag(
+        t: HomeRenderTile,
+        placements: List<HomeRenderTile>,
+        vararg requests: LogicalSpan,
+    ): DragState.Resize {
+        var state = HomeEditState.Normal
+            .enterOnLongPress(t.itemId)
+            .toggleResizeArmed()
+            .beginResize(t, metrics)
+        requests.forEach { state = state.updateResize(it, placements) }
+        return state.drag as DragState.Resize
+    }
+
     @Test
     fun previewSpan_animatedAndReducedMotion_agree() {
         val t = tile("app-a")
-        val placements = listOf(t)
-        val session = HomeEditSession.Idle.enterIfLaunchable(t, placements, columns = 5, rows = 10)
-            .beginResize()
-            .updateResizeCandidate(LogicalSpan(3, 2), placements, columns = 5, rows = 10)
-        val active = session as HomeEditSession.Active
+        val resize = resizeDrag(t, listOf(t), LogicalSpan(3, 2))
 
-        val animated = resizePreviewSpan(active, reducedMotion = false)
-        val snapped = resizePreviewSpan(active, reducedMotion = true)
+        val animated = resizePreviewSpan(resize, reducedMotion = false)
+        val snapped = resizePreviewSpan(resize, reducedMotion = true)
 
         assertEquals(GridSpan(3, 2), animated)
         assertEquals(animated, snapped)
@@ -69,33 +80,17 @@ class ResizePreviewSpanTest {
     @Test
     fun previewFrame_animatedAndReducedMotion_equal() {
         val t = tile("app-a")
-        val placements = listOf(t)
-        val session = HomeEditSession.Idle.enterIfLaunchable(t, placements, columns = 5, rows = 10)
-            .beginResize()
-            .updateResizeCandidate(LogicalSpan(3, 2), placements, columns = 5, rows = 10)
-        val active = session as HomeEditSession.Active
+        val resize = resizeDrag(t, listOf(t), LogicalSpan(3, 2))
 
-        val animatedSpan = resizePreviewSpan(active, reducedMotion = false)
-        val snappedSpan = resizePreviewSpan(active, reducedMotion = true)
-        val animatedFrame = resizeCandidateFrame(
-            originPosition = me.foxtails.lakehead.core.grid.GridPosition(
-                active.origin.column,
-                active.origin.row,
-            ),
-            candidateSpan = animatedSpan,
-            geometry = geometry,
-            rowOrigin = 0L,
-            originYPx = 0L,
+        val animatedSpan = resizePreviewSpan(resize, reducedMotion = false)
+        val snappedSpan = resizePreviewSpan(resize, reducedMotion = true)
+        val animatedFrame = metrics.signedFrame(
+            resize.position,
+            LogicalSpan(animatedSpan.columns, animatedSpan.rows),
         )
-        val snappedFrame = resizeCandidateFrame(
-            originPosition = me.foxtails.lakehead.core.grid.GridPosition(
-                active.origin.column,
-                active.origin.row,
-            ),
-            candidateSpan = snappedSpan,
-            geometry = geometry,
-            rowOrigin = 0L,
-            originYPx = 0L,
+        val snappedFrame = metrics.signedFrame(
+            resize.position,
+            LogicalSpan(snappedSpan.columns, snappedSpan.rows),
         )
 
         assertEquals(animatedFrame, snappedFrame)
@@ -121,17 +116,13 @@ class ResizePreviewSpanTest {
         val t = tile("app-a")
         val obstacle = tile("app-b", spanColumns = 1, spanRows = 1, column = 3, row = 0)
         val placements = listOf(t, obstacle)
-        val session = HomeEditSession.Idle.enterIfLaunchable(t, placements, columns = 5, rows = 10)
-            .beginResize()
-            .updateResizeCandidate(LogicalSpan(3, 2), placements, columns = 5, rows = 10)
-            .updateResizeCandidate(LogicalSpan(4, 2), placements, columns = 5, rows = 10)
-        val active = session as HomeEditSession.Active
+        val resize = resizeDrag(t, placements, LogicalSpan(3, 2), LogicalSpan(4, 2))
 
-        assertEquals(CandidateValidity.COLLIDING, active.candidateValidity)
-        assertEquals(GridSpan(3, 2), resizePreviewSpan(active, reducedMotion = false))
+        assertEquals(CandidateValidity.COLLIDING, resize.validity)
+        assertEquals(GridSpan(3, 2), resizePreviewSpan(resize, reducedMotion = false))
         assertEquals(
-            resizePreviewSpan(active, reducedMotion = false),
-            resizePreviewSpan(active, reducedMotion = true),
+            resizePreviewSpan(resize, reducedMotion = false),
+            resizePreviewSpan(resize, reducedMotion = true),
         )
     }
 
@@ -143,15 +134,16 @@ class ResizePreviewSpanTest {
         val t = tile("app-a", spanColumns = 1, spanRows = 1)
         val obstacle = tile("app-b", spanColumns = 1, spanRows = 1, column = 1, row = 0)
         val placements = listOf(t, obstacle)
-        val session = HomeEditSession.Idle.enterIfLaunchable(t, placements, columns = 5, rows = 10)
-            .beginResize()
-            .updateResizeCandidate(LogicalSpan(2, 1), placements, columns = 5, rows = 10)
-        val active = session as HomeEditSession.Active
+        val state = HomeEditState.Normal
+            .enterOnLongPress(t.itemId)
+            .toggleResizeArmed()
+            .beginResize(t, metrics)
+            .updateResize(LogicalSpan(2, 1), placements)
+        val resize = state.drag as DragState.Resize
 
-        assertEquals(CandidateValidity.COLLIDING, active.candidateValidity)
-        assertEquals(null, session.resizeCommitSpan())
-        assertEquals(false, session.hasResized())
-        assertEquals(GridSpan(1, 1), resizePreviewSpan(active, reducedMotion = false))
-        assertEquals(GridSpan(1, 1), resizePreviewSpan(active, reducedMotion = true))
+        assertEquals(CandidateValidity.COLLIDING, resize.validity)
+        assertEquals(null, state.finish().commit)
+        assertEquals(GridSpan(1, 1), resizePreviewSpan(resize, reducedMotion = false))
+        assertEquals(GridSpan(1, 1), resizePreviewSpan(resize, reducedMotion = true))
     }
 }

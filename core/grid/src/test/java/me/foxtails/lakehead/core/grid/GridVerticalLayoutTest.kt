@@ -15,10 +15,10 @@ class GridVerticalLayoutTest {
         assertEquals(
             GridVerticalExtent(
                 occupiedBottomRowExclusive = 1_000_001L,
-                totalScrollableRows = 999_999L,
+                totalScrollableRows = 1_000_001L,
                 occupiedMinRow = 2L,
                 occupiedMaxRowExclusive = 1_000_001L,
-                occupiedHeightRows = 999_999L,
+                occupiedHeightRows = 1_000_001L,
             ),
             GridVerticalLayout.measure(placements, viewportRows = 8L, workingMarginRows = 3L),
         )
@@ -34,7 +34,31 @@ class GridVerticalLayoutTest {
         )
 
         assertEquals(distantRow.toLong() + 1L, result.occupiedBottomRowExclusive)
-        assertEquals(1L, result.totalScrollableRows)
+        assertEquals(distantRow.toLong() + 1L, result.totalScrollableRows)
+    }
+
+    @Test
+    fun rowZeroIsThePermanentLogicalTopForSparseContent() {
+        val result = GridVerticalLayout.measure(
+            listOf(placement("row-five", row = 5)),
+            viewportRows = 1L,
+            workingMarginRows = 0L,
+        )
+
+        assertEquals(6L, result.totalScrollableRows)
+        assertEquals(6L, result.occupiedHeightRows)
+    }
+
+    @Test
+    fun contentRowsIncludeTheFullSpanFromAbsoluteRowZero() {
+        val result = GridVerticalLayout.measure(
+            listOf(placement("row-five-span-two", row = 5, spanRows = 2)),
+            viewportRows = 1L,
+            workingMarginRows = 0L,
+        )
+
+        assertEquals(7L, result.totalScrollableRows)
+        assertEquals(7L, result.occupiedHeightRows)
     }
 
     @Test
@@ -48,7 +72,7 @@ class GridVerticalLayoutTest {
             ),
         )
         assertEquals(
-            GridVerticalExtent(4L, 1L, 3L, 4L, 1L),
+            GridVerticalExtent(4L, 4L, 3L, 4L, 4L),
             GridVerticalLayout.measure(
                 listOf(placement("item", row = 3)),
                 viewportRows = 4L,
@@ -56,7 +80,7 @@ class GridVerticalLayoutTest {
             ),
         )
         assertEquals(
-            GridVerticalExtent(4L, 1L, 3L, 4L, 1L),
+            GridVerticalExtent(4L, 4L, 3L, 4L, 4L),
             GridVerticalLayout.measure(
                 listOf(placement("item", row = 3)),
                 viewportRows = 20L,
@@ -73,7 +97,7 @@ class GridVerticalLayoutTest {
             workingMarginRows = 1L,
         )
 
-        assertEquals(GridVerticalExtent(11L, 4L, 7L, 11L, 4L), result)
+        assertEquals(GridVerticalExtent(11L, 11L, 7L, 11L, 11L), result)
     }
 
     @Test
@@ -87,7 +111,7 @@ class GridVerticalLayoutTest {
         val first = GridVerticalLayout.measure(placements, viewportRows = 5L, workingMarginRows = 2L)
         val second = GridVerticalLayout.measure(placements, viewportRows = 5L, workingMarginRows = 2L)
 
-        assertEquals(GridVerticalExtent(17L, 13L, 4L, 17L, 13L), first)
+        assertEquals(GridVerticalExtent(17L, 17L, 4L, 17L, 17L), first)
         assertEquals(first, second)
         assertNotSame(first, second)
     }
@@ -144,6 +168,20 @@ class GridVerticalLayoutTest {
         assertEquals(5L, result.occupiedMaxRowExclusive)
         assertEquals(8L, result.occupiedHeightRows)
         assertEquals(8L, result.totalScrollableRows)
+    }
+
+    @Test
+    fun mixedAbsoluteAndSignedRowsAreRejectedInsteadOfChoosingAnExtentPolicy() {
+        assertIllegalArgument {
+            GridVerticalLayout.measure(
+                listOf(
+                    placement("absolute", row = 5),
+                    SignedGridPlacement("signed", column = 0, row = -2, span = GridSpan(1, 1)),
+                ),
+                viewportRows = 1L,
+                workingMarginRows = 0L,
+            )
+        }
     }
 
     @Test

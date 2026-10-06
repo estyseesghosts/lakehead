@@ -18,6 +18,8 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.disabled
+import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextOverflow
@@ -127,6 +129,10 @@ fun ShortcutSurfaceRow(
                 .testTag(PIN_TOGGLE_TAG)
                 .semantics(mergeDescendants = true) {
                     this.contentDescription = pinToggleDescription(entry.label, entry.isPinned)
+                    this.role = Role.Button
+                    if (!entry.isPinEnabled) {
+                        disabled()
+                    }
                 }
                 .then(
                     if (entry.isPinEnabled) {
@@ -135,10 +141,15 @@ fun ShortcutSurfaceRow(
                         Modifier.alpha(PIN_DISABLED_ALPHA)
                     },
                 )
-                .clickable(
-                    enabled = entry.isPinEnabled,
-                    onClick = onTogglePin,
-                    role = Role.Button,
+                .then(
+                    if (entry.isPinEnabled) {
+                        Modifier.clickable(
+                            onClick = onTogglePin,
+                            role = Role.Button,
+                        )
+                    } else {
+                        Modifier
+                    },
                 ),
             contentAlignment = Alignment.Center,
         ) {

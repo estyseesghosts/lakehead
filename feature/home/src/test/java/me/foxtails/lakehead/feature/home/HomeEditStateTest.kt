@@ -1,0 +1,352 @@
+package me.foxtails.lakehead.feature.home
+
+import me.foxtails.lakehead.core.grid.GridRules
+import me.foxtails.lakehead.core.model.AppIdentity
+import me.foxtails.lakehead.core.model.ComponentIdentity
+import me.foxtails.lakehead.core.model.ItemAvailability
+import me.foxtails.lakehead.core.model.ItemId
+import me.foxtails.lakehead.core.model.LogicalPosition
+import me.foxtails.lakehead.core.model.LogicalSpan
+import me.foxtails.lakehead.core.model.ProfileId
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+class HomeEditStateTest {
+
+    private val identity = AppIdentity(ProfileId("personal"), ComponentIdentity("com.app", "Main"))
+
+    private fun tile(
+        id: String,
+        column: Int = 0,
+        row: Int = 0,
+        columns: Int = 1,
+        rows: Int = 1,
+        launchable: Boolean = true,
+    ) = HomeRenderTile(
+        itemId = ItemId(id),
+        appIdentity = identity,
+        position = LogicalPosition(column, row),
+        span = LogicalSpan(columns, rows),
+        availability = if (launchable) ItemAvailability.AVAILABLE else ItemAvailability.UNAVAILABLE,
+        label = id,
+        icon = null,
+        isLaunchable = launchable,
+    )
+
+    private val metrics = HomeGridMetrics(
+        columns = 6,
+        cellWidthPx = 100f,
+        cellHeightPx = 100f,
+        columnGapPx = 0f,
+        rowGapPx = 8f,
+        originXPx = 0f,
+        restOffsetYPx = 0f,
+    )
+
+    private fun cell(column: Int, row: Int) = RequestedCell(column.toLong(), row.toLong())
+
+    private fun valid(column: Int, row: Int) =
+        MoveCellResult.Valid(cell(column, row), LogicalPosition(column, row))
+
+    private val a = tile("a")
+    private val b = tile("b", column = 3)
+    private val wide = tile("w", column = 0, row = 2, columns = 4, rows = 2)
+    private val all = listOf(a, b, wide)
+
+    private fun editing(id: String = "a") = HomeEditState.Normal.enterOnLongPress(ItemId(id))
+
+    private fun moving(t: HomeRenderTile = a) =
+        editing(t.itemId.value).beginMove(t, all, metrics, 10f, 10f)
+
+    private fun resizing(t: HomeRenderTile = a) =
+        editing(t.itemId.value).toggleResizeArmed().beginResize(t, metrics)
+
+    private fun HomeEditState.move() = drag as DragState.Move
+    private fun HomeEditState.resize() = drag as DragState.Resize
+
+    @Test(expected = IllegalArgumentException::class)
+    fun init_selectionOutsideEditMode_rejected() {
+        HomeEditState(isEditing = false, selectedTileId = ItemId("a"))
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun init_armWithoutSelection_rejected() {
+        HomeEditState(isEditing = true, resizeArmed = true)
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun init_dragOfUnselectedTile_rejected() {
+        val drag = moving().move()
+        HomeEditState(isEditing = true, selectedTileId = ItemId("b"), drag = drag)
+    }
+
+    @Test
+    fun selection_tapSwitchesAndClearsArm_exitClearsAll() {
+        val armed = editing().toggleResizeArmed()
+        assertTrue(armed.resizeArmed)
+        val tapped = armed.selectOnTap(ItemId("b"))
+        assertEquals(ItemId("b"), tapped.selectedTileId)
+        assertTrue(!tapped.resizeArmed)
+        assertEquals(HomeEditState.Normal, tapped.exit())
+    }
+
+    @Test
+    fun selectOnTap_outsideEditMode_isIgnored() {
+        assertEquals(HomeEditState.Normal, HomeEditState.Normal.selectOnTap(ItemId("a")))
+    }
+
+    @Test
+    fun beginMove_gating() {
+        assertEquals(HomeEditState.Normal, HomeEditState.Normal.beginMove(a, all, metrics, 0f, 0f))
+        val notLaunchable = tile("x", column = 5, launchable = false)
+        val s = editing()
+        assertEquals(s, s.beginMove(notLaunchable, all + notLaunchable, metrics, 0f, 0f))
+        val unknown = tile("ghost", column = 4)
+        assertEquals(s, s.beginMove(unknown, all, metrics, 0f, 0f))
+    }
+
+    @Test
+    fun beginMove_transfersSelectionAndClearsArm() {
+        val s = editing("b").toggleResizeArmed().beginMove(a, all, metrics, 0f, 0f)
+        assertEquals(ItemId("a"), s.selectedTileId)
+        assertTrue(!s.resizeArmed)
+        assertEquals(a.position, s.move().previewPosition)
+    }
+
+    @Test
+    fun beginResize_requiresSelectedAndArmed() {
+        val unarmed = editing()
+        assertEquals(unarmed, unarmed.beginResize(a, metrics))
+        val armedOther = editing("b").toggleResizeArmed()
+        assertEquals(armedOther, armedOther.beginResize(a, metrics))
+        val ok = resizing()
+        assertTrue(ok.resizeArmed)
+        assertEquals(a.span, ok.resize().previewSpan)
+    }
+
+    @Test
+    fun move_neverChangesSpan_forEverySpanAndOutcome() {
+        listOf(a, tile("t", column = 1, columns = 2, rows = 2), tile("f", column = 0, row = 5, columns = 4, rows = 2))
+            .forEach { t ->
+                var s = editing(t.itemId.value).beginMove(t, all + t, metrics, 0f, 0f)
+                val span = s.move().span
+                // collision with a (0,0), out of bounds above row 0, right-edge overflow, free cell
+                s = s.updateMove(valid(0, 0), all + t)
+                s = s.updateMove(MoveCellResult.Rejected(GridRules.Rejection.OUT_OF_BOUNDS, cell(0, -3)), all + t)
+                s = s.updateMove(valid(5, 9), all + t)
+                s = s.updateMove(valid(2, 8), all + t)
+                assertEquals(span, s.move().span)
+                assertEquals(t.span, span)
+            }
+    }
+
+    @Test
+    fun move_blockedHoldsLastValidPreview() {
+        var s = moving()
+        s = s.updateMove(valid(1, 1), all)
+        assertEquals(LogicalPosition(1, 1), s.move().previewPosition)
+        s = s.updateMove(valid(3, 0), all)
+        assertEquals(CandidateValidity.COLLIDING, s.move().validity)
+        assertEquals(LogicalPosition(1, 1), s.move().previewPosition)
+        s = s.updateMove(MoveCellResult.Rejected(GridRules.Rejection.OUT_OF_BOUNDS, cell(0, -2)), all)
+        assertEquals(CandidateValidity.OUT_OF_BOUNDS, s.move().validity)
+        assertEquals(cell(0, -2), s.move().requestedCell)
+        assertEquals(LogicalPosition(1, 1), s.move().previewPosition)
+    }
+
+    @Test
+    fun moveTo_isAbsolute_notPathDependent() {
+        val direct = moving().moveTo(250f, 120f, 0f, all)
+        val wandered = moving()
+            .moveTo(550f, 500f, 0f, all)
+            .moveTo(10f, 10f, 0f, all)
+            .moveTo(250f, 120f, 0f, all)
+        assertEquals(direct.move().previewPosition, wandered.move().previewPosition)
+        assertEquals(direct.move().requestedCell, wandered.move().requestedCell)
+    }
+
+    @Test
+    fun updateMove_unknownItem_dropsDrag() {
+        val s = moving().updateMove(valid(1, 1), listOf(b, wide))
+        assertEquals(DragState.None, s.drag)
+        assertEquals(ItemId("a"), s.selectedTileId)
+    }
+
+    @Test
+    fun finish_move_commitsOnlyValidChangedPosition() {
+        val moved = moving().updateMove(valid(1, 1), all).finish()
+        assertEquals(HomeEditCommit.Move(ItemId("a"), LogicalPosition(1, 1)), moved.commit)
+        assertEquals(DragState.None, moved.state.drag)
+        assertEquals(ItemId("a"), moved.state.selectedTileId)
+
+        assertNull(moving().finish().commit)
+        val blocked = moving().updateMove(valid(1, 1), all).updateMove(valid(3, 0), all).finish()
+        assertNull(blocked.commit)
+    }
+
+    @Test
+    fun resize_neverChangesPosition_validBlockedAndOutOfBounds() {
+        var s = resizing()
+        val position = s.resize().position
+        s = s.updateResize(LogicalSpan(2, 2), all)
+        assertEquals(LogicalSpan(2, 2), s.resize().previewSpan)
+        s = s.updateResize(LogicalSpan(4, 1), all)
+        assertEquals(CandidateValidity.COLLIDING, s.resize().validity)
+        assertEquals(LogicalSpan(2, 2), s.resize().previewSpan)
+        s = s.updateResize(LogicalSpan(8, 1), all)
+        assertEquals(CandidateValidity.OUT_OF_BOUNDS, s.resize().validity)
+        assertEquals(position, s.resize().position)
+        assertEquals(a.position, s.resize().position)
+    }
+
+    @Test
+    fun finish_resize_commitsLastValidSpan_andKeepsArm() {
+        val f = resizing().updateResize(LogicalSpan(2, 1), all).updateResize(LogicalSpan(4, 1), all).finish()
+        assertEquals(HomeEditCommit.Resize(ItemId("a"), LogicalSpan(2, 1)), f.commit)
+        assertTrue(f.state.resizeArmed)
+        assertEquals(DragState.None, f.state.drag)
+        assertNull(resizing().finish().commit)
+    }
+
+    @Test
+    fun resizeTo_quantizesPointerToRenderableSpan() {
+        val s = resizing().resizeTo(150f, 10f, 0f, all)
+        assertEquals(1, s.resize().requestedSpan.rows)
+        assertTrue(s.resize().requestedSpan.columns >= 1)
+        assertEquals(a.position, s.resize().position)
+    }
+
+    @Test
+    fun rebaseMetrics_changesOnlyMetrics() {
+        val s = moving().updateMove(valid(1, 1), all)
+        val shifted = metrics.copy(restOffsetYPx = 24f)
+        val r = s.rebaseMetrics(shifted)
+        assertEquals(shifted, r.move().metrics)
+        assertEquals(s.move().copy(metrics = shifted), r.move())
+        assertEquals(s.selectedTileId, r.selectedTileId)
+        assertEquals(s, s.rebaseMetrics(metrics))
+    }
+
+    @Test
+    fun onTileRemoved_dropsSelectionArmAndDrag() {
+        val s = moving().onTileRemoved(ItemId("a"))
+        assertNull(s.selectedTileId)
+        assertEquals(DragState.None, s.drag)
+        assertTrue(s.isEditing)
+        assertEquals(editing().toggleResizeArmed().selectedTileId, ItemId("a"))
+        assertEquals(ItemId("a"), editing().onTileRemoved(ItemId("b")).selectedTileId)
+    }
+
+    // ---- ported from the retired HomeEditSession / HomeInteractionController suites ----
+
+    @Test
+    fun resizeSequence_validBlockedAndOutOfBounds_neverChangesPosition() {
+        val t = tile("app-a", column = 4, row = 3)
+        val obstacle = tile("app-b", column = 4, row = 5)
+        val placements = listOf(t, obstacle)
+        var s = HomeEditState.Normal
+            .enterOnLongPress(t.itemId)
+            .toggleResizeArmed()
+            .beginResize(t, metrics)
+        for (span in listOf(LogicalSpan(2, 2), LogicalSpan(1, 3), LogicalSpan(3, 1), LogicalSpan(1, 1))) {
+            s = s.updateResize(span, placements)
+            assertEquals(t.position, s.resize().position)
+        }
+        // 1x3 collides with the obstacle two rows below; 3x1 overflows six columns.
+        assertEquals(CandidateValidity.VALID, s.resize().validity)
+    }
+
+    @Test
+    fun resize_collisionAndEdge_reportValidity() {
+        val t = tile("app-a", column = 5, row = 0)
+        val neighbour = tile("app-b", column = 1, row = 2)
+        val edge = HomeEditState.Normal.enterOnLongPress(t.itemId).toggleResizeArmed()
+            .beginResize(t, metrics)
+            .updateResize(LogicalSpan(2, 1), listOf(t, neighbour))
+        assertEquals(CandidateValidity.OUT_OF_BOUNDS, edge.resize().validity)
+        assertEquals(t.span, edge.resize().previewSpan)
+        assertNull(edge.finish().commit)
+
+        val a = tile("app-a")
+        val b = tile("app-b", column = 1)
+        val blocked = HomeEditState.Normal.enterOnLongPress(a.itemId).toggleResizeArmed()
+            .beginResize(a, metrics)
+            .updateResize(LogicalSpan(2, 1), listOf(a, b))
+        assertEquals(CandidateValidity.COLLIDING, blocked.resize().validity)
+        assertNull(blocked.finish().commit)
+    }
+
+    @Test
+    fun resize_2x2to3x2In5Columns_commitsPreview() {
+        val five = metrics.copy(columns = 5)
+        val t = tile("app-a", columns = 2, rows = 2)
+        val s = HomeEditState.Normal.enterOnLongPress(t.itemId).toggleResizeArmed()
+            .beginResize(t, five)
+            .updateResize(LogicalSpan(3, 2), listOf(t))
+        assertEquals(HomeEditCommit.Resize(t.itemId, LogicalSpan(3, 2)), s.finish().commit)
+        val tooWide = s.updateResize(LogicalSpan(6, 2), listOf(t))
+        assertEquals(CandidateValidity.OUT_OF_BOUNDS, tooWide.resize().validity)
+        assertEquals(LogicalSpan(3, 2), tooWide.resize().previewSpan)
+    }
+
+    @Test
+    fun updatesForTheOtherDragKind_areNoOps() {
+        val moving = moving()
+        assertEquals(moving, moving.updateResize(LogicalSpan(2, 2), all))
+        val resizing = resizing()
+        assertEquals(resizing, resizing.updateMove(valid(1, 1), all))
+        assertEquals(resizing, resizing.moveTo(250f, 120f, 0f, all))
+        assertEquals(HomeEditState.Normal, HomeEditState.Normal.updateMove(valid(1, 1), all))
+    }
+
+    @Test
+    fun enterOnLongPress_retargetsAndClearsArm() {
+        val armed = editing("a").toggleResizeArmed()
+        val retargeted = armed.enterOnLongPress(ItemId("b"))
+        assertEquals(ItemId("b"), retargeted.selectedTileId)
+        assertTrue(!retargeted.resizeArmed)
+    }
+
+    @Test
+    fun toggleResizeArmed_armsThenDisarms_andIsInertWithoutSelection() {
+        val armed = editing().toggleResizeArmed()
+        assertTrue(armed.resizeArmed)
+        assertTrue(!armed.toggleResizeArmed().resizeArmed)
+        assertEquals(HomeEditState.Normal, HomeEditState.Normal.toggleResizeArmed())
+        val noSelection = editing().onTileRemoved(ItemId("a"))
+        assertEquals(noSelection, noSelection.toggleResizeArmed())
+    }
+
+    @Test
+    fun exit_isIdempotentAndClearsEverything() {
+        val s = resizing()
+        assertEquals(HomeEditState.Normal, s.exit())
+        assertEquals(HomeEditState.Normal, s.exit().exit())
+    }
+
+    @Test
+    fun onTileRemoved_otherTile_keepsSelectionArmAndDrag() {
+        val s = resizing()
+        assertEquals(s, s.onTileRemoved(ItemId("b")))
+        assertEquals(s.exit(), s.exit().onTileRemoved(ItemId("a")))
+    }
+
+    @Test
+    fun cancelDrag_keepsSelectionAndArm_withoutCommit() {
+        val s = resizing().updateResize(LogicalSpan(2, 1), all).cancelDrag()
+        assertEquals(DragState.None, s.drag)
+        assertEquals(ItemId("a"), s.selectedTileId)
+        assertTrue(s.resizeArmed)
+        assertNull(s.finish().commit)
+    }
+
+    @Test
+    fun renderedSpan_usesPreviewOnlyForResizedTile() {
+        val s = resizing().updateResize(LogicalSpan(2, 2), all)
+        assertEquals(LogicalSpan(2, 2), s.renderedSpan(ItemId("a"), LogicalSpan(1, 1)))
+        assertEquals(LogicalSpan(1, 1), s.renderedSpan(ItemId("b"), LogicalSpan(1, 1)))
+        assertEquals(LogicalSpan(1, 1), moving().renderedSpan(ItemId("a"), LogicalSpan(1, 1)))
+    }
+}
