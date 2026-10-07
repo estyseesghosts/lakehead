@@ -3,6 +3,9 @@
 .kotlin/
 **/build/
 local.properties
+keystore.properties
+*.jks
+*.keystore
 *.iml
 .DS_Store
 captures/
