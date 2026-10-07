@@ -77,37 +77,27 @@ class HomeEditWorkspaceTest {
     }
 
     @Test
-    fun initialWorkspace_addsViewportAndLookahead_neverBelowCommitted() {
-        val rows = initialWorkspaceBottomRow(extent(3L), 1080, 108L)
-        assertEquals(3L + 10L + HomeEditWorkspace.LOOKAHEAD_ROWS, rows)
-        assertEquals(3L, initialWorkspaceBottomRow(extent(3L), 1080, 108L).coerceAtMost(3L))
-        val huge = initialWorkspaceBottomRow(extent(5_000L), 1080, 108L)
-        assertEquals(5_000L, huge)
+    fun moveWorkspace_isCommittedBottomPlusAllowedGapPlusSpan() {
+        assertEquals(3L + 2L + 1L, moveWorkspaceBottomRow(extent(3L), 1))
+        assertEquals(3L + 2L + 2L, moveWorkspaceBottomRow(extent(3L), 2))
+        assertEquals(0L + 2L + 1L, moveWorkspaceBottomRow(extent(0L), 1))
     }
 
     @Test
-    fun extendedWorkspace_growsToCover_neverShrinks_isCapped() {
-        val grown = extendedWorkspaceBottomRow(10L, 5_000L, metrics, 0)
-        assertTrue(grown > 10L)
-        assertTrue(workspaceBottomPx(grown, metrics) >= 5_000)
-        assertEquals(grown, extendedWorkspaceBottomRow(grown, 100L, metrics, 0))
-        val capped = extendedWorkspaceBottomRow(10L, 10_000_000L, metrics, 0)
-        assertEquals(workspaceRowCap(108L), capped)
+    fun moveWorkspace_neverCutsTheCommittedBottom() {
+        assertTrue(moveWorkspaceBottomRow(extent(5_000L), 2) >= 5_000L)
     }
 
     @Test
-    fun workspaceRowsToCover_roundsUp() {
-        // The row gap after the last row is not content: a bottom at -gap needs no rows.
-        assertEquals(0L, workspaceRowsToCover(-8L, 0, 108L, 8, 0))
-        assertEquals(1L, workspaceRowsToCover(100L, 0, 108L, 8, 0))
-        assertEquals(2L, workspaceRowsToCover(109L, 0, 108L, 8, 0))
+    fun committedMaxScroll_isZeroWhenContentFitsAndPositiveWhenItOverflows() {
+        assertEquals(0, committedMaxScrollPx(extent(2L), metrics, fullViewportPx = 1000, bottomClearancePx = 0))
+        assertTrue(committedMaxScrollPx(extent(30L), metrics, fullViewportPx = 1000, bottomClearancePx = 0) > 0)
     }
 
     @Test
-    fun nextAutoScrollTarget_movesByStepAndStopsAtTop() {
-        assertEquals(150, nextAutoScrollTarget(AutoScrollZone.BOTTOM, 100, 50))
-        assertEquals(50, nextAutoScrollTarget(AutoScrollZone.TOP, 100, 50))
-        assertEquals(0, nextAutoScrollTarget(AutoScrollZone.TOP, 20, 50))
-        assertEquals(100, nextAutoScrollTarget(AutoScrollZone.NONE, 100, 50))
+    fun moveWorkspaceFloor_coversTheWorkspaceOnlyWhileOneIsHeld() {
+        val held = moveWorkspaceFloorPx(12L, metrics, fullViewportPx = 500, bottomClearancePx = 0)
+        assertTrue(held > 500)
+        assertEquals(500, moveWorkspaceFloorPx(null, metrics, fullViewportPx = 500, bottomClearancePx = 0))
     }
 }

@@ -1,26 +1,19 @@
 package me.foxtails.lakehead.feature.home
 
 /**
- * MOVE edge-auto-scroll constants and zone/step/interval helpers.
+ * MOVE edge-auto-scroll constants and zone/velocity helpers.
  *
- * This object holds only auto-scroll timing constants and the pure functions
- * that classify edge-proximity zones, compute a one-row scroll step and scale
- * the scroll interval by depth. It contains no legality checks, no workspace
- * height and no synthetic scroll maximum; workspace extent is owned by
- * `HomeEditWorkspace.kt`.
+ * This object holds only auto-scroll tuning constants and the pure functions
+ * that classify edge-proximity zones and turn depth into a scroll velocity. It
+ * contains no legality checks, no workspace height and no synthetic scroll
+ * maximum; workspace extent is owned by `HomeEditWorkspace.kt`.
  */
 object HomeAutoScroll {
-    /** Edge-proximity band for auto-scroll, in dp. */
-    const val AUTO_SCROLL_EDGE_DP: Int = 32
+    /** Edge-proximity band for auto-scroll, measured from the real viewport edge, in dp. */
+    const val AUTO_SCROLL_EDGE_DP: Int = 72
 
-    /** Dwell on edge entry before the first auto-scroll step, in milliseconds. */
-    const val AUTO_SCROLL_DWELL_MS: Long = 200L
-
-    /** Fastest auto-scroll interval (deep at the viewport edge), in milliseconds. */
-    const val AUTO_SCROLL_MIN_INTERVAL_MS: Long = 120L
-
-    /** Slowest auto-scroll interval (at the inner band boundary), in milliseconds. */
-    const val AUTO_SCROLL_MAX_INTERVAL_MS: Long = 300L
+    /** Scroll speed with the pointer at (or past) the viewport edge, in dp per second. */
+    const val AUTO_SCROLL_MAX_SPEED_DP_PER_SEC: Int = 720
 }
 
 /** Edge-proximity zone for MOVE auto-scroll, from a viewport-local pointer Y. */
@@ -41,39 +34,26 @@ fun autoScrollZone(pointerYPx: Float, viewportHeightPx: Int, edgePx: Int): AutoS
     return AutoScrollZone.NONE
 }
 
-/** Auto-scroll step in pixels: one row stride, coerced into [Int]. */
-fun autoScrollStepPx(rowStridePx: Long): Int {
-    require(rowStridePx > 0L) { "rowStridePx must be positive" }
-    return rowStridePx.coerceIn(1L, Int.MAX_VALUE.toLong()).toInt()
-}
-
 /**
- * Proximity-scaled auto-scroll interval for a viewport-local pointer Y.
- *
- * Returns null when [pointerYPx] is outside both edge bands ([autoScrollZone]
- * reports NONE). Inside a band the interval scales linearly with depth: the
- * inner boundary scrolls slowest ([HomeAutoScroll.AUTO_SCROLL_MAX_INTERVAL_MS])
- * and the viewport edge scrolls fastest
- * ([HomeAutoScroll.AUTO_SCROLL_MIN_INTERVAL_MS]). Top and bottom are
- * symmetric for equal depths. Pointers past the viewport edge clamp to the
- * fastest interval. Pure, framework-free.
+ * Signed scroll velocity in px/s for a viewport-local pointer Y: negative scrolls
+ * up, positive scrolls down, zero outside both bands. Speed grows linearly with
+ * depth into the band from zero at its inner boundary to [maxSpeedPxPerSec] at
+ * the viewport edge; pointers past the edge clamp to the maximum. Top and bottom
+ * are symmetric for equal depths. Pure, framework-free.
  */
-fun autoScrollIntervalMs(
+fun autoScrollVelocityPxPerSec(
     pointerYPx: Float,
     viewportHeightPx: Int,
     edgePx: Int,
-): Long? {
-    require(viewportHeightPx >= 0) { "viewportHeightPx must be non-negative" }
-    require(edgePx > 0) { "edgePx must be positive" }
+    maxSpeedPxPerSec: Float,
+): Float {
+    require(maxSpeedPxPerSec >= 0f) { "maxSpeedPxPerSec must be non-negative" }
     val zone = autoScrollZone(pointerYPx, viewportHeightPx, edgePx)
-    if (zone == AutoScrollZone.NONE) return null
     val depthPx = when (zone) {
+        AutoScrollZone.NONE -> return 0f
         AutoScrollZone.TOP -> edgePx.toFloat() - pointerYPx
         AutoScrollZone.BOTTOM -> pointerYPx - (viewportHeightPx - edgePx).toFloat()
-        AutoScrollZone.NONE -> return null
     }.coerceIn(0f, edgePx.toFloat())
-    val fraction = depthPx / edgePx.toFloat()
-    val max = HomeAutoScroll.AUTO_SCROLL_MAX_INTERVAL_MS
-    val min = HomeAutoScroll.AUTO_SCROLL_MIN_INTERVAL_MS
-    return (max - fraction * (max - min).toFloat()).toLong()
+    val speed = depthPx / edgePx.toFloat() * maxSpeedPxPerSec
+    return if (zone == AutoScrollZone.TOP) -speed else speed
 }

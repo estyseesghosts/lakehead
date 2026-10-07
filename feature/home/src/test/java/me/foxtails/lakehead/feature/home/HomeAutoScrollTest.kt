@@ -1,13 +1,11 @@
 package me.foxtails.lakehead.feature.home
 
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * Covers auto-scroll helpers (`autoScrollZone`, `autoScrollStepPx`,
- * `autoScrollIntervalMs`) and `viewportRowsFor` division behaviour.
+ * Covers auto-scroll helpers (`autoScrollZone`, `autoScrollVelocityPxPerSec`) and `viewportRowsFor` division behaviour.
  */
 class HomeAutoScrollTest {
 
@@ -74,38 +72,37 @@ class HomeAutoScrollTest {
         assertEquals(AutoScrollZone.TOP, autoScrollZone(10f, viewportHeightPx = 100, edgePx = 96))
     }
 
+    private val maxSpeed = 1000f
+
     @Test
-    fun autoScrollStep_oneStride() {
-        assertEquals(108, autoScrollStepPx(108L))
+    fun autoScrollVelocity_outsideBand_zero() {
+        assertEquals(0f, autoScrollVelocityPxPerSec(900f, 1800, 96, maxSpeed), 0f)
+        assertEquals(0f, autoScrollVelocityPxPerSec(0f, 0, 96, maxSpeed), 0f)
     }
 
     @Test
-    fun autoScrollInterval_outsideBand_null() {
-        assertNull(autoScrollIntervalMs(900f, viewportHeightPx = 1800, edgePx = 96))
-        assertNull(autoScrollIntervalMs(0f, viewportHeightPx = 0, edgePx = 96))
+    fun autoScrollVelocity_signedAndSymmetric() {
+        val up = autoScrollVelocityPxPerSec(24f, 1800, 96, maxSpeed)
+        val down = autoScrollVelocityPxPerSec(1776f, 1800, 96, maxSpeed)
+        assertTrue(up < 0f && down > 0f)
+        assertEquals(-up, down, 0.001f)
     }
 
     @Test
-    fun autoScrollInterval_symmetricTopBottom_equal() {
-        val top = autoScrollIntervalMs(10f, viewportHeightPx = 1800, edgePx = 96)
-        val bottom = autoScrollIntervalMs(1790f, viewportHeightPx = 1800, edgePx = 96)
-        assertEquals(top, bottom)
+    fun autoScrollVelocity_proportionalToDepth_zeroAtInnerBoundary_maxAtEdge() {
+        assertEquals(0f, autoScrollVelocityPxPerSec(96f, 1800, 96, maxSpeed), 0f)
+        assertEquals(500f, autoScrollVelocityPxPerSec(1752f, 1800, 96, maxSpeed), 0.001f)
+        assertEquals(maxSpeed, autoScrollVelocityPxPerSec(1800f, 1800, 96, maxSpeed), 0.001f)
+        // Past the real viewport edge clamps rather than accelerating further.
+        assertEquals(maxSpeed, autoScrollVelocityPxPerSec(1900f, 1800, 96, maxSpeed), 0.001f)
+        assertEquals(-maxSpeed, autoScrollVelocityPxPerSec(-50f, 1800, 96, maxSpeed), 0.001f)
     }
 
     @Test
-    fun autoScrollInterval_monotonic_fasterDeeper() {
-        // Just inside the band scrolls slowest (near 300ms), the viewport
-        // edge scrolls fastest (120ms), with a mid-band value strictly between.
-        val inner = autoScrollIntervalMs(95f, viewportHeightPx = 1800, edgePx = 96)
-        val mid = autoScrollIntervalMs(48f, viewportHeightPx = 1800, edgePx = 96)
-        val deep = autoScrollIntervalMs(0f, viewportHeightPx = 1800, edgePx = 96)
-        assertEquals(HomeAutoScroll.AUTO_SCROLL_MIN_INTERVAL_MS, deep)
-        assertTrue(inner!! > mid!! && mid > deep!!)
-        assertTrue(inner in HomeAutoScroll.AUTO_SCROLL_MIN_INTERVAL_MS..
-            HomeAutoScroll.AUTO_SCROLL_MAX_INTERVAL_MS)
-        val innerBottom = autoScrollIntervalMs(1705f, viewportHeightPx = 1800, edgePx = 96)
-        val deepBottom = autoScrollIntervalMs(1800f, viewportHeightPx = 1800, edgePx = 96)
-        assertEquals(HomeAutoScroll.AUTO_SCROLL_MIN_INTERVAL_MS, deepBottom)
-        assertEquals(inner, innerBottom)
+    fun autoScrollBand_isMeasuredFromTheViewportEdge() {
+        // A pointer 40px above the true bottom of a 2000px viewport is in the band,
+        // even though it would be mid-screen against a shorter usable height.
+        assertEquals(AutoScrollZone.BOTTOM, autoScrollZone(1960f, 2000, 96))
+        assertEquals(AutoScrollZone.NONE, autoScrollZone(1960f, 2400, 96))
     }
 }

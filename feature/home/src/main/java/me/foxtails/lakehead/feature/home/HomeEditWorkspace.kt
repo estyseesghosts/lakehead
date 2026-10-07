@@ -16,90 +16,53 @@ import kotlin.math.roundToLong
  * second, synthetic scroll maximum.
  */
 internal object HomeEditWorkspace {
-    /** Rows kept measured beyond the area an auto-scroll step is about to reveal. */
-    const val LOOKAHEAD_ROWS: Long = 4L
-
-    /** Upper bound on workspace height, kept well under Compose's measure constraint limit. */
-    const val MAX_HEIGHT_PX: Long = 200_000L
-}
-
-/** Most rows a workspace may span at [rowStridePx], never below one. */
-internal fun workspaceRowCap(rowStridePx: Long): Long {
-    require(rowStridePx > 0L) { "rowStridePx must be positive" }
-    return maxOf(1L, HomeEditWorkspace.MAX_HEIGHT_PX / rowStridePx)
+    /**
+     * Empty rows the gap normaliser tolerates below the last tile. A moved tile
+     * may therefore start this far under the committed bottom and no further.
+     */
+    const val TRAILING_EMPTY_ROWS: Long = 2L
 }
 
 /**
- * Workspace at MOVE start: the committed content bottom plus the rows of one
- * visible edit area and the lookahead, so the user can drag below the last tile
- * and the first auto-scroll step already has measured room. The committed
- * bottom is never cut by the cap; only the added room is.
+ * Workspace of a MOVE: the committed bottom, plus the [HomeEditWorkspace.TRAILING_EMPTY_ROWS]
+ * the normaliser allows, plus the moved tile's own [spanRows]. A drop deeper than
+ * that would be closed up on release, so there is nothing further to reach. The
+ * committed bottom itself is never cut.
  */
-internal fun initialWorkspaceBottomRow(
-    extent: GridVerticalExtent,
-    usableHeightPx: Int,
-    rowStridePx: Long,
-): Long {
+internal fun moveWorkspaceBottomRow(extent: GridVerticalExtent, spanRows: Int): Long {
     val committedBottom = extent.occupiedMaxRowExclusive.coerceAtLeast(0L)
-    val withRoom = committedBottom + viewportRowsFor(usableHeightPx, rowStridePx) +
-        HomeEditWorkspace.LOOKAHEAD_ROWS
-    return maxOf(committedBottom, minOf(withRoom, workspaceRowCap(rowStridePx)))
+    return committedBottom + HomeEditWorkspace.TRAILING_EMPTY_ROWS + spanRows.coerceAtLeast(1)
 }
 
 /**
- * Smallest row count whose content, with [clearancePx] after it, reaches
- * [contentBottomPx] (a content-space Y). The rest offset is included, exactly as
- * [workspaceBottomPx] includes it.
+ * Largest scroll offset the committed content alone allows (no workspace). The
+ * release path animates the scroll back to at most this before the workspace is
+ * dropped, so the content never jumps when it collapses.
  */
-internal fun workspaceRowsToCover(
-    contentBottomPx: Long,
-    restOffsetYPx: Int,
-    rowStridePx: Long,
-    rowGapPx: Int,
-    clearancePx: Int,
-): Long {
-    require(rowStridePx > 0L) { "rowStridePx must be positive" }
-    val need = contentBottomPx - clearancePx + rowGapPx - restOffsetYPx
-    if (need <= 0L) return 0L
-    return (need + rowStridePx - 1L) / rowStridePx
-}
-
-/**
- * Next workspace for a bottom auto-scroll step that will reveal content down to
- * [revealedBottomPx]: grows to cover it plus [HomeEditWorkspace.LOOKAHEAD_ROWS],
- * never shrinks, never exceeds [workspaceRowCap]. Returns [current] when it
- * already covers the step.
- */
-internal fun extendedWorkspaceBottomRow(
-    current: Long,
-    revealedBottomPx: Long,
+internal fun committedMaxScrollPx(
+    extent: GridVerticalExtent,
     metrics: HomeGridMetrics,
-    clearancePx: Int,
-): Long {
-    val stride = metrics.rowStrideCells
-    val cover = workspaceRowsToCover(
-        contentBottomPx = revealedBottomPx,
-        restOffsetYPx = metrics.restOffsetYPx.roundToLong().toInt(),
-        rowStridePx = stride,
-        rowGapPx = metrics.rowGapPx.toInt(),
-        clearancePx = clearancePx,
-    )
-    val wanted = minOf(cover + HomeEditWorkspace.LOOKAHEAD_ROWS, workspaceRowCap(stride))
-    return maxOf(current, wanted)
-}
+    fullViewportPx: Int,
+    bottomClearancePx: Int,
+): Int = (
+    contentContainerHeightPx(
+        naturalHeightPx = workspaceBottomPx(extent.occupiedMaxRowExclusive.coerceAtLeast(0L), metrics),
+        fullHeightPx = fullViewportPx,
+        bottomClearancePx = bottomClearancePx,
+    ) - fullViewportPx
+    ).coerceAtLeast(0)
 
 /**
- * Measured-content floor: the full viewport, or while a MOVE is active the
+ * Measured-content floor: the full viewport, or while a MOVE (or its release settle) holds a
  * edit workspace's bottom (plus clearance) when that is taller. Pure
  * derivation; the workspace row itself stays owned by the composable.
  */
 internal fun moveWorkspaceFloorPx(
     workspaceBottomRow: Long?,
-    moveActive: Boolean,
     metrics: HomeGridMetrics,
     fullViewportPx: Int,
     bottomClearancePx: Int,
-): Int = workspaceBottomRow?.takeIf { moveActive }?.let { rows ->
+): Int = workspaceBottomRow?.let { rows ->
     contentContainerHeightPx(
         naturalHeightPx = workspaceBottomPx(rows, metrics),
         fullHeightPx = fullViewportPx,

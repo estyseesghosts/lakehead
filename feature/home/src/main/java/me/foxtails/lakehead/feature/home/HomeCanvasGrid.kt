@@ -360,33 +360,20 @@ internal fun HomeCanvasGrid(
                 rowStridePx = rowStridePx,
             )
             val committedExtent = committed.extent
-            val moveActive = moveDrag != null
             val moveTickItemId = moveDrag?.itemId
-            // Transient edit workspace (6.1): exists only while a MOVE is active,
-            // keyed by the moved item so it starts fresh with each MOVE and is
-            // gone the moment the MOVE ends, however it ends. It sizes the
-            // measured content only (below); candidates and legality never read
-            // it. The ticker extends it before scrolling down.
-            var workspaceBottomRow by remember(moveTickItemId) {
-                mutableStateOf<Long?>(
-                    if (moveTickItemId == null) {
-                        null
-                    } else {
-                        initialWorkspaceBottomRow(committedExtent, availableHeightPx, rowStridePx)
-                    },
-                )
-            }
+            // Transient edit workspace: set when a MOVE starts, held through the
+            // release settle (the scroll animates back inside the committed range
+            // first) and then dropped. It sizes the measured content only;
+            // candidates and legality never read it.
+            var workspaceBottomRow by remember { mutableStateOf<Long?>(null) }
             val committedRest = committed.rest
             // Edge auto-scroll for a held MOVE (the ONLY scroll driver): while the
-            // pointer stays in an edge band, scroll the real `ScrollState` one row
-            // stride per proximity-scaled interval, then recompute the candidate
-            // from the unchanged pointer and the new scroll. Edge entry dwells
-            // 200ms before the first step; the interval scales from 300ms at the
-            // inner band boundary down to 120ms at the viewport edge, and the
-            // scroll continues until the pointer leaves the band, the MOVE ends or
-            // the top is reached. Before a downward step the workspace is extended
-            // so the real scroll range already covers it. Scrolling never calls
-            // onMoveTile: release stays the sole commit.
+            // pointer is within the edge band of the real viewport the real
+            // `ScrollState` scrolls every frame at a speed proportional to depth,
+            // and the candidate is recomputed from the unchanged pointer and the
+            // new scroll. The scroll range is the transient workspace: committed
+            // bottom + the empty rows the normaliser allows + the tile's span.
+            // Scrolling never calls onMoveTile: release stays the sole commit.
             val autoScrollEdgePx = with(density) {
                 HomeAutoScroll.AUTO_SCROLL_EDGE_DP.dp.roundToPx()
             }.coerceAtLeast(1)
@@ -408,35 +395,42 @@ internal fun HomeCanvasGrid(
             // Ticker inputs stay fresh through snapshot holders; the ticker itself
             // restarts only with the moved item (see [runMoveEdgeAutoScroll]).
             val latestGridMetrics = rememberUpdatedState(gridMetrics)
-            val bandHeightPx = rememberUpdatedState(availableHeightPx)
             val scrollViewportPx = rememberUpdatedState(fullViewportPx)
             val bottomClearancePx = rememberUpdatedState(viewportStyle.bottomClearancePx)
+            val autoScrollMaxSpeedPx = with(density) {
+                HomeAutoScroll.AUTO_SCROLL_MAX_SPEED_DP_PER_SEC.dp.toPx()
+            }
+            val moveSpanRows = moveDrag?.span?.rows ?: 1
             LaunchedEffect(moveTickItemId) {
-                if (moveTickItemId == null) return@LaunchedEffect
-                runMoveEdgeAutoScroll(
-                    scrollState = scrollState,
-                    isMoveActive = { editState.moveDrag?.itemId == moveTickItemId },
-                    pointer = { moveEdgePointer.position },
-                    bandHeightPx = { bandHeightPx.value },
-                    scrollViewportPx = { scrollViewportPx.value },
-                    edgePx = autoScrollEdgePx,
-                    stepPx = { autoScrollStepPx(latestGridMetrics.value.rowStrideCells) },
-                    extendWorkspace = { revealedBottomPx ->
-                        workspaceBottomRow = extendedWorkspaceBottomRow(
-                            current = workspaceBottomRow ?: 0L,
-                            revealedBottomPx = revealedBottomPx,
-                            metrics = latestGridMetrics.value,
-                            clearancePx = bottomClearancePx.value,
-                        )
-                    },
-                    onScrolled = { held ->
-                        editState = editState.moveTo(
-                            pointerXPx = held.x,
-                            pointerYPxViewport = held.y,
-                            scrollYPx = scrollState.value.toFloat(),
-                        )
-                    },
-                )
+                if (moveTickItemId != null) {
+                    workspaceBottomRow = moveWorkspaceBottomRow(committedExtent, moveSpanRows)
+                    runMoveEdgeAutoScroll(
+                        scrollState = scrollState,
+                        isMoveActive = { editState.moveDrag?.itemId == moveTickItemId },
+                        pointer = { moveEdgePointer.position },
+                        viewportPx = { scrollViewportPx.value },
+                        edgePx = autoScrollEdgePx,
+                        maxSpeedPxPerSec = autoScrollMaxSpeedPx,
+                        onScrolled = { held ->
+                            editState = editState.moveTo(
+                                pointerXPx = held.x,
+                                pointerYPxViewport = held.y,
+                                scrollYPx = scrollState.value.toFloat(),
+                            )
+                        },
+                    )
+                } else if (workspaceBottomRow != null) {
+                    // Release: glide back inside the committed range before the
+                    // workspace collapses, so the content never jumps.
+                    val limit = committedMaxScrollPx(
+                        extent = committedExtent,
+                        metrics = latestGridMetrics.value,
+                        fullViewportPx = scrollViewportPx.value,
+                        bottomClearancePx = bottomClearancePx.value,
+                    )
+                    if (scrollState.value > limit) scrollState.animateScrollTo(limit)
+                    workspaceBottomRow = null
+                }
             }
             // A3 floating container: HomeGridLayout measures the lowest tile bottom
             // plus exactly the bottom clearance, floored at the full viewport, so
@@ -449,7 +443,6 @@ internal fun HomeCanvasGrid(
             // separately computed scroll maximum anywhere.
             val minHeightPx = moveWorkspaceFloorPx(
                 workspaceBottomRow = workspaceBottomRow,
-                moveActive = moveActive,
                 metrics = gridMetrics,
                 fullViewportPx = fullViewportPx,
                 bottomClearancePx = viewportStyle.bottomClearancePx,

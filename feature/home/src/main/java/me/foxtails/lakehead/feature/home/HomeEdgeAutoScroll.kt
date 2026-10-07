@@ -1,79 +1,51 @@
 package me.foxtails.lakehead.feature.home
 
 import androidx.compose.foundation.ScrollState
+import androidx.compose.foundation.gestures.scrollBy
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.geometry.Offset
-import kotlinx.coroutines.delay
+import kotlin.math.abs
 
 /**
- * Pure scroll target for one auto-scroll step: [AutoScrollZone.BOTTOM] moves
- * down by [stepPx], [AutoScrollZone.TOP] moves up by [stepPx] and stops at the
- * top, [AutoScrollZone.NONE] stays put. The real `ScrollState` clamps the
- * downward end to its own measured maximum.
- */
-internal fun nextAutoScrollTarget(zone: AutoScrollZone, scrollPx: Int, stepPx: Int): Int {
-    require(scrollPx >= 0) { "scrollPx must be non-negative" }
-    require(stepPx > 0) { "stepPx must be positive" }
-    return when (zone) {
-        AutoScrollZone.BOTTOM -> (scrollPx.toLong() + stepPx).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
-        AutoScrollZone.TOP -> (scrollPx - stepPx).coerceAtLeast(0)
-        AutoScrollZone.NONE -> scrollPx
-    }
-}
-
-/**
- * Edge auto-scroll for a held MOVE: while the pointer stays in an edge band the
- * real [scrollState] moves one [stepPx] per proximity-scaled interval after an
- * entry dwell, and the candidate is then recomputed from the unchanged pointer
- * and the new current scroll through [onScrolled]. Nothing is remembered about
- * earlier steps: no budget, no baseline, no copy of the frame. It runs until
- * [isMoveActive] turns false (the caller cancels it with the MOVE) and a
- * downward step scrolls only as far as the measured content allows, so reaching
- * the top or the end of the workspace simply stops moving.
- *
- * Before each downward step [extendWorkspace] is given the content Y the step
- * will reveal, so the workspace (and with it the real scroll range) already
- * covers it. Scrolling never commits anything.
+ * Edge auto-scroll for a held MOVE: every frame the real [scrollState] moves by
+ * the pointer's depth-proportional velocity ([autoScrollVelocityPxPerSec]) and
+ * the candidate is then recomputed from the unchanged pointer and the new
+ * scroll through [onScrolled]. Sub-pixel remainders carry to the next frame, so
+ * speed is independent of frame rate. It runs until [isMoveActive] turns false
+ * (the caller cancels it with the MOVE). The scroll range is whatever the
+ * measured workspace allows, so reaching either end simply stops moving.
+ * Scrolling never commits anything.
  */
 internal suspend fun runMoveEdgeAutoScroll(
     scrollState: ScrollState,
     isMoveActive: () -> Boolean,
     pointer: () -> Offset?,
-    bandHeightPx: () -> Int,
-    scrollViewportPx: () -> Int,
+    viewportPx: () -> Int,
     edgePx: Int,
-    stepPx: () -> Int,
-    extendWorkspace: (revealedBottomPx: Long) -> Unit,
+    maxSpeedPxPerSec: Float,
     onScrolled: (pointer: Offset) -> Unit,
 ) {
-    var dwellZone = AutoScrollZone.NONE
+    var lastFrameNanos = 0L
+    var carryPx = 0f
     while (isMoveActive()) {
+        val frameNanos = withFrameNanos { it }
+        val elapsedSec = if (lastFrameNanos == 0L) 0f else (frameNanos - lastFrameNanos) / 1e9f
+        lastFrameNanos = frameNanos
         val held = pointer()
-        val zone = if (held == null) {
-            AutoScrollZone.NONE
+        val velocity = if (held == null) {
+            0f
         } else {
-            autoScrollZone(held.y, bandHeightPx(), edgePx)
+            autoScrollVelocityPxPerSec(held.y, viewportPx(), edgePx, maxSpeedPxPerSec)
         }
-        if (held == null || zone == AutoScrollZone.NONE) {
-            dwellZone = AutoScrollZone.NONE
-            delay(HomeAutoScroll.AUTO_SCROLL_MAX_INTERVAL_MS)
+        if (held == null || velocity == 0f) {
+            carryPx = 0f
             continue
         }
-        if (zone != dwellZone) {
-            // Edge entry or zone change: dwell, then re-read the pointer.
-            dwellZone = zone
-            delay(HomeAutoScroll.AUTO_SCROLL_DWELL_MS)
-            continue
-        }
-        val step = stepPx()
-        if (zone == AutoScrollZone.BOTTOM) {
-            extendWorkspace(scrollState.value.toLong() + scrollViewportPx() + step)
-        }
-        val before = scrollState.value
-        scrollState.scrollTo(nextAutoScrollTarget(zone, before, step))
-        if (scrollState.value != before) onScrolled(held)
-        delay(
-            autoScrollIntervalMs(held.y, bandHeightPx(), edgePx)
-                ?: HomeAutoScroll.AUTO_SCROLL_MAX_INTERVAL_MS,
-        )
+        carryPx += velocity * elapsedSec
+        val wholePx = carryPx.toInt()
+        if (wholePx == 0) continue
+        carryPx -= wholePx
+        val consumed = scrollState.scrollBy(wholePx.toFloat())
+        if (abs(consumed) > 0f) onScrolled(held)
     }
 }
