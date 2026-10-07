@@ -73,7 +73,7 @@ internal fun HomeGridOverlay(
     // ([right - touch, right] x [bottom - touch, bottom]), never
     // outward, so edge tiles never clip.
     val controlItemId = editState.selectedTileId
-    if (controlItemId != null) {
+    if (controlItemId != null && moveDrag == null) {
         val activeTile = tiles.find { it.itemId == controlItemId }
         if (activeTile != null) {
             val density = LocalDensity.current

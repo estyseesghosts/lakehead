@@ -1,5 +1,6 @@
 package me.foxtails.lakehead.feature.home
 
+import androidx.compose.ui.geometry.Offset
 import me.foxtails.lakehead.core.grid.GridRules
 import me.foxtails.lakehead.core.grid.GridSpan
 import me.foxtails.lakehead.core.model.LogicalPosition
@@ -49,6 +50,25 @@ object MoveDragMath {
         contentX = pointerXPx - frame.grabOffsetXPx,
         contentY = frame.metrics.contentY(pointerYPxViewport, currentScrollPx) - frame.grabOffsetYPx,
     )
+
+    /**
+     * Translation that carries the lifted tile from its committed cell to the
+     * finger: `(pointer + scroll) − grabOffset − committedTopLeft`. Unsnapped and
+     * unclamped (the tile follows the finger; the outline shows where it lands).
+     */
+    fun liftTranslation(
+        move: DragState.Move,
+        pointerXPx: Float,
+        pointerYPxViewport: Float,
+        currentScrollPx: Float,
+    ): Offset {
+        val committed = move.metrics.rect(move.originalPosition, move.span)
+        return Offset(
+            x = pointerXPx - move.grabOffsetXPx - committed.left,
+            y = move.metrics.contentY(pointerYPxViewport, currentScrollPx) -
+                move.grabOffsetYPx - committed.top,
+        )
+    }
 
     /** Validates the complete occupied span of [request] before building a domain position. */
     internal fun validate(request: RequestedCell, columns: Int, span: GridSpan): MoveCellResult {

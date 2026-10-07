@@ -5,7 +5,10 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.semantics
@@ -13,6 +16,7 @@ import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.zIndex
 import me.foxtails.lakehead.core.designsystem.AppSymbol
 import me.foxtails.lakehead.core.designsystem.AppTile
+import me.foxtails.lakehead.core.designsystem.AppTileDefaults
 import me.foxtails.lakehead.core.designsystem.AppTileState
 import me.foxtails.lakehead.core.designsystem.PinnedTileShortcut
 import me.foxtails.lakehead.core.grid.GridSpan
@@ -88,6 +92,7 @@ internal fun HomeCanvasTile(
     onShortcutClick: (String) -> Unit = {},
     onSelect: (ItemId) -> Unit = {},
     onEnterWiggle: (HomeRenderTile) -> Unit = {},
+    lift: (() -> Offset)? = null,
 ) {
     val rawLabel = tile.label
     val label = if (rawLabel.isNullOrBlank()) UNAVAILABLE_LABEL else rawLabel
@@ -133,13 +138,29 @@ internal fun HomeCanvasTile(
     }
     // W1 wrapper: recess scale + selected-above z-order. Wallpaper < non-selected
     // < selected; handles/overlays stay siblings above (owned by the grid).
+    // A lifted tile follows the finger: the translation is read inside the layer
+    // block, so pointer events invalidate only this layer, never the grid.
+    val liftTarget = if (lift != null && isEditing) 1f else 0f
+    val liftProgress by animateFloatAsState(targetValue = liftTarget, label = "moveLift")
+    val liftShadowPx = with(LocalDensity.current) { LIFTED_ELEVATION_DP.dp.toPx() }
     Box(
         modifier = Modifier
-            .graphicsLayer(
-                scaleX = animatedScale,
-                scaleY = animatedScale,
-            )
-            .zIndex(if (isSelected) 1f else 0f),
+            .graphicsLayer {
+                val raised = 1f + (LIFTED_SCALE - 1f) * liftProgress
+                scaleX = animatedScale * raised
+                scaleY = animatedScale * raised
+                if (lift != null && isEditing) {
+                    val offset = lift()
+                    translationX = offset.x
+                    translationY = offset.y
+                }
+                if (liftProgress > 0f) {
+                    shadowElevation = liftShadowPx * liftProgress
+                    shape = AppTileDefaults.TileShape
+                    clip = false
+                }
+            }
+            .zIndex(if (isEditing) 2f else if (isSelected) 1f else 0f),
     ) {
     AppTile(
         state = AppTileState(
@@ -212,6 +233,12 @@ internal fun HomeCanvasTile(
     )
     }
 }
+
+/** Render-only scale of the tile lifted by a move. */
+internal const val LIFTED_SCALE: Float = 1.06f
+
+/** Shadow elevation of the tile lifted by a move, in dp. */
+internal const val LIFTED_ELEVATION_DP: Int = 8
 
 /** Label fallback when a tile has no joined metadata label. */
 internal const val UNAVAILABLE_LABEL: String = "Unavailable app"

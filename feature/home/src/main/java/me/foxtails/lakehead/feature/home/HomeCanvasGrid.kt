@@ -19,6 +19,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.pointer.PointerInputChange
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
@@ -601,6 +602,23 @@ internal fun HomeCanvasGrid(
                         },
                         onEnterWiggle = { entered ->
                             editState = editState.enterOnLongPress(entered.itemId)
+                        },
+                        lift = if (moveDrag != null && moveDrag.itemId == tile.itemId) {
+                            {
+                                val held = moveEdgePointer.position
+                                if (held == null) {
+                                    Offset.Zero
+                                } else {
+                                    MoveDragMath.liftTranslation(
+                                        move = moveDrag,
+                                        pointerXPx = held.x,
+                                        pointerYPxViewport = held.y,
+                                        currentScrollPx = scrollState.value.toFloat(),
+                                    )
+                                }
+                            }
+                        } else {
+                            null
                         },
                     )
                 }
