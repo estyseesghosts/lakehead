@@ -17,7 +17,7 @@ class AppIconSnapshotCacheTest {
     fun sameComponentInDifferentProfilesHasDistinctSnapshots() {
         val personalSnapshot = icon(personal, "same.app", 1)
         val workSnapshot = icon(work, "same.app", 2)
-        val cache = AppIconSnapshotCache(maxEntries = 2)
+        val cache = AppIconSnapshotCache()
 
         cache.replaceAll(listOf(personalSnapshot, workSnapshot))
 
@@ -32,7 +32,7 @@ class AppIconSnapshotCacheTest {
         val retainedOld = icon(personal, "retained.app", 2)
         val retainedFresh = icon(personal, "retained.app", 3)
         val added = icon(work, "added.app", 4)
-        val cache = AppIconSnapshotCache(maxEntries = 4)
+        val cache = AppIconSnapshotCache()
         cache.replaceAll(listOf(removed, retainedOld))
 
         cache.replaceAll(listOf(retainedFresh, added))
@@ -44,24 +44,27 @@ class AppIconSnapshotCacheTest {
     }
 
     @Test
-    fun evictionIsFifoAndDeterministicIncludingRepeatedIdentity() {
+    fun repeatedIdentityKeepsLastSnapshotAtItsLastPosition() {
         val aOld = icon(personal, "a.app", 1)
         val b = icon(personal, "b.app", 2)
         val aNew = icon(personal, "a.app", 3)
-        val c = icon(personal, "c.app", 4)
-        val cache = AppIconSnapshotCache(maxEntries = 2)
+        val cache = AppIconSnapshotCache()
 
-        cache.replaceAll(listOf(aOld, b, aNew, c))
+        cache.replaceAll(listOf(aOld, b, aNew))
 
-        assertEquals(listOf(aNew.identity, c.identity), cache.snapshot().keys.toList())
-        assertNull(cache[b.identity])
+        assertEquals(listOf(b.identity, aNew.identity), cache.snapshot().keys.toList())
         assertEquals(aNew, cache[aNew.identity])
     }
 
     @Test
-    fun rejectsNonPositiveEntryLimits() {
-        assertThrows(IllegalArgumentException::class.java) { AppIconSnapshotCache(0) }
-        assertThrows(IllegalArgumentException::class.java) { AppIconSnapshotCache(-1) }
+    fun retainsEveryEntryOfALargeCatalogue() {
+        val all = (0 until 500).map { icon(personal, "app$it", it) }
+        val cache = AppIconSnapshotCache()
+
+        cache.replaceAll(all)
+
+        assertEquals(500, cache.snapshot().size)
+        assertEquals(all.map { it.identity }, cache.snapshot().keys.toList())
     }
 
     @Test
@@ -73,7 +76,7 @@ class AppIconSnapshotCacheTest {
         exposedBytes[1] = 99
         assertEquals(listOf<Byte>(1, 2, 3), snapshot.pngBytes.toList())
 
-        val cache = AppIconSnapshotCache(maxEntries = 1)
+        val cache = AppIconSnapshotCache()
         cache.replaceAll(listOf(snapshot))
         val published = cache.snapshot()
         assertThrows(UnsupportedOperationException::class.java) {
@@ -102,7 +105,7 @@ class AppIconSnapshotCacheTest {
     fun invalidateRemovesAllEntriesAndAllowsSubsequentReplacement() {
         val first = icon(personal, "first.app", 1)
         val second = icon(work, "second.app", 2)
-        val cache = AppIconSnapshotCache(maxEntries = 2)
+        val cache = AppIconSnapshotCache()
         cache.replaceAll(listOf(first, second))
 
         cache.invalidate()

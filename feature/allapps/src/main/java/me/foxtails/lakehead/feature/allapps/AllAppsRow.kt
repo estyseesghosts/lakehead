@@ -105,6 +105,14 @@ fun AllAppsRow(
                     bitmap = icon,
                     modifier = Modifier.testTag(ALL_APPS_ICON_TAG),
                 )
+            } else {
+                // A missing icon (failed lookup/encode) keeps the label aligned and stays visible.
+                Box(
+                    modifier = Modifier
+                        .testTag(ALL_APPS_ICON_PLACEHOLDER_TAG)
+                        .size(dimensions.symbolSize)
+                        .border(1.dp, onSurface.copy(alpha = 0.38f), CircleShape),
+                )
             }
             BasicText(
                 text = entry.displayLabel,
@@ -183,6 +191,9 @@ const val ALL_APPS_ROW_TAG: String = "allapps-row"
 
 /** Test tag on a directly rendered pre-decoded row icon (testing hook only). */
 const val ALL_APPS_ICON_TAG: String = "allapps-row-icon"
+
+/** Test tag on the placeholder shown when a row has no icon (testing hook only). */
+const val ALL_APPS_ICON_PLACEHOLDER_TAG: String = "allapps-row-icon-placeholder"
 
 /** Test tag on the visual-only Remove placeholder slot (testing hook only). */
 const val ALL_APPS_REMOVE_TAG: String = "allapps-remove"

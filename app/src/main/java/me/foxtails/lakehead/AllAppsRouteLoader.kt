@@ -33,8 +33,8 @@ import me.foxtails.lakehead.platform.launcherapps.LauncherAppsIconSnapshotRefres
  * [SupervisorJob], collects [AppCatalogue.apps], joins with home membership from
  * [HomePlacementRepository], and projects [AllAppsViewState]. [stop] cancels all jobs.
  *
- * Icons are refreshed for ALL catalogue entries (not just placed ones) and decoded into a
- * separate [DecodedHomeIconCache] instance so All Apps and Home icon caches are independent.
+ * Icons are refreshed for ALL catalogue entries and read from the same encoded and decoded
+ * caches that [HomeRouteLoader] uses.
  */
 internal class AllAppsRouteLoader(
     private val homeId: HomeId,
@@ -42,7 +42,7 @@ internal class AllAppsRouteLoader(
     private val catalogue: AppCatalogue,
     private val iconRefresher: LauncherAppsIconSnapshotRefresher,
     private val encodedIcons: AppIconSnapshotCache,
-    private val decodedIcons: DecodedHomeIconCache<ImageBitmap>,
+    private val decodedIcons: DecodedIconCache<ImageBitmap>,
     private val columnsBound: Int = 5,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) {
@@ -155,7 +155,7 @@ internal class AllAppsRouteLoader(
                 throw cancelled
             } catch (_: Exception) {
                 // Preserve last-good decoded icons on transient refresh failure;
-                // do not invalidate the (now-isolated) encoded cache.
+                // do not invalidate the shared encoded cache.
                 return@withLock
             }
             val decoded = withContext(ioDispatcher) { decodedIcons.replace(encodedIcons.snapshot()) }

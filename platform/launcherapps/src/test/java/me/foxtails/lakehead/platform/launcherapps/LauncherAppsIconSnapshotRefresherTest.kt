@@ -21,7 +21,7 @@ class LauncherAppsIconSnapshotRefresherTest {
     fun sameComponentInDifferentProfilesGetsSeparateSnapshots() = runTest {
         val personal = entry("0")
         val work = entry("10")
-        val cache = AppIconSnapshotCache(maxEntries = 10)
+        val cache = AppIconSnapshotCache()
         val refresher = refresher(cache) { identity -> TestIcon(identity.profileId.value.toByte()) }
 
         refresher.refresh(listOf(personal, work))
@@ -36,7 +36,7 @@ class LauncherAppsIconSnapshotRefresherTest {
         val present = entry("0", "present")
         val missing = entry("0", "missing")
         val failed = entry("0", "failed")
-        val cache = AppIconSnapshotCache(maxEntries = 10)
+        val cache = AppIconSnapshotCache()
         val refresher = LauncherAppsIconSnapshotRefresher(
             lookup = LauncherAppIconLookup { identity ->
                 when (identity.component.className) {
@@ -65,7 +65,7 @@ class LauncherAppsIconSnapshotRefresherTest {
         val dispatcher = Executors.newSingleThreadExecutor { task ->
             Thread(task, "icon-io-test")
         }.asCoroutineDispatcher()
-        val cache = AppIconSnapshotCache(maxEntries = 10)
+        val cache = AppIconSnapshotCache()
         val checks = mutableListOf<Boolean>()
         fun checkDispatcher() {
             checks += Thread.currentThread().name == "icon-io-test"
@@ -93,7 +93,7 @@ class LauncherAppsIconSnapshotRefresherTest {
     fun replacementRemovesNoLongerPresentAndFailedOldSnapshots() = runTest {
         val retained = entry("0", "retained")
         val removed = entry("0", "removed")
-        val cache = AppIconSnapshotCache(maxEntries = 10)
+        val cache = AppIconSnapshotCache()
         val available = mutableSetOf(retained.identity, removed.identity)
         val refresher = refresher(cache) { identity ->
             if (identity in available) TestIcon(1) else null
@@ -112,7 +112,7 @@ class LauncherAppsIconSnapshotRefresherTest {
     fun oversizedEncoderOutputIsRejectedAndSnapshotBytesStayBounded() = runTest {
         val accepted = entry("0", "accepted")
         val oversized = entry("0", "oversized")
-        val cache = AppIconSnapshotCache(maxEntries = 10)
+        val cache = AppIconSnapshotCache()
         val identityLookup = LauncherAppsIconSnapshotRefresher(
             lookup = LauncherAppIconLookup { identity ->
                 TestIcon(if (identity == oversized.identity) 2 else 1)
@@ -133,31 +133,14 @@ class LauncherAppsIconSnapshotRefresherTest {
     }
 
     @Test
-    fun separateEncodedCachesAreIsolatedDuringConsecutiveRefreshes() = runTest {
-        val personal = entry("0")
-        val work = entry("10")
-        val extra = entry("0", "extra")
-        val homeCache = AppIconSnapshotCache(maxEntries = 64)
-        val allAppsCache = AppIconSnapshotCache(maxEntries = 64)
+    fun refreshOfALargeCatalogueCachesEveryEntry() = runTest {
+        val entries = (0 until 500).map { entry("0", "app$it") }
+        val cache = AppIconSnapshotCache()
+        val refresher = refresher(cache) { TestIcon(1) }
 
-        val homeRefresher = refresher(homeCache) { TestIcon(1) }
-        val allAppsRefresher = refresher(allAppsCache) { TestIcon(2) }
+        refresher.refresh(entries)
 
-        // Home refreshes with only placed entry (personal)
-        homeRefresher.refresh(listOf(personal))
-        // AllApps refreshes with all entries
-        allAppsRefresher.refresh(listOf(personal, work, extra))
-
-        // Home cache only has placed entry
-        assertEquals(setOf(personal.identity), homeCache.snapshot().keys)
-        // AllApps cache has all entries
-        assertEquals(setOf(personal.identity, work.identity, extra.identity), allAppsCache.snapshot().keys)
-
-        // Now Home refreshes again with different subset — should not affect AllApps
-        homeRefresher.refresh(listOf(personal, work))
-        assertEquals(setOf(personal.identity, work.identity), homeCache.snapshot().keys)
-        // AllApps cache unchanged
-        assertEquals(setOf(personal.identity, work.identity, extra.identity), allAppsCache.snapshot().keys)
+        assertEquals(entries.map { it.identity }.toSet(), cache.snapshot().keys)
     }
 
     @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)

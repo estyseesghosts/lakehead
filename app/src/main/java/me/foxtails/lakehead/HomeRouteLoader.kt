@@ -48,7 +48,7 @@ internal class HomeRouteLoader(
     private val catalogue: AppCatalogue,
     private val iconRefresher: LauncherAppsIconSnapshotRefresher,
     private val encodedIcons: AppIconSnapshotCache,
-    private val decodedIcons: DecodedHomeIconCache<ImageBitmap>,
+    private val decodedIcons: DecodedIconCache<ImageBitmap>,
     private val viewport: HomeRouteViewport,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) {
@@ -265,15 +265,14 @@ internal class HomeRouteLoader(
                 if (revision != catalogueGeneration) return
                 placements
             } ?: return
-            val placedIdentities = persisted.mapTo(HashSet()) { it.appIdentity }
-            val placedEntries = entries.filter { it.identity in placedIdentities }
             try {
-                iconRefresher.refresh(placedEntries)
+                // The icon cache is shared with All Apps and is driven by the whole catalogue.
+                iconRefresher.refresh(entries)
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: Exception) {
                 // Preserve last-good decoded icons on transient refresh failure;
-                // do not invalidate the (now-isolated) encoded cache.
+                // do not invalidate the shared encoded cache.
                 return@withLock
             }
             val decoded = withContext(ioDispatcher) { decodedIcons.replace(encodedIcons.snapshot()) }

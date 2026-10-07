@@ -5,14 +5,15 @@ import me.foxtails.lakehead.platform.launcherapps.AppIconSnapshot
 import java.util.Collections
 import java.util.LinkedHashMap
 
-/** Decodes platform PNG snapshots away from composition and retains a bounded immutable view. */
-internal class DecodedHomeIconCache<T : Any>(
-    private val maxEntries: Int,
+/**
+ * Decodes platform PNG snapshots away from composition and retains an immutable view for the
+ * whole catalogue. Shared by Home and All Apps. Unbounded by design: entries track the
+ * catalogue and each decoded icon is small.
+ */
+internal class DecodedIconCache<T : Any>(
     private val decoder: (ByteArray) -> T?,
 ) {
     private val entries = LinkedHashMap<AppIdentity, T>()
-
-    init { require(maxEntries > 0) }
 
     /**
      * Decodes [snapshots] and replaces the internal map. If every decode attempt fails or the
@@ -25,7 +26,6 @@ internal class DecodedHomeIconCache<T : Any>(
         snapshots.forEach { (identity, snapshot) ->
             val decoded = try { decoder(snapshot.pngBytes) } catch (_: Exception) { null }
             if (decoded != null) newEntries[identity] = decoded
-            while (newEntries.size > maxEntries) newEntries.remove(newEntries.keys.first())
         }
         if (newEntries.isNotEmpty()) {
             entries.clear()

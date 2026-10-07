@@ -13,6 +13,8 @@ import android.os.UserManager
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import me.foxtails.lakehead.core.model.AppIdentity
 import me.foxtails.lakehead.core.model.LauncherAppEntry
@@ -44,8 +46,16 @@ class LauncherAppsIconSnapshotRefresher(
     private val cache: AppIconSnapshotCache,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) {
+    private val refreshMutex = Mutex()
+
     /** Resolves icons for the supplied catalogue without modifying its entries or labels. */
     suspend fun refresh(entries: List<LauncherAppEntry>) {
+        // One refresher is shared by Home and All Apps; serialise so a slower, older pass
+        // cannot overwrite a newer one.
+        refreshMutex.withLock { refreshLocked(entries) }
+    }
+
+    private suspend fun refreshLocked(entries: List<LauncherAppEntry>) {
         withContext(ioDispatcher) {
             val snapshots = LinkedHashMap<AppIdentity, AppIconSnapshot>()
             val visited = HashSet<AppIdentity>()

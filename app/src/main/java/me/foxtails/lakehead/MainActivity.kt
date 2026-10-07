@@ -87,37 +87,23 @@ class MainActivity : ComponentActivity() {
         RoomHomePlacementRepository(placementDatabase)
     }
 
-    private val homeIconSnapshots by lazy(LazyThreadSafetyMode.NONE) { AppIconSnapshotCache(maxEntries = 64) }
-    private val allAppsIconSnapshots by lazy(LazyThreadSafetyMode.NONE) { AppIconSnapshotCache(maxEntries = 64) }
+    private val iconSnapshots by lazy(LazyThreadSafetyMode.NONE) { AppIconSnapshotCache() }
     private val iconLookup by lazy(LazyThreadSafetyMode.NONE) {
         LauncherAppsIconActivityLookup(applicationContext)
     }
     private val iconEncoder by lazy(LazyThreadSafetyMode.NONE) {
         BoundedLauncherAppIconPngEncoder()
     }
-    private val homeIconRefresher by lazy(LazyThreadSafetyMode.NONE) {
+    private val iconRefresher by lazy(LazyThreadSafetyMode.NONE) {
         LauncherAppsIconSnapshotRefresher(
             lookup = iconLookup,
             encoder = iconEncoder,
-            cache = homeIconSnapshots,
-            ioDispatcher = Dispatchers.IO,
-        )
-    }
-    private val allAppsIconRefresher by lazy(LazyThreadSafetyMode.NONE) {
-        LauncherAppsIconSnapshotRefresher(
-            lookup = iconLookup,
-            encoder = iconEncoder,
-            cache = allAppsIconSnapshots,
+            cache = iconSnapshots,
             ioDispatcher = Dispatchers.IO,
         )
     }
     private val decodedIcons by lazy(LazyThreadSafetyMode.NONE) {
-        DecodedHomeIconCache(maxEntries = 64) { png ->
-            BitmapFactory.decodeByteArray(png, 0, png.size)?.asImageBitmap()
-        }
-    }
-    private val decodedAllAppsIcons by lazy(LazyThreadSafetyMode.NONE) {
-        DecodedHomeIconCache(maxEntries = 64) { png ->
+        DecodedIconCache { png ->
             BitmapFactory.decodeByteArray(png, 0, png.size)?.asImageBitmap()
         }
     }
@@ -141,8 +127,8 @@ class MainActivity : ComponentActivity() {
             homeId = PRODUCTION_HOME_ID,
             repository = placementRepository,
             catalogue = appCatalogue,
-            iconRefresher = homeIconRefresher,
-            encodedIcons = homeIconSnapshots,
+            iconRefresher = iconRefresher,
+            encodedIcons = iconSnapshots,
             decodedIcons = decodedIcons,
             viewport = HomeRouteViewport(
                 inputs = HomeViewportInputs(
@@ -162,9 +148,9 @@ class MainActivity : ComponentActivity() {
             homeId = PRODUCTION_HOME_ID,
             repository = placementRepository,
             catalogue = appCatalogue,
-            iconRefresher = allAppsIconRefresher,
-            encodedIcons = allAppsIconSnapshots,
-            decodedIcons = decodedAllAppsIcons,
+            iconRefresher = iconRefresher,
+            encodedIcons = iconSnapshots,
+            decodedIcons = decodedIcons,
             columnsBound = 5,
             ioDispatcher = Dispatchers.IO,
         )

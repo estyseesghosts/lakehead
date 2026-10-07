@@ -183,14 +183,14 @@ class AllAppsRouteLoaderTest {
             LauncherAppEntry(appA, "App A"),
             LauncherAppEntry(appB, "App B"),
         ))
-        val encodedIcons = AppIconSnapshotCache(8)
+        val encodedIcons = AppIconSnapshotCache()
         val loader = AllAppsRouteLoader(
             homeId = homeId,
             repository = repository,
             catalogue = catalogue,
             iconRefresher = LauncherAppsIconSnapshotRefresher(testIconLookup, testEncoder, encodedIcons, dispatcher),
             encodedIcons = encodedIcons,
-            decodedIcons = DecodedHomeIconCache(8, testDecoder),
+            decodedIcons = DecodedIconCache(testDecoder),
             ioDispatcher = dispatcher,
         )
         loader.start(this)
@@ -260,8 +260,8 @@ class AllAppsRouteLoaderTest {
             LauncherAppEntry(appA, "App A"),
             LauncherAppEntry(appB, "App B"),
         ))
-        val encodedIcons = AppIconSnapshotCache(8)
-        val decodedIcons = DecodedHomeIconCache<ImageBitmap>(8, testDecoder)
+        val encodedIcons = AppIconSnapshotCache()
+        val decodedIcons = DecodedIconCache<ImageBitmap>(testDecoder)
         val loader = AllAppsRouteLoader(
             homeId = homeId,
             repository = repository,
@@ -297,7 +297,7 @@ class AllAppsRouteLoaderTest {
         dispatcher: kotlinx.coroutines.CoroutineDispatcher,
         catalogue: FakeCatalogue = FakeCatalogue(emptyList()),
     ): AllAppsRouteLoader {
-        val encodedIcons = AppIconSnapshotCache(8)
+        val encodedIcons = AppIconSnapshotCache()
         return AllAppsRouteLoader(
             homeId = homeId,
             repository = repository,
@@ -309,7 +309,7 @@ class AllAppsRouteLoaderTest {
                 dispatcher,
             ),
             encodedIcons = encodedIcons,
-            decodedIcons = DecodedHomeIconCache(8) { null },
+            decodedIcons = DecodedIconCache { null },
             ioDispatcher = dispatcher,
         )
     }

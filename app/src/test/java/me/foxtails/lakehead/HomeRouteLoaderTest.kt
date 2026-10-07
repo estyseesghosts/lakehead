@@ -171,11 +171,16 @@ class HomeRouteLoaderTest {
         loader.start(this)
         advanceUntilIdle()
 
-        assertEquals(listOf(appB), refreshedIdentities)
-        assertEquals(listOf("work"), decodedPayloads)
-        assertEquals(setOf(appB), loader.icons.value.keys)
+        // The shared cache is driven by the whole catalogue, not the placed subset.
+        assertEquals(listOf(appA, appB), refreshedIdentities)
+        assertEquals(listOf(appA.profileId.value, "work"), decodedPayloads)
+        assertEquals(setOf(appA, appB), loader.icons.value.keys)
         assertSame(TestImageBitmap, loader.icons.value[appB])
-        assertFalse("Same component in another profile must not share the icon key", appA in loader.icons.value)
+        assertEquals(
+            "Same component in another profile keeps its own icon key",
+            2,
+            loader.icons.value.keys.map { it.profileId }.toSet().size,
+        )
         loader.stop()
     }
 
@@ -716,9 +721,10 @@ class HomeRouteLoaderTest {
     }
 
     @Test
-    fun decodedIconSnapshotIsImmutableBoundedAndUsesInjectedDecoder() {        val imageA = "decoded-image"
+    fun decodedIconSnapshotIsImmutableAndUsesInjectedDecoder() {
+        val imageA = "decoded-image"
         var decoded = 0
-        val cache = DecodedHomeIconCache<String>(maxEntries = 1) {
+        val cache = DecodedIconCache<String> {
             decoded++
             imageA
         }
@@ -729,8 +735,7 @@ class HomeRouteLoaderTest {
         val first = cache.replace(snapshots)
         val second = cache.snapshot()
         assertEquals(2, decoded)
-        assertEquals(1, first.size)
-        assertEquals(listOf(appB), first.keys.toList())
+        assertEquals(listOf(appA, appB), first.keys.toList())
         assertNotSame(first, second)
         assertTrue(first[appB] === imageA)
         try {
@@ -742,7 +747,7 @@ class HomeRouteLoaderTest {
     @Test
     fun decodedCachePreservesLastGoodWhenAllNewDecodesFail() {
         var decodeCount = 0
-        val cache = DecodedHomeIconCache<String>(maxEntries = 4) { png ->
+        val cache = DecodedIconCache<String> { png ->
             decodeCount++
             if (png[0] == 0.toByte()) null else "decoded-${png[0]}"
         }
@@ -769,6 +774,56 @@ class HomeRouteLoaderTest {
     }
 
     @Test
+    fun homeAndAllAppsLoadersSharingOneCacheResolveTheSameIcons() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val entries = (0 until 100).map {
+            LauncherAppEntry(AppIdentity(profileA, ComponentIdentity("com.example", "App$it")), "App $it")
+        }
+        val catalogue = FakeCatalogue(entries)
+        val repository = FakeRepository { _, _, _ ->
+            LoadResult.Loaded(listOf(placement("one", entries[3].identity)))
+        }
+        val encodedIcons = AppIconSnapshotCache()
+        val decodedIcons = DecodedIconCache<ImageBitmap> { TestImageBitmap }
+        val refresher = LauncherAppsIconSnapshotRefresher(
+            LauncherAppIconLookup { TestLauncherIcon(it) },
+            LauncherAppIconPngEncoder { byteArrayOf(1) },
+            encodedIcons,
+            dispatcher,
+        )
+        val home = HomeRouteLoader(
+            homeId = requestedHome,
+            repository = repository,
+            catalogue = catalogue,
+            iconRefresher = refresher,
+            encodedIcons = encodedIcons,
+            decodedIcons = decodedIcons,
+            viewport = viewport,
+            ioDispatcher = dispatcher,
+        )
+        val allApps = AllAppsRouteLoader(
+            homeId = requestedHome,
+            repository = repository,
+            catalogue = catalogue,
+            iconRefresher = refresher,
+            encodedIcons = encodedIcons,
+            decodedIcons = decodedIcons,
+            ioDispatcher = dispatcher,
+        )
+
+        home.start(this)
+        allApps.start(this)
+        advanceUntilIdle()
+
+        val identities = entries.map { it.identity }.toSet()
+        assertEquals(identities, home.icons.value.keys)
+        assertEquals(home.icons.value, allApps.icons.value)
+        assertEquals(identities, encodedIcons.snapshot().keys)
+        home.stop()
+        allApps.stop()
+    }
+
+    @Test
     fun allIconLookupsReturningNullPreservesLastGoodDecodedIcons() = runTest {
         val dispatcher = StandardTestDispatcher(testScheduler)
         var shouldReturnNull = false
@@ -791,7 +846,7 @@ class HomeRouteLoaderTest {
         advanceUntilIdle()
 
         // Verify initial icons loaded
-        assertEquals(setOf(appB), loader.icons.value.keys)
+        assertEquals(setOf(appA, appB), loader.icons.value.keys)
         assertSame(TestImageBitmap, loader.icons.value[appB])
 
         // Now make all lookups return null (simulating a transient platform failure)
@@ -803,7 +858,7 @@ class HomeRouteLoaderTest {
         advanceUntilIdle()
 
         // Last-good icons should be preserved — not wiped to empty
-        assertEquals("Icons should be preserved when all lookups return null", setOf(appB), loader.icons.value.keys)
+        assertEquals("Icons should be preserved when all lookups return null", setOf(appA, appB), loader.icons.value.keys)
         assertSame(TestImageBitmap, loader.icons.value[appB])
         loader.stop()
     }
@@ -816,7 +871,7 @@ class HomeRouteLoaderTest {
         pngEncoder: LauncherAppIconPngEncoder = LauncherAppIconPngEncoder { null },
         decoder: (ByteArray) -> ImageBitmap? = { null },
     ): HomeRouteLoader {
-        val encodedIcons = AppIconSnapshotCache(8)
+        val encodedIcons = AppIconSnapshotCache()
         return HomeRouteLoader(
             homeId = requestedHome,
             repository = repository,
@@ -828,7 +883,7 @@ class HomeRouteLoaderTest {
                 dispatcher,
             ),
             encodedIcons = encodedIcons,
-            decodedIcons = DecodedHomeIconCache(8, decoder),
+            decodedIcons = DecodedIconCache(decoder),
             viewport = viewport,
             ioDispatcher = dispatcher,
         )
