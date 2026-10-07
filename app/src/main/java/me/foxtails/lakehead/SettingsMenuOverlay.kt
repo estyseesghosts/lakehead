@@ -54,6 +54,15 @@ internal const val SETTINGS_MENU_FEED_HEADER: String = "Feed provider"
 /** Suffix appended to the selected provider's row label. */
 internal const val SETTINGS_MENU_SELECTED_SUFFIX: String = " (selected)"
 
+/** Header label for the layout debug section. */
+internal const val SETTINGS_MENU_LAYOUT_HEADER: String = "Layout (debug)"
+
+/** Test tag for the export layout row. */
+const val SETTINGS_MENU_EXPORT_ROW_TAG: String = "home-layout-export-row"
+
+/** Test tag for the import layout row. */
+const val SETTINGS_MENU_IMPORT_ROW_TAG: String = "home-layout-import-row"
+
 /**
  * Test tag for one feed provider row.
  *
@@ -104,7 +113,10 @@ internal fun feedUnavailableReasonText(reason: FeedAvailability.Unavailable.Reas
  *   [FeedProviderId.PRIORITY] entry with the [selectedFeedProvider] row marked (its
  *   content description carries [SETTINGS_MENU_SELECTED_SUFFIX] and the selected
  *   semantics flag), plus an honest footer when [availability] is
- *   [FeedAvailability.Unavailable]. The header and footer expose no click action.
+ *   [FeedAvailability.Unavailable]. After the feed section, a "Layout (debug)" header
+ *   and two rows ("Export layout…", "Import layout…") invoke [onExportHomeLayout] and
+ *   [onImportHomeLayout] respectively without dismissing the menu; they carry no
+ *   [selected] semantics. The header and footer expose no click action.
  * - `BackHandler(enabled = isOpen)` dismisses; while open the back press is consumed here
  *   and never propagates to the pager.
  *
@@ -120,6 +132,8 @@ internal fun SettingsMenuOverlay(
     availability: FeedAvailability,
     onDismiss: () -> Unit,
     onSelectProvider: (FeedProviderId) -> Unit,
+    onExportHomeLayout: () -> Unit = {},
+    onImportHomeLayout: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     if (!isOpen) return
@@ -227,6 +241,49 @@ internal fun SettingsMenuOverlay(
                                         text = feedUnavailableReasonText(unavailable.reason),
                                         style = LocalTextStyle.current.merge(
                                             color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        ),
+                                    )
+                                }
+                                // Layout debug section: export / import rows.
+                                BasicText(
+                                    text = SETTINGS_MENU_LAYOUT_HEADER,
+                                    style = LocalTextStyle.current.merge(
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    ),
+                                )
+                                Box(
+                                    contentAlignment = Alignment.CenterStart,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .sizeIn(minWidth = 48.dp, minHeight = 48.dp)
+                                        .clickable(
+                                            role = Role.Button,
+                                            onClick = onExportHomeLayout,
+                                        )
+                                        .testTag(SETTINGS_MENU_EXPORT_ROW_TAG),
+                                ) {
+                                    BasicText(
+                                        text = "Export layout\u2026",
+                                        style = LocalTextStyle.current.merge(
+                                            color = MaterialTheme.colorScheme.onSurface,
+                                        ),
+                                    )
+                                }
+                                Box(
+                                    contentAlignment = Alignment.CenterStart,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .sizeIn(minWidth = 48.dp, minHeight = 48.dp)
+                                        .clickable(
+                                            role = Role.Button,
+                                            onClick = onImportHomeLayout,
+                                        )
+                                        .testTag(SETTINGS_MENU_IMPORT_ROW_TAG),
+                                ) {
+                                    BasicText(
+                                        text = "Import layout\u2026",
+                                        style = LocalTextStyle.current.merge(
+                                            color = MaterialTheme.colorScheme.onSurface,
                                         ),
                                     )
                                 }

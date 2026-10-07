@@ -19,6 +19,7 @@ import androidx.lifecycle.lifecycleScope
 import androidx.room.Room
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import me.foxtails.lakehead.core.designsystem.LauncherTheme
 import me.foxtails.lakehead.core.model.HomeId
 import me.foxtails.lakehead.data.database.PlacementDatabase
@@ -177,6 +178,55 @@ class MainActivity : ComponentActivity() {
         )
     }
 
+    private val homeLayoutExportImport: HomeLayoutExportImport by lazy(LazyThreadSafetyMode.NONE) {
+        HomeLayoutExportImport(
+            homeId = PRODUCTION_HOME_ID,
+            columns = 5,
+            repository = placementRepository,
+            ioDispatcher = Dispatchers.IO,
+        )
+    }
+
+    // SAF launchers: registered at activity construction time (before onCreate)
+    // so the system can restore them across configuration changes. Each launcher
+    // holds a mutable reference to the pending JSON/filename set during the
+    // export callback; the result handler reads it and writes/reads via ContentResolver.
+
+    /** Pending export state: set by the export callback, consumed by the SAF result. */
+    @Volatile
+    private var pendingExportJson: org.json.JSONObject? = null
+
+    private val exportLayoutLauncher = registerForActivityResult(
+        ActivityResultContracts.CreateDocument("application/json"),
+    ) { uri ->
+        val json = pendingExportJson ?: return@registerForActivityResult
+        pendingExportJson = null
+        if (uri != null) {
+            contentResolver.openOutputStream(uri)?.bufferedWriter()?.use { writer ->
+                writer.write(json.toString(2))
+            }
+        }
+    }
+
+    private val importLayoutLauncher = registerForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        if (uri == null) return@registerForActivityResult
+        val json = contentResolver.openInputStream(uri)?.bufferedReader()?.use { reader ->
+            org.json.JSONObject(reader.readText())
+        } ?: return@registerForActivityResult
+
+        val routeLoader = homeRouteLoader
+        val allAppsLoader = allAppsRouteLoader
+        lifecycleScope.launch(Dispatchers.IO) {
+            val result = homeLayoutExportImport.importLayout(json)
+            if (result is ImportResult.Applied) {
+                routeLoader.reload()
+                allAppsLoader.refreshHomeMembership()
+            }
+        }
+    }
+
     // Feed overlay gateway: application context only, never the activity. The
     // PackageManager probe lives in the platform boundary adapter behind the pure
     // FeedProviderResolver decision; the gateway owns binding, lifecycle and
@@ -249,6 +299,21 @@ class MainActivity : ComponentActivity() {
                 // S1: menu picks attach directly (non-suspend tryLock path); the
                 // shell dismisses the menu around this call.
                 onSelectFeedProvider = { feedGateway.attach(it) },
+                // S1: export/import layout via SAF. The menu stays open;
+                // the launcher opens a system picker on top.
+                onExportHomeLayout = {
+                    lifecycleScope.launch(Dispatchers.IO) {
+                        val (json, filename) = homeLayoutExportImport.exportLayout()
+                        pendingExportJson = json
+                        // ActivityResultLauncher#launch must be called on the main thread.
+                        withContext(Dispatchers.Main) {
+                            exportLayoutLauncher.launch(filename)
+                        }
+                    }
+                },
+                onImportHomeLayout = {
+                    importLayoutLauncher.launch(arrayOf("application/json"))
+                },
                 // F3 feed driving (kept separate from the shortcut gateway
                 // wiring): pager progress/visibility flow into the gateway's
                 // never-throw best-effort notify verbs, which parallax and

@@ -108,9 +108,11 @@ const val LAUNCHER_PAGE_COUNT = 3
  * S1 settings menu: the shell hoists transient `isSettingsOpen` (plain
  * `remember`, never persisted). A Home long-press opens the menu; Back, the
  * scrim, or a provider pick dismisses it, and the pick reports through
- * [onSelectFeedProvider] (binding stays with the caller). While open the pager
- * sets `userScrollEnabled = false`, so swipe navigation is held; programmatic
- * pill navigation still works.
+ * [onSelectFeedProvider] (binding stays with the caller). The menu also
+ * exposes "Export layout…" and "Import layout…" rows that invoke
+ * [onExportHomeLayout] and [onImportHomeLayout] without dismissing. While
+ * open the pager sets `userScrollEnabled = false`, so swipe navigation is
+ * held; programmatic pill navigation still works.
  *
  * F3 feed driving: the shell derives the left-most page progress and settled
  * visibility from the pager state and reports them through [onFeedProgress] /
@@ -157,6 +159,10 @@ internal fun LauncherShell(
     // S1 settings menu: reports the feed provider picked in the transient
     // settings menu. The shell dismisses the menu; binding stays with the caller.
     onSelectFeedProvider: (FeedProviderId) -> Unit = {},
+    // S1 settings menu: export/import home layout as JSON. These fire without
+    // dismissing the menu; SAF launchers and persistence stay with the caller.
+    onExportHomeLayout: () -> Unit = {},
+    onImportHomeLayout: () -> Unit = {},
     // F3 feed driving: [onFeedProgress] receives the left-most page scroll
     // progress (1 when the feed page is fully shown, 0 on home and beyond) on
     // every pager offset change; [onFeedVisible] receives true only while
@@ -420,7 +426,7 @@ internal fun LauncherShell(
         )
         // S1 settings menu floats above the pager and the pill. A provider pick
         // reports through onSelectFeedProvider then dismisses; Back and the scrim
-        // dismiss without reporting.
+        // dismiss without reporting. Export/import fire without dismissing.
         SettingsMenuOverlay(
             isOpen = isSettingsOpen,
             availability = feedAvailability,
@@ -429,6 +435,8 @@ internal fun LauncherShell(
                 onSelectFeedProvider(provider)
                 isSettingsOpen = false
             },
+            onExportHomeLayout = onExportHomeLayout,
+            onImportHomeLayout = onImportHomeLayout,
         )
     }
 }
