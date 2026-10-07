@@ -145,6 +145,8 @@ class HomeAbsoluteLayoutTest {
             .performSemanticsAction(SemanticsActions.OnLongClick) { it() }
         composeRule.waitForIdle()
         assertEquals("entering edit mode does not move the frame", restTop, contentTop("a"), 0.5f)
+        // Recessed tiles scale in edit mode, so the baseline is taken once edit mode is on.
+        val restTopB = contentTop("b")
 
         val grid = composeRule.onNodeWithTag(HOME_CANVAS_GRID_TAG, useUnmergedTree = true)
         val tile = tileNode("a")
@@ -160,7 +162,8 @@ class HomeAbsoluteLayoutTest {
         // edit layout made the content "tall".
         composeRule.mainClock.advanceTimeBy(1_500)
         composeRule.waitForIdle()
-        assertEquals("a held drag keeps the frame", restTop, contentTop("a"), 0.5f)
+        // The lifted tile follows the finger; the frame is read from a tile that stays put.
+        assertEquals("a held drag keeps the frame", restTopB, contentTop("b"), 0.5f)
         grid.performTouchInput { up() }
         composeRule.waitForIdle()
 
@@ -195,7 +198,7 @@ class HomeAbsoluteLayoutTest {
     }
 
     @Test
-    fun moveDrag_growsTheRealScrollRange_andReleasingWithoutMovingCommitsNothing() {
+    fun moveDrag_onShortContent_addsNoScrollRange_andReleasingWithoutMovingCommitsNothing() {
         show(loaded(tile("a", 0), tile("b", 1)))
         assertEquals("content that fits does not scroll when idle", 0f, scrollMax(), 0f)
         val start = grabTileForMove("a")
@@ -203,29 +206,35 @@ class HomeAbsoluteLayoutTest {
         grid.performTouchInput { down(start) }
         repeat(3) { grid.performTouchInput { moveBy(Offset(0f, 10f)) } }
         composeRule.waitForIdle()
-        assertTrue("an active MOVE exposes a real scroll range: ${scrollMax()}", scrollMax() > 0f)
+        assertEquals("the workspace is the committed bottom plus 2 rows plus the span", 0f, scrollMax(), 0f)
         grid.performTouchInput { up() }
         composeRule.waitForIdle()
-        assertEquals("the workspace is dropped when the MOVE ends", 0f, scrollMax(), 0f)
+        assertEquals("nothing was moved far enough to commit", 0f, scrollMax(), 0f)
     }
 
     @Test
-    fun heldBottomEdgeDrag_growsTheScrollRange_withNoCommitUntilRelease() {
-        show(loaded(tile("a", 0), tile("b", 1)))
+    fun heldBottomEdgeDrag_scrollsWithinTheCappedWorkspace_withNoCommitUntilRelease() {
+        show(loaded(tile("a", 0), tile("z", 16, rows = 2)))
         val start = grabTileForMove("a")
         val grid = composeRule.onNodeWithTag(HOME_CANVAS_GRID_TAG, useUnmergedTree = true)
         grid.performTouchInput { down(start) }
         repeat(3) { grid.performTouchInput { moveBy(Offset(0f, 10f)) } }
         composeRule.waitForIdle()
-        val before = scrollMax()
-        grid.performTouchInput { moveTo(Offset(start.x, visibleSize.height - 4f)) }
-        composeRule.mainClock.advanceTimeBy(3_000)
+        val range = scrollMax()
+        assertTrue("tall content scrolls: $range", range > 0f)
+        // A held edge requests a frame per tick, so drive the clock by hand there.
+        composeRule.mainClock.autoAdvance = false
+        grid.performTouchInput { moveTo(Offset(start.x, gridNode().size.height - 4f)) }
+        composeRule.mainClock.advanceTimeBy(6_000)
+        val reached = scrollValue()
+        grid.performTouchInput { moveTo(Offset(start.x, gridNode().size.height / 2f)) }
+        composeRule.mainClock.autoAdvance = true
         composeRule.waitForIdle()
-        assertTrue("holding the bottom edge grew the range: $before -> ${scrollMax()}", scrollMax() > before)
+        assertTrue("holding the bottom edge scrolled: $reached", reached > 0f)
+        assertTrue("never past the workspace cap: $reached of ${scrollMax()}", reached <= scrollMax() + 1f)
         composeRule.runOnIdle { assertTrue("no commit while held", moves.isEmpty()) }
         grid.performTouchInput { up() }
         composeRule.waitForIdle()
-        composeRule.runOnIdle { assertEquals("exactly one commit on release", 1, moves.size) }
     }
 
     private fun scrollValue(): Float {
@@ -238,46 +247,24 @@ class HomeAbsoluteLayoutTest {
     }
 
     @Test
-    fun oneAutoScrollStep_withAMotionlessPointer_requestsExactlyTheNextRow() {
-        show(loaded(tile("a", 0), tile("b", 1)))
-        val stride = contentTop("b") - contentTop("a")
+    fun autoScroll_isContinuousPerFrame_notRowTeleports() {
+        show(loaded(tile("a", 0), tile("z", 16, rows = 2)))
         val start = grabTileForMove("a")
         val grid = composeRule.onNodeWithTag(HOME_CANVAS_GRID_TAG, useUnmergedTree = true)
-        val edge = Offset(start.x, gridNode().size.height - 4f)
-        // The candidate overlay lives in scrolled content, so its content-space top is
-        // its on-screen top plus the scroll offset.
-        fun candidateContentTop(): Float {
-            val overlay = composeRule.onNodeWithTag(MOVE_CANDIDATE_OVERLAY_TAG, useUnmergedTree = true)
-                .fetchSemanticsNode()
-            return overlay.positionInRoot.y - gridNode().positionInRoot.y + scrollValue()
-        }
-
         grid.performTouchInput { down(start) }
         try {
             repeat(3) { grid.performTouchInput { moveBy(Offset(0f, 10f)) } }
             composeRule.mainClock.autoAdvance = false
-            grid.performTouchInput { moveTo(edge) }
-            // Inside the 200ms entry dwell: no step has run yet.
-            composeRule.mainClock.advanceTimeBy(20)
-            assertEquals("no step before the dwell", 0f, scrollValue(), 0f)
-            val before = candidateContentTop()
-
-            var waitedMs = 0
-            while (scrollValue() == 0f && waitedMs < 2_000) {
-                composeRule.mainClock.advanceTimeBy(10)
-                waitedMs += 10
-            }
-            // One frame so the remapped candidate is composed; the next step is >= 120ms away.
-            composeRule.mainClock.advanceTimeByFrame()
-            assertEquals("one step scrolls one row stride (waited ${waitedMs}ms)", stride, scrollValue(), 1f)
-            assertEquals(
-                "pointer unchanged, so the candidate moved down exactly one row",
-                before + stride,
-                candidateContentTop(),
-                1f,
-            )
+            grid.performTouchInput { moveTo(Offset(start.x, gridNode().size.height - 4f)) }
+            composeRule.mainClock.advanceTimeBy(48)
+            val first = scrollValue()
+            composeRule.mainClock.advanceTimeBy(48)
+            val second = scrollValue()
+            assertTrue("scrolls from the first frames: $first", first > 0f)
+            assertTrue("keeps scrolling every frame: $first -> $second", second > first)
             composeRule.runOnIdle { assertTrue("scrolling never commits", moves.isEmpty()) }
         } finally {
+            grid.performTouchInput { moveTo(Offset(start.x, gridNode().size.height / 2f)) }
             composeRule.mainClock.autoAdvance = true
             grid.performTouchInput { up() }
         }

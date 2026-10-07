@@ -554,12 +554,10 @@ class HomeCanvasTest {
     }
 
     @Test
-    fun move_diagonalDominantAxis_requestsExactCellAndKeepsSpan() {
-        // MoveDragMath invariant: a 1×1 tile dragged right + down requests the
-        // exact cell under (pointer − grab); span is unchanged. The swipe keeps
-        // a dominant axis (2 : 1.25): a perfect 45° diagonal never leaves slop
-        // by design (`classifyHomeAxis` diagonal-never-steals contract), so the
-        // test drives a dominant-axis diagonal landing exactly on cell (2, 1).
+    fun move_trueFortyFiveDegreeDiagonal_requestsExactCellAndKeepsSpan() {
+        // A 1×1 tile dragged exactly 45° (2 strides right, 2 down) lands on the
+        // cell under (pointer − grab). Edit-mode drags start on plain radial
+        // touch slop, so no axis needs to dominate.
         val moves = mutableListOf<Pair<ItemId, LogicalPosition>>()
         val resizes = mutableListOf<Pair<ItemId, LogicalSpan>>()
         val tiles = listOf(
@@ -585,9 +583,7 @@ class HomeCanvasTest {
             tileBounds.top + tileBounds.height * 0.25f - gridBounds.top,
         )
         val stride = gridBounds.width / 6f
-        // Dominant-axis diagonal: 2 strides right + 1.25 down lands the
-        // (pointer − grab) candidate unambiguously in cell (2, 1).
-        val dragEnd = dragStart + Offset(2f * stride, 1.25f * stride)
+        val dragEnd = dragStart + Offset(2f * stride, 2f * stride)
         gridNode.performTouchInput { swipe(dragStart, dragEnd, 500) }
         composeRule.waitForIdle()
 
@@ -595,11 +591,48 @@ class HomeCanvasTest {
             assertEquals("one move for the dragged tile", 1, moves.size)
             assertEquals(ItemId("a"), moves[0].first)
             assertEquals(
-                "dominant-axis diagonal move lands on exactly column 2, row 1",
-                LogicalPosition(2, 1),
+                "a true 45° move lands on exactly column 2, row 2",
+                LogicalPosition(2, 2),
                 moves[0].second,
             )
             assertTrue("move drag must never resize: $resizes", resizes.isEmpty())
+        }
+    }
+
+    @Test
+    fun move_longPressThenDragInOneGesture_startsAtOnceAndCommits() {
+        // One continuous touch from outside edit mode: hold past the long-press
+        // timeout, then drag. The pickup needs no slop, so the first movement
+        // already carries the tile.
+        val moves = mutableListOf<Pair<ItemId, LogicalPosition>>()
+        val tiles = listOf(
+            tile("a", personal, "Alpha App", column = 0, row = 0),
+        )
+        setMoveCanvas(
+            tiles,
+            onMoveTile = { id, pos -> moves.add(id to pos) },
+        )
+        composeRule.waitForIdle()
+
+        val gridNode = composeRule.onNodeWithTag(HOME_CANVAS_GRID_TAG, useUnmergedTree = true)
+        val tileBounds = composeRule.onAllNodesWithContentDescription("Alpha App")[0]
+            .fetchSemanticsNode().boundsInRoot
+        val gridBounds = gridNode.fetchSemanticsNode().boundsInRoot
+        val dragStart = Offset(
+            tileBounds.left + tileBounds.width * 0.25f - gridBounds.left,
+            tileBounds.top + tileBounds.height * 0.25f - gridBounds.top,
+        )
+        val stride = gridBounds.width / 6f
+        gridNode.performTouchInput { down(dragStart) }
+        composeRule.mainClock.advanceTimeBy(1_000)
+        gridNode.performTouchInput { moveTo(dragStart + Offset(stride, stride)) }
+        composeRule.waitForIdle()
+        gridNode.performTouchInput { up() }
+        composeRule.waitForIdle()
+
+        composeRule.runOnIdle {
+            assertEquals("one move for the picked-up tile", 1, moves.size)
+            assertEquals(LogicalPosition(1, 1), moves[0].second)
         }
     }
 

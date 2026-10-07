@@ -3,7 +3,8 @@
 - Phase: Release builds with release optimizations COMPLETE (2026-10-07). `:app:assembleRelease` + `:app:bundleRelease` + `:app:lintRelease` all PASS with R8 full mode + resource shrinking on; release APK installs and runs on `R5CN70E2SGV` as HOME (F/H/A navigation rendered, accent theme resolved, no R8 stripping symptoms in logcat). Debug variant unchanged. Merged to main as `4b6948b` (merge of `c0d91ba`); debug + release both PASS validation after merge. Task: `docs/agents/tasks/release-builds-setup.md`.
 - Active objective: next slice per `docs/first_draft.md` roadmap (orchestrator directs).
 - Owner: orchestrator / next agent.
-- Latest handoff: [handoffs/2026-10-07-release-builds-setup.md](handoffs/2026-10-07-release-builds-setup.md) (release-builds slice done; debug-keystore-signed release APK + AAB; R8 + ProGuard rules; device smoke PASS).
+- Latest handoff: [handoffs/2026-10-07-move-drag-repair.md](handoffs/2026-10-07-move-drag-repair.md) (move/drag repair slices 1-6 done; unit and `:feature:home` device tests PASS; real-finger pass pending; task `docs/agents/tasks/move-drag-repair.md`). Next: real-finger pass on R5CN70E2SGV, including scroll-then-drag coordinate check.
+- Prior handoff retained as history: [handoffs/2026-10-07-release-builds-setup.md](handoffs/2026-10-07-release-builds-setup.md).
 - Newest prior handoff retained as history: [handoffs/2026-10-07-home-layout-export-import.md](handoffs/2026-10-07-home-layout-export-import.md).
 - Newest prior handoff retained as history: [handoffs/2026-10-07-grid-repair-phase10.md](handoffs/2026-10-07-grid-repair-phase10.md).
 - Prior phase handoff retained as history: [handoffs/2026-10-07-grid-repair-phase9.md](handoffs/2026-10-07-grid-repair-phase9.md).

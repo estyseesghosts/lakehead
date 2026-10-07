@@ -2,8 +2,10 @@ package me.foxtails.lakehead.feature.home
 
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.gestures.scrollBy
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.geometry.Offset
+import kotlinx.coroutines.flow.first
 import kotlin.math.abs
 
 /**
@@ -25,27 +27,32 @@ internal suspend fun runMoveEdgeAutoScroll(
     maxSpeedPxPerSec: Float,
     onScrolled: (pointer: Offset) -> Unit,
 ) {
-    var lastFrameNanos = 0L
-    var carryPx = 0f
+    fun velocityPxPerSec(): Float {
+        val held = pointer() ?: return 0f
+        val velocity = autoScrollVelocityPxPerSec(held.y, viewportPx(), edgePx, maxSpeedPxPerSec)
+        // At either end there is nothing to scroll, so no frames are requested.
+        val room = if (velocity > 0f) scrollState.value < scrollState.maxValue else scrollState.value > 0
+        return if (room) velocity else 0f
+    }
     while (isMoveActive()) {
-        val frameNanos = withFrameNanos { it }
-        val elapsedSec = if (lastFrameNanos == 0L) 0f else (frameNanos - lastFrameNanos) / 1e9f
-        lastFrameNanos = frameNanos
-        val held = pointer()
-        val velocity = if (held == null) {
-            0f
-        } else {
-            autoScrollVelocityPxPerSec(held.y, viewportPx(), edgePx, maxSpeedPxPerSec)
+        // Frames are requested only while the pointer is inside a band; outside
+        // it the loop suspends on the snapshot, costing nothing per frame.
+        snapshotFlow { velocityPxPerSec() }.first { it != 0f }
+        var lastFrameNanos = 0L
+        var carryPx = 0f
+        while (isMoveActive()) {
+            val frameNanos = withFrameNanos { it }
+            val elapsedSec = if (lastFrameNanos == 0L) 0f else (frameNanos - lastFrameNanos) / 1e9f
+            lastFrameNanos = frameNanos
+            val held = pointer()
+            val velocity = velocityPxPerSec()
+            if (held == null || velocity == 0f) break
+            carryPx += velocity * elapsedSec
+            val wholePx = carryPx.toInt()
+            if (wholePx == 0) continue
+            carryPx -= wholePx
+            val consumed = scrollState.scrollBy(wholePx.toFloat())
+            if (abs(consumed) > 0f) onScrolled(held)
         }
-        if (held == null || velocity == 0f) {
-            carryPx = 0f
-            continue
-        }
-        carryPx += velocity * elapsedSec
-        val wholePx = carryPx.toInt()
-        if (wholePx == 0) continue
-        carryPx -= wholePx
-        val consumed = scrollState.scrollBy(wholePx.toFloat())
-        if (abs(consumed) > 0f) onScrolled(held)
     }
 }
