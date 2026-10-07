@@ -75,24 +75,34 @@ internal class DragDown(
     val inHandle: Boolean,
     val grabOffsetXPx: Float,
     val grabOffsetYPx: Float,
+    /** True for a launchable tile touched before edit mode: the long-press may pick it up. */
+    val awaitsLongPress: Boolean = false,
 )
+
+/** Pure: true once the pointer is farther than [slopPx] from its down point, in any direction. */
+internal fun exceedsTouchSlop(dxPx: Float, dyPx: Float, slopPx: Float): Boolean =
+    dxPx * dxPx + dyPx * dyPx > slopPx * slopPx
 
 /**
  * The edit-drag gesture, read top to bottom:
- * down → hit test → wait for slop → choose MOVE or RESIZE once → update that
- * operation until up/cancel → emit one [HomeDragEnd].
+ * down → hit test → (long-press pickup | wait for slop) → choose MOVE or
+ * RESIZE once → update that operation until up/cancel → emit one [HomeDragEnd].
  *
- * Runs as the body of `awaitEachGesture`. The pointer is already down from the
- * long-press that entered edit mode.
+ * Runs as the body of `awaitEachGesture`. A move starts either with plain
+ * radial touch slop on a tile touched in edit mode, or immediately, with no
+ * slop, when the long-press that enters edit mode fires with the finger still
+ * down on a tile.
  */
 internal suspend fun AwaitPointerEventScope.homeDragGesture(
     host: HomeDragHost,
     handleSizePx: Int,
 ) {
     val down = awaitDownTile(host, handleSizePx) ?: return
+    // Before edit mode the idle pager loop owns the hold; only a pickup claims it.
+    val pickedUp = if (down.awaitsLongPress) awaitLongPressPickup(host, down) ?: return else null
     host.pager.claim(HomeGestureWinner.SELECT_DRAG)
     try {
-        val slop = awaitSlop(down) ?: return
+        val slop = pickedUp ?: awaitSlop(down)?.position ?: return
         val route = chooseRouteOnce(down)
         if (route == DownDragRoute.NONE) return
         if (!beginDrag(host, down, route)) return
@@ -124,10 +134,12 @@ private suspend fun AwaitPointerEventScope.awaitDownTile(
     val selectedInHandle = selectedTile?.let {
         isInHandle(start.x, start.y + scrollYPx, metrics.pixelFrame(it.position, it.span), handleSizePx)
     } == true
-    if (!edit.isEditing || (downTile == null && !selectedInHandle)) return null
+    if (!edit.isEditing && downTile?.isLaunchable != true) return null
+    if (edit.isEditing && downTile == null && !selectedInHandle) return null
     val tile = downTile ?: selectedTile ?: return null
     val bounds = metrics.pixelFrame(tile.position, tile.span)
     return DragDown(
+        awaitsLongPress = !edit.isEditing,
         pointerId = first.id,
         position = start,
         tile = tile,
@@ -139,27 +151,68 @@ private suspend fun AwaitPointerEventScope.awaitDownTile(
     )
 }
 
-/** Waits until the pressed pointer passes drag slop. Null on release before slop. */
+/**
+ * Waits until the pressed pointer passes drag slop in any direction. Dragging a
+ * tile has no axis preference (scroll-versus-pager arbitration is
+ * [classifyHomeAxis]'s job, for the idle gesture only). Null on release before slop.
+ */
 private suspend fun AwaitPointerEventScope.awaitSlop(
     down: DragDown,
 ): PointerInputChange? {
     val slopPx = viewConfiguration.touchSlop.toFloat()
-    var axis = LockedAxis.UNDECIDED
     while (true) {
         val change = awaitPointerEvent().changes.find { it.id == down.pointerId }
         if (change == null || !change.pressed) return null
-        axis = classifyHomeAxis(
-            dxPx = change.position.x - down.position.x,
-            dyPx = change.position.y - down.position.y,
-            slopPx = slopPx,
-            jitterPx = slopPx,
-            currentLock = axis,
-        )
-        if (axis != LockedAxis.UNDECIDED) {
+        if (exceedsTouchSlop(
+                dxPx = change.position.x - down.position.x,
+                dyPx = change.position.y - down.position.y,
+                slopPx = slopPx,
+            )
+        ) {
             change.consume()
             return change
         }
     }
+}
+
+/**
+ * Pre-edit pointer on a launchable tile: if the finger stays within slop for the
+ * long-press timeout, enters edit mode with that tile selected and returns the
+ * latest change so the move starts at once, no slop. Null when the finger
+ * lifted, vanished or moved past slop first (a tap or a scroll, not a pickup).
+ * Nothing is consumed before the pickup, so taps and scrolling are unaffected.
+ */
+private suspend fun AwaitPointerEventScope.awaitLongPressPickup(
+    host: HomeDragHost,
+    down: DragDown,
+): Offset? {
+    val slopPx = viewConfiguration.touchSlop.toFloat()
+    var latest = down.position
+    var aborted = false
+    withTimeoutOrNull(viewConfiguration.longPressTimeoutMillis) {
+        while (true) {
+            val change = awaitPointerEvent().changes.find { it.id == down.pointerId }
+            if (change == null || !change.pressed ||
+                exceedsTouchSlop(
+                    dxPx = change.position.x - down.position.x,
+                    dyPx = change.position.y - down.position.y,
+                    slopPx = slopPx,
+                )
+            ) {
+                aborted = true
+                return@withTimeoutOrNull
+            }
+            latest = change.position
+        }
+    }
+    if (aborted) return null
+    // The tile's own long-press selects the same tile at the same moment; entering
+    // here too is idempotent and makes the pickup independent of that race.
+    val edit = host.editState
+    if (!edit.isEditing || edit.selectedTileId != down.tile.itemId) {
+        host.editState = edit.enterOnLongPress(down.tile.itemId)
+    }
+    return latest
 }
 
 /** The one route decision: armed handle → RESIZE, tile body or transfer → MOVE, else NONE. */
@@ -201,9 +254,9 @@ private suspend fun AwaitPointerEventScope.trackDrag(
     host: HomeDragHost,
     pointerId: PointerId,
     route: DownDragRoute,
-    slop: PointerInputChange,
+    start: Offset,
 ): DragExit {
-    if (route == DownDragRoute.MOVE) updateDrag(host, route, slop.position)
+    if (route == DownDragRoute.MOVE) updateDrag(host, route, start)
     while (true) {
         // Scroll is never compared with a remembered value: every update maps the
         // pointer through the current scroll, so a scroll from any source simply

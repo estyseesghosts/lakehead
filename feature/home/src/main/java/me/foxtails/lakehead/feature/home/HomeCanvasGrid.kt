@@ -516,12 +516,13 @@ internal fun HomeCanvasGrid(
             // through candidate recomposition and resets on home switch;
             // scroll is disabled while active so scrollState/geometry stay fixed.
             //
-            // This handler is also used for a selected tile in wiggle editing;
-            // in either route the pointer is already down when this block starts.
-            // It must NOT use awaitFirstDown()
-            // (which waits for a fresh down that never arrives). Instead the first
-            // awaitPointerEvent() observes the already-pressed pointer and tracks it
-            // past touch slop for a continuous press-hold-drag.
+            // A move starts two ways, both from this one handler: a tile touched
+            // in edit mode drags past plain radial touch slop in any direction,
+            // and a launchable tile touched before edit mode is picked up with no
+            // slop when its long-press fires with the finger still down. The
+            // loop reads the down itself (the first awaitPointerEvent()) and
+            // consumes nothing until a move starts, so taps and scrolling keep
+            // working.
             // P2 hide-abort: keyed on isVisible as well as the home id so a
             // pager navigation away cancels the in-flight await (zero-write);
             // the LaunchedEffect(isVisible) above already discards Compose
