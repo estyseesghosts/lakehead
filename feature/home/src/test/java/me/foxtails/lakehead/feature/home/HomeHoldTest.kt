@@ -2,7 +2,6 @@ package me.foxtails.lakehead.feature.home
 
 import me.foxtails.lakehead.core.designsystem.GestureArbitration
 import me.foxtails.lakehead.core.grid.GridColumns
-import me.foxtails.lakehead.core.grid.GridRowWindow
 import me.foxtails.lakehead.core.grid.GridVerticalExtent
 import me.foxtails.lakehead.core.model.AppIdentity
 import me.foxtails.lakehead.core.model.ComponentIdentity
@@ -55,7 +54,7 @@ class HomeHoldTest {
 
     private fun moving() = selected.beginMove(tile, listOf(tile), metrics, 0f, 0f)
 
-    private fun resizing() = selected.toggleResizeArmed().beginResize(tile, metrics)
+    private fun resizing() = selected.toggleResizeArmed().beginResize(tile, listOf(tile), metrics)
 
     private fun loadedEmpty(): HomeRenderState.Loaded {
         val homeId = HomeId("home-1")
@@ -67,7 +66,6 @@ class HomeHoldTest {
                 occupiedBottomRowExclusive = 0L,
                 totalScrollableRows = 1L,
             ),
-            window = GridRowWindow(0L, 1L),
         )
     }
 

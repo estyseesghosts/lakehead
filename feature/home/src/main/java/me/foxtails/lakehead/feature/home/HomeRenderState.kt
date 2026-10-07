@@ -1,7 +1,6 @@
 package me.foxtails.lakehead.feature.home
 
 import me.foxtails.lakehead.core.grid.GridColumns
-import me.foxtails.lakehead.core.grid.GridRowWindow
 import me.foxtails.lakehead.core.grid.GridVerticalExtent
 import me.foxtails.lakehead.core.model.AppIdentity
 import me.foxtails.lakehead.core.model.HomeId
@@ -64,8 +63,8 @@ data class HomeAppMetadata(
  * Pure viewport inputs for the home render projection.
  *
  * Pixel values are resolved by callers outside `core:grid`. Column-count policy belongs to
- * `GridViewportAdaptation`; extent policy belongs to `GridVerticalLayout`; window policy belongs
- * to `GridRowWindow`. This type only validates ranges.
+ * `GridViewportAdaptation`; extent policy belongs to `GridVerticalLayout`. Home composes
+ * every tile, so there is no visible-row window. This type only validates ranges.
  */
 data class HomeViewportInputs(
     val viewportWidthPx: Int,
@@ -75,8 +74,6 @@ data class HomeViewportInputs(
     val minimumCellWidthPx: Int,
     val viewportRows: Long,
     val workingMarginRows: Long = 0L,
-    val overscanRows: Long = 0L,
-    val visibleRows: GridRowWindow,
 ) {
     init {
         require(viewportWidthPx > 0) { "viewportWidthPx must be positive" }
@@ -86,7 +83,6 @@ data class HomeViewportInputs(
         require(minimumCellWidthPx > 0) { "minimumCellWidthPx must be positive" }
         require(viewportRows > 0L) { "viewportRows must be positive" }
         require(workingMarginRows >= 0L) { "workingMarginRows must be non-negative" }
-        require(overscanRows >= 0L) { "overscanRows must be non-negative" }
     }
 }
 
@@ -134,14 +130,12 @@ sealed interface HomeRenderState {
      * @param tiles projected tiles in persisted placement order.
      * @param columns adapted column count; five is only the normal-phone reference result.
      * @param extent vertical extent measured from the persisted placements.
-     * @param window visible rows extended by the requested overscan.
      */
     data class Loaded(
         val requestedHomeId: HomeId,
         val tiles: List<HomeRenderTile>,
         val columns: GridColumns,
         val extent: GridVerticalExtent,
-        val window: GridRowWindow,
     ) : HomeRenderState
 
     /** No persisted home exists for [requestedHomeId]. */

@@ -66,20 +66,19 @@ class MoveResizeRegressionTest {
             .enterOnLongPress(t.itemId)
             .beginMove(t, placements, metrics, 0f, 0f)
 
-    private fun HomeEditState.moveRequest(column: Int, row: Int, placements: List<HomeRenderTile>) =
+    private fun HomeEditState.moveRequest(column: Int, row: Int) =
         updateMove(
             MoveCellResult.Valid(
                 RequestedCell(column.toLong(), row.toLong()),
                 LogicalPosition(column, row),
             ),
-            placements,
         )
 
     @Test
     fun move_preservesSpan_andChangesOnlyPosition() {
         val moving = tile("moving", spanColumns = 2, spanRows = 1)
         val placements = listOf(moving)
-        val state = begin(moving, placements).moveRequest(3, 2, placements)
+        val state = begin(moving, placements).moveRequest(3, 2)
 
         assertEquals(LogicalSpan(2, 1), state.moveDrag!!.span)
         val result = GridRules.move(
@@ -99,8 +98,8 @@ class MoveResizeRegressionTest {
         val state = HomeEditState.Normal
             .enterOnLongPress(resizing.itemId)
             .toggleResizeArmed()
-            .beginResize(resizing, metrics)
-            .updateResize(LogicalSpan(2, 3), placements)
+            .beginResize(resizing, placements, metrics)
+            .updateResize(LogicalSpan(2, 3))
 
         assertEquals(LogicalPosition(2, 1), state.resizeDrag!!.position)
         val result = GridRules.resize(
@@ -118,15 +117,15 @@ class MoveResizeRegressionTest {
         val resizing = tile("resizing")
         val selected = HomeEditState.Normal.enterOnLongPress(resizing.itemId)
 
-        assertSame(selected, selected.beginResize(resizing, metrics))
-        assertTrue(selected.toggleResizeArmed().beginResize(resizing, metrics).resizeDrag != null)
+        assertSame(selected, selected.beginResize(resizing, listOf(resizing), metrics))
+        assertTrue(selected.toggleResizeArmed().beginResize(resizing, listOf(resizing), metrics).resizeDrag != null)
     }
 
     @Test
     fun move_allowsDiagonalRowCrossingFreePlacement() {
         val moving = tile("moving", spanColumns = 2, spanRows = 2)
         val placements = listOf(moving)
-        val state = begin(moving, placements).moveRequest(3, 2, placements)
+        val state = begin(moving, placements).moveRequest(3, 2)
 
         assertEquals(CandidateValidity.VALID, state.moveDrag!!.validity)
         assertTrue(
@@ -144,7 +143,7 @@ class MoveResizeRegressionTest {
         val moving = tile("moving", spanColumns = 2)
         val obstacle = tile("obstacle", column = 3, row = 1)
         val placements = listOf(moving, obstacle)
-        val state = begin(moving, placements).moveRequest(2, 1, placements)
+        val state = begin(moving, placements).moveRequest(2, 1)
 
         assertEquals(CandidateValidity.COLLIDING, state.moveDrag!!.validity)
         val result = GridRules.move(
@@ -160,7 +159,7 @@ class MoveResizeRegressionTest {
     fun horizontalBoundsRemainRejectedButRowsAreUnbounded() {
         val moving = tile("moving", spanColumns = 2)
         val placements = listOf(moving)
-        val state = begin(moving, placements).moveRequest(5, Int.MAX_VALUE, placements)
+        val state = begin(moving, placements).moveRequest(5, Int.MAX_VALUE)
 
         assertEquals(CandidateValidity.OUT_OF_BOUNDS, state.moveDrag!!.validity)
         val result = GridRules.move(

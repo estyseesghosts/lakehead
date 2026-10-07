@@ -67,7 +67,7 @@ class EditShortcutMenuTest {
     private fun resizingState() = HomeEditState.Normal
         .enterOnLongPress(ItemId("a"))
         .toggleResizeArmed()
-        .beginResize(tiles.first(), gridMetrics)
+        .beginResize(tiles.first(), tiles, gridMetrics)
 
     // ---- follow/dismiss selector ----
 

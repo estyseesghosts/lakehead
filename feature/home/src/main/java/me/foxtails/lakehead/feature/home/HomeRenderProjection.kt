@@ -3,7 +3,6 @@ package me.foxtails.lakehead.feature.home
 import me.foxtails.lakehead.core.grid.GridColumns
 import me.foxtails.lakehead.core.grid.GridPlacement
 import me.foxtails.lakehead.core.grid.GridPosition
-import me.foxtails.lakehead.core.grid.GridRowWindow
 import me.foxtails.lakehead.core.grid.GridSpan
 import me.foxtails.lakehead.core.grid.GridVerticalExtent
 import me.foxtails.lakehead.core.grid.GridVerticalLayout
@@ -64,10 +63,6 @@ object HomeRenderProjection {
         )
     }
 
-    /** Delegates directly to [GridRowWindow.withOverscan]. */
-    fun resolveWindow(visibleRows: GridRowWindow, overscanRows: Long): GridRowWindow =
-        visibleRows.withOverscan(overscanRows)
-
     /**
      * Joins caller-resolved [metadataByIdentity] onto [placements] by complete [AppIdentity].
      *
@@ -120,13 +115,11 @@ object HomeRenderProjection {
             viewportRows = inputs.viewportRows,
             workingMarginRows = inputs.workingMarginRows,
         )
-        val window = resolveWindow(inputs.visibleRows, inputs.overscanRows)
         return HomeRenderState.Loaded(
             requestedHomeId = requestedHomeId,
             tiles = tiles,
             columns = columns,
             extent = extent,
-            window = window,
         )
     }
 

@@ -19,9 +19,7 @@ import org.junit.Test
 
 /**
  * Softlock regression: committed geometry owns the idle scroll range; the
- * transient MOVE frontier sizes the layout only while a MOVE drag is active
- * (never RESIZE, never idle). No-commit MOVE ends discard the frontier with
- * zero writes; a valid pending lease never inflates the idle range; the
+ * transient MOVE workspace ([HomeEditWorkspace]) is covered separately. The
  * commit-result ack clears only on reject for the matching attempt id.
  */
 class HomeCommittedScrollTest {
@@ -55,47 +53,6 @@ class HomeCommittedScrollTest {
             occupiedHeightRows = totalRows,
         )
 
-    // ── shouldUseEditLayout ──────────────────────────────────────────
-
-    @Test
-    fun editLayout_onlyWhileMoveActiveWithFrontier() {
-        val frontier = initEditFrontier(extent(2L, 2L), 1800, 108L)
-        assertTrue(shouldUseEditLayout(true, frontier))
-        assertFalse(shouldUseEditLayout(false, frontier))
-        assertFalse(shouldUseEditLayout(true, null))
-        assertFalse(shouldUseEditLayout(false, null))
-        assertFalse(shouldUseEditLayout(null, frontier))
-    }
-
-    // ── contentHeightForLayout ───────────────────────────────────────
-
-    @Test
-    fun layoutHeight_idleUsesCommitted_despiteRetainedFrontier() {
-        // Valid pending lease retains the frontier object, but idle must not
-        // inflate: committed 208px, edit would be far taller.
-        val frontier = initEditFrontier(extent(2L, 2L), 1800, 108L)
-        val idle = contentHeightForLayout(extent(2L, 2L), frontier, false, 100, 8)
-        assertEquals(208, idle)
-        assertEquals(
-            contentMinHeightPxSigned(extent(2L, 2L), 100, 8),
-            idle,
-        )
-    }
-
-    @Test
-    fun layoutHeight_activeMoveUsesFrontier_resizeNever() {
-        val frontier = initEditFrontier(extent(2L, 2L), 1800, 108L)
-        val activeHeight = contentHeightForLayout(extent(2L, 2L), frontier, true, 100, 8)
-        assertEquals(
-            editContentHeightPx(editLayoutRows(extent(2L, 2L), frontier), 100, 8),
-            activeHeight,
-        )
-        assertTrue(activeHeight > 208)
-        // RESIZE is never MOVE-active: the same frontier must not expand it.
-        // (moveActive=false models any non-MOVE session including RESIZE.)
-        assertEquals(208, contentHeightForLayout(extent(2L, 2L), frontier, false, 100, 8))
-    }
-
     // ── committedScrollMaxPx ─────────────────────────────────────────
 
     @Test
@@ -105,13 +62,9 @@ class HomeCommittedScrollTest {
     }
 
     @Test
-    fun committedMax_ignoresFrontier() {
-        // Even with a retained frontier, the committed supply is unchanged.
+    fun committedMax_contentThatFits_isZero() {
         val committed = committedScrollMaxPx(extent(2L, 2L), 100, 8, 1800)
         assertEquals(0, committed)
-        val frontier = initEditFrontier(extent(2L, 2L), 1800, 108L)
-        val editMax = editScrollMaxPx(editLayoutRows(extent(2L, 2L), frontier), 100, 8, 1800)
-        assertTrue(editMax > committed)
         assertEquals(0, clampScrollToCommitted(900, committed))
     }
 
@@ -122,132 +75,6 @@ class HomeCommittedScrollTest {
         assertEquals(500, clampScrollToCommitted(500, 1000))
         assertEquals(2000, clampScrollToCommitted(4500, 2000))
         assertEquals(0, clampScrollToCommitted(900, 0))
-    }
-
-    // ── shouldDiscardFrontierOnMoveEnd ───────────────────────────────
-
-    @Test
-    fun discard_invalidNoMoveLift_discards() {
-        assertTrue(
-            shouldDiscardFrontierOnMoveEnd(
-                commit = null, cancelled = false, stolen = false,
-                isVisible = true, completedByUp = true,
-            ),
-        )
-    }
-
-    @Test
-    fun discard_cancelStealHideStale_discards() {
-        assertTrue(
-            shouldDiscardFrontierOnMoveEnd(
-                commit = LogicalPosition(1, 1), cancelled = true, stolen = false,
-                isVisible = true, completedByUp = true,
-            ),
-        )
-        assertTrue(
-            shouldDiscardFrontierOnMoveEnd(
-                commit = LogicalPosition(1, 1), cancelled = false, stolen = true,
-                isVisible = true, completedByUp = true,
-            ),
-        )
-        assertTrue(
-            shouldDiscardFrontierOnMoveEnd(
-                commit = LogicalPosition(1, 1), cancelled = false, stolen = false,
-                isVisible = false, completedByUp = true,
-            ),
-        )
-        assertTrue(
-            shouldDiscardFrontierOnMoveEnd(
-                commit = LogicalPosition(1, 1), cancelled = false, stolen = false,
-                isVisible = true, completedByUp = false,
-            ),
-        )
-    }
-
-    @Test
-    fun retain_validLiftedCommit_retainsLease() {
-        assertFalse(
-            shouldDiscardFrontierOnMoveEnd(
-                commit = LogicalPosition(1, 1), cancelled = false, stolen = false,
-                isVisible = true, completedByUp = true,
-            ),
-        )
-    }
-
-    // ── ack ──────────────────────────────────────────────────────────
-
-    @Test
-    fun ack_rejectedMatching_clears_acceptedRetains_staleIgnores() {
-        val pending = PendingMoveCommit(ItemId("a"), LogicalPosition(1, 1), requestId = 1L)
-        assertTrue(
-            shouldClearLeaseOnAck(pending, HomeMoveCommitAck(ItemId("a"), LogicalPosition(1, 1), false, requestId = 1L)),
-        )
-        assertFalse(
-            shouldClearLeaseOnAck(pending, HomeMoveCommitAck(ItemId("a"), LogicalPosition(1, 1), true, requestId = 1L)),
-        )
-        assertFalse(
-            shouldClearLeaseOnAck(pending, HomeMoveCommitAck(ItemId("b"), LogicalPosition(1, 1), false, requestId = 1L)),
-        )
-        assertFalse(
-            shouldClearLeaseOnAck(
-                pending,
-                HomeMoveCommitAck(ItemId("a"), LogicalPosition(9, 9), false, requestId = 1L),
-            ),
-        )
-        assertFalse(
-            shouldClearLeaseOnAck(
-                pending,
-                HomeMoveCommitAck(ItemId("a"), LogicalPosition(1, 1), false, requestId = 2L),
-            ),
-        )
-        assertFalse(
-            shouldClearLeaseOnAck(
-                null,
-                HomeMoveCommitAck(ItemId("a"), LogicalPosition(1, 1), false, requestId = 1L),
-            ),
-        )
-        assertFalse(shouldClearLeaseOnAck(pending, null))
-    }
-
-    @Test
-    fun ack_repeatIdenticalRejected_clearsEachTime() {
-        // P1: equal item/position retries are distinct attempts (unique
-        // request ids make the acks unequal, so each retriggers the ack
-        // effect); a retry of the same rejected move clears its own lease.
-        val firstPending = PendingMoveCommit(ItemId("a"), LogicalPosition(1, 1), requestId = 1L)
-        val firstAck = HomeMoveCommitAck(ItemId("a"), LogicalPosition(1, 1), false, requestId = 1L)
-        assertTrue(shouldClearLeaseOnAck(firstPending, firstAck))
-        // The retry reports the same item/position under a new attempt id.
-        val retryPending = PendingMoveCommit(ItemId("a"), LogicalPosition(1, 1), requestId = 2L)
-        val retryAck = HomeMoveCommitAck(ItemId("a"), LogicalPosition(1, 1), false, requestId = 2L)
-        assertTrue(retryAck != firstAck)
-        assertTrue(shouldClearLeaseOnAck(retryPending, retryAck))
-    }
-
-    @Test
-    fun ack_staleId_neverClearsNewerLease() {
-        // P1: a late ack naming an older attempt must not release the newer
-        // in-flight lease, even with an equal item/position — only the ack
-        // carrying the pending attempt's id clears it.
-        val newer = PendingMoveCommit(ItemId("a"), LogicalPosition(1, 1), requestId = 2L)
-        assertFalse(
-            shouldClearLeaseOnAck(
-                newer,
-                HomeMoveCommitAck(ItemId("a"), LogicalPosition(1, 1), false, requestId = 1L),
-            ),
-        )
-        assertFalse(
-            shouldClearLeaseOnAck(
-                newer,
-                HomeMoveCommitAck(ItemId("a"), LogicalPosition(1, 1), true, requestId = 1L),
-            ),
-        )
-        assertTrue(
-            shouldClearLeaseOnAck(
-                newer,
-                HomeMoveCommitAck(ItemId("a"), LogicalPosition(1, 1), false, requestId = 2L),
-            ),
-        )
     }
 
     // ── extent parity + fallback ─────────────────────────────────────

@@ -11,12 +11,12 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
-import me.foxtails.lakehead.core.grid.GridRowWindow
 import me.foxtails.lakehead.core.model.AppIdentity
 import me.foxtails.lakehead.core.model.AppPlacement
 import me.foxtails.lakehead.core.model.ComponentIdentity
@@ -61,7 +61,6 @@ class HomeRouteLoaderTest {
             columnGapPx = 16,
             minimumCellWidthPx = 160,
             viewportRows = 10,
-            visibleRows = GridRowWindow(0, 10),
         ),
         columnsBound = 6,
     )
@@ -217,44 +216,67 @@ class HomeRouteLoaderTest {
     }
 
     @Test
-    fun commitMoveDispatchesToIOAndReloadsOnAccepted() = runTest {
+    fun commitMoveShowsTheRequestedCellAtOnceThenTheAcceptedGridWithoutReloading() = runTest {
         val dispatcher = StandardTestDispatcher(testScheduler)
-        val moveResult = MutationResult.Accepted(
-            me.foxtails.lakehead.core.grid.GridRules.Result.Accepted(
-                listOf(me.foxtails.lakehead.core.grid.GridPlacement(ItemId("tile-a"), me.foxtails.lakehead.core.grid.GridPosition(2, 3), me.foxtails.lakehead.core.grid.GridSpan(1, 1)))
-            )
+        val persisted = listOf(
+            placementAt("a", appA, 0, 0),
+            placementAt("b", appB, 0, 10),
         )
-        var loadCount = 0
-        val repository = FakeRepository { _, _, _ ->
-            loadCount++
-            if (loadCount == 1) {
-                LoadResult.Loaded(listOf(placement("tile-a", appA)))
-            } else {
-                LoadResult.Loaded(listOf(placement("tile-a", appA, ItemAvailability.AVAILABLE)))
-            }
-        }
-        repository.moveAction = { _, _, _, _, _ -> moveResult }
+        val repository = FakeRepository { _, _, _ -> LoadResult.Loaded(persisted) }
         val loader = loader(repository, dispatcher)
+        var duringWrite: Map<ItemId, LogicalPosition>? = null
+        val moveResult = accepted(cell("a", 1, 1), cell("b", 0, 4))
+        repository.moveAction = { _, _, _, _, _ ->
+            duringWrite = positionsOf(loader)
+            moveResult
+        }
         loader.start(this)
         advanceUntilIdle()
-        assertTrue(loader.state.value is HomeRenderState.Loaded)
         val readsBefore = repository.reads
 
-        val result = loader.commitMove(ItemId("tile-a"), LogicalPosition(2, 3))
+        val result = loader.commitMove(ItemId("a"), LogicalPosition(1, 1))
         advanceUntilIdle()
 
         assertSame(moveResult, result)
-        assertEquals(1, repository.moveCalls.size)
-        assertEquals(requestedHome, repository.moveCalls[0].first)
-        assertEquals(ItemId("tile-a"), repository.moveCalls[0].second)
-        assertEquals(LogicalPosition(2, 3), repository.moveCalls[0].third)
-        // Reload triggers a new repository read
-        assertTrue("Expected reload after accepted move", repository.reads > readsBefore)
+        assertEquals(listOf(Triple(requestedHome, ItemId("a"), LogicalPosition(1, 1))), repository.moveCalls)
+        // The dropped tile sits at the requested cell while the write runs; others are untouched.
+        assertEquals(
+            mapOf(ItemId("a") to LogicalPosition(1, 1), ItemId("b") to LogicalPosition(0, 10)),
+            duringWrite,
+        )
+        // The accepted grid also shifted another tile (row-gap normalization).
+        assertEquals(
+            mapOf(ItemId("a") to LogicalPosition(1, 1), ItemId("b") to LogicalPosition(0, 4)),
+            positionsOf(loader),
+        )
+        assertEquals("An accepted move must not need a reload", readsBefore, repository.reads)
         loader.stop()
     }
 
     @Test
-    fun commitMoveDoesNotReloadOnRejected() = runTest {
+    fun commitMoveAcceptedGridWinsOverTheRequestedCellWhenNormalizationMovesTheDroppedTile() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val persisted = listOf(placementAt("a", appA, 0, 0), placementAt("b", appB, 3, 0))
+        val repository = FakeRepository { _, _, _ -> LoadResult.Loaded(persisted) }
+        val loader = loader(repository, dispatcher)
+        var duringWrite: Map<ItemId, LogicalPosition>? = null
+        repository.moveAction = { _, _, _, _, _ ->
+            duringWrite = positionsOf(loader)
+            accepted(cell("a", 0, 3), cell("b", 3, 0))
+        }
+        loader.start(this)
+        advanceUntilIdle()
+
+        loader.commitMove(ItemId("a"), LogicalPosition(0, 16))
+        advanceUntilIdle()
+
+        assertEquals(LogicalPosition(0, 16), duringWrite!!.getValue(ItemId("a")))
+        assertEquals(LogicalPosition(0, 3), positionsOf(loader).getValue(ItemId("a")))
+        loader.stop()
+    }
+
+    @Test
+    fun commitMoveRejectedReloadsThePersistedCellOverTheOptimisticOne() = runTest {
         val dispatcher = StandardTestDispatcher(testScheduler)
         val rejected = MutationResult.Rejected(
             me.foxtails.lakehead.core.grid.GridRules.Result.Rejected(
@@ -262,13 +284,16 @@ class HomeRouteLoaderTest {
             )
         )
         val repository = FakeRepository { _, _, _ ->
-            LoadResult.Loaded(listOf(placement("tile-a", appA)))
+            LoadResult.Loaded(listOf(placementAt("tile-a", appA, 0, 0)))
         }
-        repository.moveAction = { _, _, _, _, _ -> rejected }
+        var duringWrite: LogicalPosition? = null
         val loader = loader(repository, dispatcher)
+        repository.moveAction = { _, _, _, _, _ ->
+            duringWrite = positionsOf(loader).getValue(ItemId("tile-a"))
+            rejected
+        }
         loader.start(this)
         advanceUntilIdle()
-        assertTrue(loader.state.value is HomeRenderState.Loaded)
         val readsBefore = repository.reads
 
         val result = loader.commitMove(ItemId("tile-a"), LogicalPosition(2, 3))
@@ -276,15 +301,17 @@ class HomeRouteLoaderTest {
 
         assertSame(rejected, result)
         assertEquals(1, repository.moveCalls.size)
-        assertEquals("Rejected move must not trigger reload", readsBefore, repository.reads)
+        assertEquals(LogicalPosition(2, 3), duringWrite)
+        assertEquals("A rejected move reloads to undo the optimistic cell", readsBefore + 1, repository.reads)
+        assertEquals(LogicalPosition(0, 0), positionsOf(loader).getValue(ItemId("tile-a")))
         loader.stop()
     }
 
     @Test
-    fun commitMoveDoesNotReloadOnNotFound() = runTest {
+    fun commitMoveNotFoundReloadsThePersistedState() = runTest {
         val dispatcher = StandardTestDispatcher(testScheduler)
         val repository = FakeRepository { _, _, _ ->
-            LoadResult.Loaded(listOf(placement("tile-a", appA)))
+            LoadResult.Loaded(listOf(placementAt("tile-a", appA, 0, 0)))
         }
         repository.moveAction = { _, _, _, _, _ -> MutationResult.NotFound }
         val loader = loader(repository, dispatcher)
@@ -296,7 +323,156 @@ class HomeRouteLoaderTest {
         advanceUntilIdle()
 
         assertTrue(result is MutationResult.NotFound)
-        assertEquals("NotFound move must not trigger reload", readsBefore, repository.reads)
+        assertEquals(readsBefore + 1, repository.reads)
+        assertEquals(LogicalPosition(0, 0), positionsOf(loader).getValue(ItemId("tile-a")))
+        loader.stop()
+    }
+
+    @Test
+    fun commitMoveFailureReloadsThePersistedStateAndRethrows() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val repository = FakeRepository { _, _, _ ->
+            LoadResult.Loaded(listOf(placementAt("tile-a", appA, 0, 0)))
+        }
+        repository.moveAction = { _, _, _, _, _ -> throw IllegalStateException("disk full") }
+        val loader = loader(repository, dispatcher)
+        loader.start(this)
+        advanceUntilIdle()
+        val readsBefore = repository.reads
+
+        var thrown: IllegalStateException? = null
+        try {
+            loader.commitMove(ItemId("tile-a"), LogicalPosition(2, 3))
+        } catch (failure: IllegalStateException) {
+            thrown = failure
+        }
+        advanceUntilIdle()
+
+        assertEquals("disk full", thrown?.message)
+        assertEquals(readsBefore + 1, repository.reads)
+        assertEquals(LogicalPosition(0, 0), positionsOf(loader).getValue(ItemId("tile-a")))
+        loader.stop()
+    }
+
+    @Test
+    fun acceptedGridNamingAnUnknownTileFallsBackToAReload() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val repository = FakeRepository { _, _, _ ->
+            LoadResult.Loaded(listOf(placementAt("a", appA, 0, 0)))
+        }
+        repository.moveAction = { _, _, _, _, _ -> accepted(cell("a", 1, 1), cell("added-elsewhere", 2, 2)) }
+        val loader = loader(repository, dispatcher)
+        loader.start(this)
+        advanceUntilIdle()
+        val readsBefore = repository.reads
+
+        loader.commitMove(ItemId("a"), LogicalPosition(1, 1))
+        advanceUntilIdle()
+
+        assertEquals(readsBefore + 1, repository.reads)
+        loader.stop()
+    }
+
+    @Test
+    fun secondMoveWhileTheFirstIsInFlightIsNotOverwrittenByTheFirstResult() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val persisted = listOf(placementAt("a", appA, 0, 0), placementAt("b", appB, 0, 5))
+        val repository = FakeRepository { _, _, _ -> LoadResult.Loaded(persisted) }
+        val loader = loader(repository, dispatcher)
+        var bWhenSecondWriteStarts: LogicalPosition? = null
+        repository.moveAction = { _, itemId, _, _, _ ->
+            if (itemId == ItemId("a")) {
+                // Database state as of the first write: b is still at its old cell.
+                accepted(cell("a", 1, 1), cell("b", 0, 5))
+            } else {
+                bWhenSecondWriteStarts = positionsOf(loader).getValue(ItemId("b"))
+                accepted(cell("a", 1, 1), cell("b", 2, 2))
+            }
+        }
+        loader.start(this)
+        advanceUntilIdle()
+        val readsBefore = repository.reads
+
+        launch { loader.commitMove(ItemId("a"), LogicalPosition(1, 1)) }
+        launch { loader.commitMove(ItemId("b"), LogicalPosition(2, 2)) }
+        advanceUntilIdle()
+
+        assertEquals(listOf(ItemId("a"), ItemId("b")), repository.moveCalls.map { it.second })
+        assertEquals(LogicalPosition(2, 2), bWhenSecondWriteStarts)
+        assertEquals(
+            mapOf(ItemId("a") to LogicalPosition(1, 1), ItemId("b") to LogicalPosition(2, 2)),
+            positionsOf(loader),
+        )
+        assertEquals(readsBefore, repository.reads)
+        loader.stop()
+    }
+
+    @Test
+    fun firstMoveRejectedThenSecondAccepted_usesTheSecondGridWithoutReloading() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val persisted = listOf(placementAt("a", appA, 0, 0), placementAt("b", appB, 0, 5))
+        val repository = FakeRepository { _, _, _ -> LoadResult.Loaded(persisted) }
+        val loader = loader(repository, dispatcher)
+        repository.moveAction = { _, itemId, _, _, _ ->
+            if (itemId == ItemId("a")) {
+                MutationResult.Rejected(
+                    me.foxtails.lakehead.core.grid.GridRules.Result.Rejected(
+                        me.foxtails.lakehead.core.grid.GridRules.Rejection.COLLISION,
+                    ),
+                )
+            } else {
+                accepted(cell("a", 0, 0), cell("b", 2, 2))
+            }
+        }
+        loader.start(this)
+        advanceUntilIdle()
+        val readsBefore = repository.reads
+
+        launch { loader.commitMove(ItemId("a"), LogicalPosition(1, 1)) }
+        launch { loader.commitMove(ItemId("b"), LogicalPosition(2, 2)) }
+        advanceUntilIdle()
+
+        assertEquals(
+            mapOf(ItemId("a") to LogicalPosition(0, 0), ItemId("b") to LogicalPosition(2, 2)),
+            positionsOf(loader),
+        )
+        assertEquals(readsBefore, repository.reads)
+        loader.stop()
+    }
+
+    @Test
+    fun firstMoveAcceptedThenSecondRejected_reloadsTheFinalPersistedState() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        var loads = 0
+        val repository = FakeRepository { _, _, _ ->
+            loads++
+            if (loads == 1) {
+                LoadResult.Loaded(listOf(placementAt("a", appA, 0, 0), placementAt("b", appB, 0, 5)))
+            } else {
+                LoadResult.Loaded(listOf(placementAt("a", appA, 1, 1), placementAt("b", appB, 0, 5)))
+            }
+        }
+        val loader = loader(repository, dispatcher)
+        repository.moveAction = { _, itemId, _, _, _ ->
+            if (itemId == ItemId("a")) {
+                accepted(cell("a", 1, 1), cell("b", 0, 5))
+            } else {
+                MutationResult.NotFound
+            }
+        }
+        loader.start(this)
+        advanceUntilIdle()
+        val readsBefore = repository.reads
+
+        launch { loader.commitMove(ItemId("a"), LogicalPosition(1, 1)) }
+        launch { loader.commitMove(ItemId("b"), LogicalPosition(2, 2)) }
+        advanceUntilIdle()
+
+        assertEquals(readsBefore + 1, repository.reads)
+        assertEquals(
+            mapOf(ItemId("a") to LogicalPosition(1, 1), ItemId("b") to LogicalPosition(0, 5)),
+            positionsOf(loader),
+        )
         loader.stop()
     }
 
@@ -328,21 +504,11 @@ class HomeRouteLoaderTest {
     // ---- commitResize ----
 
     @Test
-    fun commitResizeDispatchesToIOAndReloadsOnAccepted() = runTest {
+    fun commitResizeAppliesTheAcceptedGridWithoutReloading() = runTest {
         val dispatcher = StandardTestDispatcher(testScheduler)
-        val resizeResult = MutationResult.Accepted(
-            me.foxtails.lakehead.core.grid.GridRules.Result.Accepted(
-                listOf(me.foxtails.lakehead.core.grid.GridPlacement(ItemId("tile-a"), me.foxtails.lakehead.core.grid.GridPosition(0, 0), me.foxtails.lakehead.core.grid.GridSpan(2, 2)))
-            )
-        )
-        var loadCount = 0
+        val resizeResult = accepted(cell("tile-a", 0, 0, 2, 2))
         val repository = FakeRepository { _, _, _ ->
-            loadCount++
-            if (loadCount == 1) {
-                LoadResult.Loaded(listOf(placement("tile-a", appA)))
-            } else {
-                LoadResult.Loaded(listOf(placement("tile-a", appA, ItemAvailability.AVAILABLE)))
-            }
+            LoadResult.Loaded(listOf(placement("tile-a", appA)))
         }
         repository.resizeAction = { _, _, _, _, _ -> resizeResult }
         val loader = loader(repository, dispatcher)
@@ -359,12 +525,14 @@ class HomeRouteLoaderTest {
         assertEquals(requestedHome, repository.resizeCalls[0].homeId)
         assertEquals(ItemId("tile-a"), repository.resizeCalls[0].itemId)
         assertEquals(LogicalSpan(2, 2), repository.resizeCalls[0].span)
-        assertTrue("Expected reload after accepted resize", repository.reads > readsBefore)
+        assertEquals("An accepted resize must not need a reload", readsBefore, repository.reads)
+        val tile = (loader.state.value as HomeRenderState.Loaded).tiles.single()
+        assertEquals(LogicalSpan(2, 2), tile.span)
         loader.stop()
     }
 
     @Test
-    fun commitResizeDoesNotReloadOnRejected() = runTest {
+    fun commitResizeReloadsOnRejected() = runTest {
         val dispatcher = StandardTestDispatcher(testScheduler)
         val rejected = MutationResult.Rejected(
             me.foxtails.lakehead.core.grid.GridRules.Result.Rejected(
@@ -386,7 +554,8 @@ class HomeRouteLoaderTest {
 
         assertSame(rejected, result)
         assertEquals(1, repository.resizeCalls.size)
-        assertEquals("Rejected resize must not trigger reload", readsBefore, repository.reads)
+        assertEquals("A rejected resize reloads to undo the optimistic span", readsBefore + 1, repository.reads)
+        assertEquals(LogicalSpan(1, 1), (loader.state.value as HomeRenderState.Loaded).tiles.single().span)
         loader.stop()
     }
 
@@ -447,6 +616,28 @@ class HomeRouteLoaderTest {
         assertTrue("Expected reload after removed", repository.reads > readsBefore)
         assertTrue(loader.state.value is HomeRenderState.Loaded)
         assertEquals(0, (loader.state.value as HomeRenderState.Loaded).tiles.size)
+        loader.stop()
+    }
+
+    @Test
+    fun removeWhileAMoveIsInFlightDoesNotReloadAndTheAcceptedGridDropsTheRemovedTile() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val persisted = listOf(placementAt("a", appA, 0, 0), placementAt("b", appB, 0, 5))
+        val repository = FakeRepository { _, _, _ -> LoadResult.Loaded(persisted) }
+        repository.moveAction = { _, _, _, _, _ -> accepted(cell("a", 1, 1)) }
+        repository.removeAction = { _, _ -> RemoveResult.Removed }
+        val loader = loader(repository, dispatcher)
+        loader.start(this)
+        advanceUntilIdle()
+        val readsBefore = repository.reads
+
+        // The remove writes first; the move is already in flight when it completes.
+        launch { loader.commitRemove(ItemId("b")) }
+        launch { loader.commitMove(ItemId("a"), LogicalPosition(1, 1)) }
+        advanceUntilIdle()
+
+        assertEquals(mapOf(ItemId("a") to LogicalPosition(1, 1)), positionsOf(loader))
+        assertEquals(readsBefore, repository.reads)
         loader.stop()
     }
 
@@ -648,6 +839,22 @@ class HomeRouteLoaderTest {
         identity: AppIdentity,
         availability: ItemAvailability = ItemAvailability.AVAILABLE,
     ) = AppPlacement(requestedHome, ItemId(item), identity, LogicalPosition(0, 0), LogicalSpan(1, 1), availability)
+
+    private fun placementAt(item: String, identity: AppIdentity, column: Int, row: Int) =
+        placement(item, identity).copy(position = LogicalPosition(column, row))
+
+    private fun cell(item: String, column: Int, row: Int, columns: Int = 1, rows: Int = 1) =
+        me.foxtails.lakehead.core.grid.GridPlacement(
+            ItemId(item),
+            me.foxtails.lakehead.core.grid.GridPosition(column, row),
+            me.foxtails.lakehead.core.grid.GridSpan(columns, rows),
+        )
+
+    private fun accepted(vararg cells: me.foxtails.lakehead.core.grid.GridPlacement<ItemId>) =
+        MutationResult.Accepted(me.foxtails.lakehead.core.grid.GridRules.Result.Accepted(cells.toList()))
+
+    private fun positionsOf(loader: HomeRouteLoader): Map<ItemId, LogicalPosition> =
+        (loader.state.value as HomeRenderState.Loaded).tiles.associate { it.itemId to it.position }
 
     private fun identity(profile: String) = AppIdentity(ProfileId(profile), ComponentIdentity("com.other", "Other"))
 

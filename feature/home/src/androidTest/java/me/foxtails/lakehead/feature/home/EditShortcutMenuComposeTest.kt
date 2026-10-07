@@ -31,7 +31,6 @@ import me.foxtails.lakehead.core.designsystem.SHORTCUT_SURFACE_ROW_TAG
 import me.foxtails.lakehead.core.designsystem.ShortcutSurfaceEntry
 import me.foxtails.lakehead.core.designsystem.SquareCellGeometry
 import me.foxtails.lakehead.core.grid.GridColumns
-import me.foxtails.lakehead.core.grid.GridRowWindow
 import me.foxtails.lakehead.core.grid.GridVerticalExtent
 import me.foxtails.lakehead.core.model.AppIdentity
 import me.foxtails.lakehead.core.model.ComponentIdentity
@@ -108,7 +107,6 @@ class EditShortcutMenuComposeTest {
         tiles = tiles,
         columns = GridColumns(6),
         extent = GridVerticalExtent(4L, 10L),
-        window = GridRowWindow(0L, 10L),
     )
 
     private val executed = mutableListOf<Pair<ItemId, String>>()

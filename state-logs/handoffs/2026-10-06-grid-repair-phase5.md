@@ -1,0 +1,64 @@
+# 2026-10-06 — Home grid repair Phase 5: replace Home rendering with absolute placement (slices 5.1–5.5)
+
+Status: implemented; unit-tested; device-tested on SM-G986W (Android 13, 1080×2400 @ 480 dpi override). **Not committed, nothing staged.**
+Owner/slice: `:feature:home`; spec `docs/agents/tasks/grid-repair-phase5.md`, plan `docs/lakehead-grid-repair-plan.md` Phase 5.
+
+## Baseline and worktree
+HEAD `cb3d38f`. The worktree already held uncommitted Phase 3 Slice 3.2 and Phase 4 work; it was preserved and this phase sits on top. No reset, stash, clean, checkout over, amend or revert. `git diff --check` clean. Baseline claims were checked, not assumed: the forced unit run reproduced `:core:grid` 184; `:feature:home` was 593 before this phase and is 587 now (tests for retired APIs were deleted or replaced, see below).
+
+## Baseline classification (evidence)
+A pre-Phase-3 reference was built **without checkout or stash**: `git archive -o /tmp/lakehead-head.tar HEAD`, extracted to `/tmp/lakehead-head`, `local.properties` copied, instrumentation run there. Results:
+- `HomeCanvasTest.removeAffordance_smallTile_topRightCorner_tapCallsOnRemoveOnly` — **pre-existing at HEAD** (47 tests, 1 failure, identical `expected:<180.0> but was:<144.0>`). Root cause found: the scroll container wrapped only the rightmost tile edge (180 px), so the 48 dp (144 px) remove control spanning x=108..252 was clipped to 108..180 and `boundsInRoot` centred at 144. The control really was clipped and untappable beyond the container edge. **Fixed in this phase** by making `HomeGridLayout` fill the available width; the test now passes.
+- `MainActivitySeededHomeDeviceTest` ×3 (`sparsePlacements…`, `explicitlySeededEmptyHome…`, `seededPlacements…`) — **pre-existing at HEAD**, same failing lines. Two wait for the "Set ProtoLaunch as default home" overlay that `HomeCanvas` no longer renders (and `HomeCanvasTest` asserts absent); `seededPlacements…` waits for the unavailable-tile label text at line 132. The sparse test's old "distant tile absent" assertion encoded the retired row window; I changed it to wait for the distant tile (all tiles are composed). It now passes that line and fails only on the stale overlay text.
+- `LauncherShellForwardingTest` and `LauncherShellPickerTest` — both compose `LauncherShell` **without `LauncherTheme`** and crash the whole instrumentation process with `No LauncherDimensions provided`. Both files are unmodified from HEAD and no `:app` androidTest wraps in the theme. Pre-existing harness defects. Because a crash kills the process, they must be excluded to run the rest (`-Pandroid.testInstrumentationRunnerArguments.notClass=…`).
+- `WorkProfileLaunchProofTest` — environmental (accessible profile 150 absent from the catalogue); not compared at HEAD.
+- **The Phase 4 "next action" cannot be satisfied as written:** `LauncherShellForwardingTest` tests `onRemoveTile` forwarding, not the pager hold, and crashes; no `:app` test covers the Home pager hold at all. The only pager-hold evidence remains `HomeDragPagerArbitrationTest` (feature module, 4/4 in the final run). The `:app` baseline that could run is the 33-test run below.
+
+## Completed work
+- **5.1** `HomeGridLayout.kt` (new): composes every tile via `key(itemId)`, places at `metrics.signedFrame(position, renderedSpan)`; replaces `WindowedSpanContainer` in Home.
+- **5.2** Height is `max(floor, lowest tile bottom + bottomClearance)`; the viewport is the floor in normal mode; the edit-frontier height is the floor only while a MOVE is active (Phase 6). Removed the shadow `viewport` state, `preserveAnchorOnResize` use and the scroll-clamp effect from the composable; scroll enabled by `scrollState.maxValue > 0`.
+- **5.3** `HomeRestOffset.kt` (new): `rememberRestOffsetYPx` glides outside editing, freezes at the value in effect when editing begins, returns whole pixels. `HomeEditState.cancelDragIfFrameChanged` replaces the rebase bridge. **Deleted:** `rebaseMetrics`, `rebaseAndMoveTo`, `HomeDragHost.liveMetrics`, `tickMetricsState`, the ticker's two rebase calls, the `rest` recomputation under an active frontier, `originAnim`/`isFirstOriginFrame`.
+- **5.4** Overlays already derived from `gridMetrics`; confirmed by grep of `feature/home/src/main` (no independent stride/origin arithmetic outside `HomeGridGeometry.kt`) and proven on device. Layout width now fills the available width (bug above).
+- **5.5** Removed `visibleWindowFor`, `resolveWindow`, `Loaded.window`, `HomeViewportInputs.visibleRows/overscanRows`, the `overscanRows` parameters of `HomeCanvas`/`HomeCanvasGrid`, and `MainActivity`'s window argument.
+
+## 4.1 gate status (the deferred part)
+- **`rebaseMetrics` bridge: complete — deleted** (5.3). Verified: grep for `rebaseMetrics|rebaseAndMoveTo|liveMetrics` in `feature/home/src` returns nothing.
+- **Still deferred → Phase 7:** the acknowledgement lease (`PendingMoveCommit`, `moveCommitAck`, `moveGateOpen`, `onDragEnded` lease handling) and the MOVE frontier init/discard behind `HomeDragHost.onDragBegan/onDragEnded`. Untouched, still marked temporary.
+
+## Decisions and reasons
+- **Cancel, don't rebase, on a frame change.** With the rest offset frozen, the only remaining causes are width adaptation or rotation; adopting a new frame mid-drag would move the grid under a stationary pointer (contract item 6). A cancelled drag commits nothing.
+- **`beginMove/beginResize` take `host.hit.metrics`** (the same `gridMetrics` the renderer uses) instead of a second metrics source.
+- **Rest offset target from the committed content only.** The old code also recomputed rest from the edit-frontier height, which animated the origin under a drag; that source is gone.
+- **Layout fills available width** (fall back to the old wrap only for unbounded width): corner controls, the shortcut menu and background/pointer handlers share that coordinate space. This also lets background taps and vertical scroll work beside the tiles. It is a behavior change beyond the letter of 5.1–5.5, taken because the 5.4 overlay gate cannot hold otherwise.
+- **Shared primitives kept.** `WindowedSpanContainer`, `SpanContainer`, `SpanChild`, `GridRowWindow`, `GridVisiblePlacements`, `TileBounds.signedBounds`, `designsystem.ResizeCandidateOverlay` and their tests remain; Home has no production caller of any of them now (Phase 9 deletes).
+- **No `GridRules` change** was needed.
+
+## Touched paths (this phase)
+New: `feature/home/src/main/.../HomeGridLayout.kt`, `HomeRestOffset.kt`; tests `HomeGridLayoutTest.kt` (pure, 7), androidTest `HomeAbsoluteLayoutTest.kt` (6), `HomeRestOffsetTest.kt` (5); `docs/agents/tasks/grid-repair-phase5.md`.
+Modified main: `HomeCanvasGrid.kt`, `HomeCanvas.kt`, `HomeEditState.kt`, `HomeGridGestures.kt`, `HomeGridGeometry.kt`, `HomeRenderState.kt`, `HomeRenderProjection.kt`, `app/.../MainActivity.kt`.
+Modified tests: `HomeCanvasTest.kt` (androidTest), `HomePointerLoopRegressionTest`, `HomeEditStateTest`, `HomeRenderProjectionTest`, `HomeHoldTest`, androidTest `EditShortcutMenuComposeTest`, `HomeDragPagerArbitrationTest`; `app` tests `HomeRouteLoaderTest`, `FeedSurfaceTest`, `SettingsMenuOverlayTest`, `LauncherShellPickerTest`, `LauncherShellForwardingTest` (constructor arguments only), `MainActivitySeededHomeDeviceTest` (one assertion).
+**Deleted tests (not silent):** `VisibleWindowForTest.kt` (the function is gone); three `resolveWindow_*` tests and the `overscanRows = -1` case in `HomeRenderProjectionTest`; four `rebase_*` tests in `HomePointerLoopRegressionTest` and `rebaseMetrics_changesOnlyMetrics` in `HomeEditStateTest` — replaced by `cancelDragIfFrameChanged_*`, `moveUpdates_neverChangeTheFrameTheDragBeganIn`, `scrollOnly_keepsFrameWithLiveDelta`. **Rewritten to the new contract:** `HomeCanvasTest.sparseDistantRow_isComposedAtItsAbsoluteRow_andScrollsIntoView`, `softlock_populatedGrid_…` (displayed, not present), and removed the window-saturation tail of `publicSignatures_…`.
+
+## Validation (exact)
+- `./gradlew :core:grid:test :feature:home:testDebugUnitTest :app:testDebugUnitTest --rerun-tasks --console=plain` — BUILD SUCCESSFUL, 189 tasks executed (forced). XML: `:feature:home` **587** tests / 0 failures / 0 errors / 0 skipped; `:core:grid` **184** / 0 / 0 / 0; `:app` unit **94** / 0 / 0 / 0.
+- `./gradlew assembleDebug --console=plain -q` PASS. `./gradlew lint --console=plain -q` PASS (reports written, no errors).
+- `repo_map.py` ran; `module_graph.py` ran, **graph unchanged** (`:feature:home → :core:model, :core:grid, :core:designsystem`); `function_audit.py` 17 findings, `HomeCanvasGrid()` **856** lines (957 before); `compose_audit.py` 3 pre-existing comment/string matches; `git diff --check` clean.
+- `python3 -m unittest discover -s tools/scripts -t tools/scripts`: 16 run, **1 FAIL**, the accepted tripwire (`856 not greater than 1500`). Threshold untouched; Phase 8 deletes it.
+- Device `./gradlew :feature:home:connectedDebugAndroidTest --console=plain` (whole module, SM-G986W): **79 tests, 0 failures** (result XML) — includes `HomeCanvasTest` (all pass, including the former red remove-affordance test), `HomeDragPagerArbitrationTest` 4/4, `EditShortcutMenuComposeTest`, and the new `HomeAbsoluteLayoutTest` (6) and `HomeRestOffsetTest` (5).
+- Device `./gradlew :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.notClass=…LauncherShellForwardingTest,…LauncherShellPickerTest`: **33 tests, 4 failures**, all in the pre-existing set above.
+- **Falsifiability:** `HomeAbsoluteLayoutTest` run against the HEAD export (only the `Loaded` constructor adapted): **5 of 6 failed** — the distant tiles were not composed, the remove control was clipped, and the held-drag assertion failed with `expected:<745.0> but was:<0.0>` (the old animated origin drifting under a stationary drag).
+- Grep gate: `GridRowWindow|WindowedSpanContainer|SpanChild|signedBounds|SignedGridPlacement|windowFirstRow|rowOrigin|rebaseMetrics|rebaseAndMoveTo|liveMetrics|visibleWindowFor|overscan` over `feature/home/src` → only 3 **test** hits (a comment in `ResizeDragMathTest`; `SignedGridPlacement` and `TileBounds.signedBounds` used as parity oracles in `HomeRenderProjectionTest`/`HomeCanvasSignedRendererTest`); **zero in `feature/home/src/main` and `app/src`**. Caveat: `SignedPixelFrame` (the Int frame type returned by `HomeGridMetrics.signedFrame`) still exists by name; it carries no signed origin.
+- **Process caveat:** I validated each slice with a compile and the relevant unit tests while developing, but the full forced battery and the device runs were executed once after 5.5, not after every slice.
+
+## Unverified device behavior
+- Auto-scroll (the ticker) under the new layout was not exercised on device by any new test; `HomeCanvasTest` edge cases that pass do not cover a held edge drag with scroll.
+- A real finger on the real `LauncherShell` pager; resize-handle drags; rotation/width change cancelling a drag; two consecutive drags.
+- Compose's maximum measure constraint (262,143 px) bounds an un-virtualized grid: row 1000 passes at a 180 px stride (≈180k px), but rows beyond ~1,400 at this density were not tested and may fail measurement. Virtualization is a plan non-goal; no storage-side bound was verified.
+
+## Known failures and incomplete work
+- Accepted tripwire red. `MainActivitySeededHomeDeviceTest` ×3, `LauncherShellForwardingTest`, `LauncherShellPickerTest`, `WorkProfileLaunchProofTest` red for the pre-existing reasons above (not fixed; they are outside this phase and `:app` shell tests need a theme wrapper).
+- Now-unreferenced production code (verified by grep: definitions only) left for Phase 9: in `HomeViewport.kt` `preserveAnchorOnResize`, `clampScrollOffsetToRange`, `committedScrollRangePx`, `scrollOffsetForCommitted` (`viewportFor`/`Viewport` are still used by `originTargetFor`); in `HomeCanvasGrid.kt` `rendererOriginYPx`, `contentMinHeightPx` (the unsigned wrapper), `committedScrollMaxPx`, `clampScrollToCommitted`, `shouldDiscardFrontierOnMoveEnd`, `contentBoundsForTiles`; plus the shared window primitives listed above. All still have unit tests.
+- Phase 6 items observed, not fixed: the ticker still uses `editScrollMaxPx` (a synthetic maximum) and `moveScrollBaseline`; the MOVE frontier still raises the layout floor. Phase 7: the lease/frontier.
+
+## Next action
+**Phase 6 Slice 6.1 — one transient edit workspace extent.** Add `workspaceBottomRow` (initialised from committed content bottom plus enough rows for the visible edit area) as the single owner of edit-time measured height, feeding the `minHeightPx` floor in `HomeGridLayout` only; do not touch `GridRules`. Exit condition: a pure test shows a candidate at row 30 is the identical `RequestedCell`/validity before and after `workspaceBottomRow` changes, and `HomeAbsoluteLayoutTest` gains a device case showing the real `ScrollState.maxValue` grows with it; then 6.2 deletes `editScrollMaxPx`.

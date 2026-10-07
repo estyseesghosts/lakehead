@@ -193,6 +193,63 @@ class GridRulesTest {
     }
 
     @Test
+    fun rejectionPredicatesAgreeWithMoveAndResizeOnEveryOutcome() {
+        // The predicates are the allocation-free preview entry points; move and
+        // resize delegate to them, so legality has exactly one implementation.
+        val existing = listOf(
+            placement("target", GridPosition(0, 0)),
+            placement("blocker", GridPosition(2, 1)),
+            placement("wide", GridPosition(4, 0), 2, 2),
+        )
+        val movePositions = listOf(
+            GridPosition(0, 0), // own footprint — legal
+            GridPosition(2, 1), // collides
+            GridPosition(5, 0), // 1x1 at the last column — legal
+            GridPosition(6, 0), // out of bounds
+            GridPosition(0, Int.MAX_VALUE), // rows are unbounded
+        )
+        val spans = listOf(
+            GridSpan(1, 1), // unchanged — legal
+            GridSpan(2, 1), // legal
+            GridSpan(3, 2), // collides with the blocker
+            GridSpan(7, 1), // out of bounds
+            GridSpan(2, 5), // tall but legal — rows are unbounded
+        )
+        for (position in movePositions) {
+            assertEquals(
+                reasonOf(GridRules.move(existing, "target", position, 6)),
+                GridRules.moveRejection(existing, "target", position, 6),
+            )
+        }
+        for (span in spans) {
+            assertEquals(
+                reasonOf(GridRules.resize(existing, "target", span, 6)),
+                GridRules.resizeRejection(existing, "target", span, 6),
+            )
+        }
+        // An id absent from the collection is UNKNOWN_ITEM through both shapes.
+        assertEquals(
+            GridRules.Rejection.UNKNOWN_ITEM,
+            GridRules.moveRejection(existing, "missing", GridPosition(0, 0), 6),
+        )
+        assertEquals(
+            GridRules.Rejection.UNKNOWN_ITEM,
+            GridRules.resizeRejection(existing, "missing", GridSpan(2, 1), 6),
+        )
+    }
+
+    @Test
+    fun rejectionPredicatesRejectNonPositiveColumns() {
+        val existing = listOf(placement("item", GridPosition(0, 0)))
+        assertIllegalArgument {
+            GridRules.moveRejection(existing, "item", GridPosition(1, 0), columns = 0)
+        }
+        assertIllegalArgument {
+            GridRules.resizeRejection(existing, "item", GridSpan(2, 1), columns = -1)
+        }
+    }
+
+    @Test
     fun genericResizeIsAcceptedWhenInBoundsAndMoveRejectsOutOfBounds() {
         val existing = listOf(placement("item", GridPosition(0, 0)))
         val resizeResult = accepted(
@@ -532,6 +589,13 @@ class GridRulesTest {
     private fun assertRejected(result: GridRules.Result<String>, reason: GridRules.Rejection) {
         assertEquals(GridRules.Result.Rejected(reason), result)
     }
+
+    /** The rejection a result-returning call reports, or null when it accepted. */
+    private fun reasonOf(result: GridRules.Result<String>): GridRules.Rejection? =
+        when (result) {
+            is GridRules.Result.Accepted -> null
+            is GridRules.Result.Rejected -> result.reason
+        }
 
     private fun assertIllegalArgument(block: () -> Unit) {
         try {

@@ -20,15 +20,12 @@ import androidx.room.Room
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import me.foxtails.lakehead.core.designsystem.LauncherTheme
-import me.foxtails.lakehead.core.grid.GridRowWindow
 import me.foxtails.lakehead.core.model.HomeId
 import me.foxtails.lakehead.data.database.PlacementDatabase
 import me.foxtails.lakehead.data.repository.HomePlacementRepository
-import me.foxtails.lakehead.data.repository.MutationResult
 import me.foxtails.lakehead.data.repository.RemoveResult
 import me.foxtails.lakehead.data.repository.RoomHomePlacementRepository
 import me.foxtails.lakehead.feature.home.HomeCanvasViewportStyle
-import me.foxtails.lakehead.feature.home.HomeMoveCommitAck
 import me.foxtails.lakehead.feature.home.HomeRenderState
 import me.foxtails.lakehead.feature.home.HomeViewportInputs
 import me.foxtails.lakehead.platform.feed.AndroidFeedServiceQuery
@@ -153,7 +150,6 @@ class MainActivity : ComponentActivity() {
                     columnGapPx = gapPx,
                     minimumCellWidthPx = minimumCellPx,
                     viewportRows = viewportRows,
-                    visibleRows = GridRowWindow(0L, viewportRows),
                 ),
                 columnsBound = 5,
             ),
@@ -224,15 +220,6 @@ class MainActivity : ComponentActivity() {
             val feedAvailability by feed.state.collectAsState()
             val shortcutMenu by shortcutMenuCoordinator.menu.collectAsState()
             val pinnedByTile by shortcutMenuCoordinator.pinnedByTile.collectAsState()
-            // Softlock ack: commit-result for a reported MOVE. The grid assigns a
-            // per-attempt request id; it is echoed back here so the grid clears
-            // only the matching lease. Accepted retains the grid's pending
-            // lease until the projection reflects it; rejected/not-found
-            // clears the lease + frontier there. The repository mapping stays
-            // here so no repo types enter :feature.
-            var moveCommitAck by androidx.compose.runtime.remember {
-                androidx.compose.runtime.mutableStateOf<HomeMoveCommitAck?>(null)
-            }
             // B1: forward loaded tiles so the coordinator can project the
             // selection to its AppIdentity and clear menus of removed tiles.
             androidx.compose.runtime.LaunchedEffect(homeState) {
@@ -276,16 +263,8 @@ class MainActivity : ComponentActivity() {
                 // the provider packages, binding uses BIND_AUTO_CREATE).
                 onFeedWindowAttached = { feedGateway.notifyWindowAttached(this@MainActivity) },
                 onFeedWindowDetached = { feedGateway.notifyWindowDetached(false) },
-                onMoveTile = { itemId, position, requestId ->
-                    lifecycleScope.launch {
-                        val result = routeLoader.commitMove(itemId, position)
-                        moveCommitAck = HomeMoveCommitAck(
-                            itemId = itemId,
-                            position = position,
-                            accepted = result is MutationResult.Accepted,
-                            requestId = requestId,
-                        )
-                    }
+                onMoveTile = { itemId, position ->
+                    lifecycleScope.launch { routeLoader.commitMove(itemId, position) }
                 },
                 onResizeTile = { itemId, span ->
                     lifecycleScope.launch {
@@ -321,7 +300,6 @@ class MainActivity : ComponentActivity() {
                     }
                 },
                 viewportStyle = routeViewportStyle,
-                moveCommitAck = moveCommitAck,
             )
             }
         }

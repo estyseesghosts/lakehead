@@ -1,0 +1,61 @@
+package me.foxtails.lakehead
+
+import me.foxtails.lakehead.core.grid.GridRules
+import me.foxtails.lakehead.core.model.AppPlacement
+import me.foxtails.lakehead.core.model.ItemId
+import me.foxtails.lakehead.core.model.LogicalPosition
+import me.foxtails.lakehead.core.model.LogicalSpan
+
+/**
+ * Pure rules the Home state owner uses to keep its in-memory placements in step
+ * with a persisted mutation. They never read or write the repository.
+ *
+ * The requested placement is only a guess at the final layout: row-gap
+ * normalization in the repository can shift other tiles, so the accepted grid
+ * (not the request) is what finally replaces the optimistic state.
+ */
+
+/** Optimistic apply of a requested move; null when [itemId] is not placed. */
+internal fun withRequestedMove(
+    placements: List<AppPlacement>,
+    itemId: ItemId,
+    position: LogicalPosition,
+): List<AppPlacement>? {
+    if (placements.none { it.itemId == itemId }) return null
+    return placements.map { if (it.itemId == itemId) it.copy(position = position) else it }
+}
+
+/** Optimistic apply of a requested resize; null when [itemId] is not placed. */
+internal fun withRequestedSpan(
+    placements: List<AppPlacement>,
+    itemId: ItemId,
+    span: LogicalSpan,
+): List<AppPlacement>? {
+    if (placements.none { it.itemId == itemId }) return null
+    return placements.map { if (it.itemId == itemId) it.copy(span = span) else it }
+}
+
+/**
+ * Replaces every position and span with the accepted, normalized grid.
+ *
+ * Order and identity of [placements] are kept; a placement the accepted grid no
+ * longer contains is dropped. Returns null when the accepted grid names an item
+ * this state has never seen (for example a placement added elsewhere), because
+ * an [AppPlacement] cannot be built from grid data alone: the caller must
+ * reload instead.
+ */
+internal fun withAcceptedGrid(
+    placements: List<AppPlacement>,
+    accepted: GridRules.Result.Accepted<ItemId>,
+): List<AppPlacement>? {
+    val finalById = accepted.placements.associateBy { it.id }
+    val known = placements.mapTo(HashSet()) { it.itemId }
+    if (finalById.keys.any { it !in known }) return null
+    return placements.mapNotNull { placement ->
+        val final = finalById[placement.itemId] ?: return@mapNotNull null
+        placement.copy(
+            position = LogicalPosition(final.position.column, final.position.row),
+            span = LogicalSpan(final.span.columns, final.span.rows),
+        )
+    }
+}

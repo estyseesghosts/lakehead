@@ -14,6 +14,7 @@ import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsNotDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.longClick
@@ -41,7 +42,6 @@ import me.foxtails.lakehead.core.designsystem.SquareCellGeometry
 import me.foxtails.lakehead.core.designsystem.RESIZE_HANDLE_TAG
 import me.foxtails.lakehead.core.designsystem.REMOVE_BUTTON_TAG
 import me.foxtails.lakehead.core.grid.GridColumns
-import me.foxtails.lakehead.core.grid.GridRowWindow
 import me.foxtails.lakehead.core.grid.GridVerticalExtent
 import me.foxtails.lakehead.core.model.AppIdentity
 import me.foxtails.lakehead.core.model.ComponentIdentity
@@ -116,13 +116,11 @@ class HomeCanvasTest {
         tiles: List<HomeRenderTile>,
         columns: Int = 6,
         extent: GridVerticalExtent = GridVerticalExtent(4L, 10L),
-        window: GridRowWindow = GridRowWindow(0L, 10L),
     ) = HomeRenderState.Loaded(
         requestedHomeId = homeId,
         tiles = tiles,
         columns = GridColumns(columns),
         extent = extent,
-        window = window,
     )
 
     private fun setThemedContent(content: @Composable () -> Unit) {
@@ -137,7 +135,6 @@ class HomeCanvasTest {
         icons: HomeCanvasIcons = emptyMap(),
         onLaunchApp: (AppIdentity) -> Unit = {},
         onRequestDefaultHome: () -> Unit = {},
-        overscanRows: Long = 1L,
         pinnedByTile: Map<ItemId, List<PinnedTileShortcut>> = emptyMap(),
         onPinnedShortcutClick: (ItemId, String) -> Unit = { _, _ -> },
     ) {
@@ -147,7 +144,6 @@ class HomeCanvasTest {
                 iconsByIdentity = icons,
                 onLaunchApp = onLaunchApp,
                 onRequestDefaultHome = onRequestDefaultHome,
-                overscanRows = overscanRows,
                 pinnedByTile = pinnedByTile,
                 onPinnedShortcutClick = onPinnedShortcutClick,
             )
@@ -295,7 +291,6 @@ class HomeCanvasTest {
                 iconsByIdentity = emptyMap(),
                 onLaunchApp = {},
                 onRequestDefaultHome = {},
-                overscanRows = 1L,
             )
         }
         composeRule.onAllNodesWithContentDescription("Personal App").assertCountEquals(2)
@@ -717,7 +712,9 @@ class HomeCanvasTest {
     // ---- Sparse distant rows ----
 
     @Test
-    fun sparseDistantRow_isOmittedUntilScrolled_thenRenders() {
+    fun sparseDistantRow_isComposedAtItsAbsoluteRow_andScrollsIntoView() {
+        // Phase 5 contract: Home composes every tile, so a distant row exists
+        // before it is scrolled to (below the viewport) instead of being windowed out.
         val tiles = listOf(
             tile("near", personal, "Near App", column = 0, row = 0),
             tile("far", work, "Distant App", column = 0, row = 16),
@@ -725,35 +722,27 @@ class HomeCanvasTest {
         setCanvas(
             loaded(
                 tiles,
-                extent = GridVerticalExtent(occupiedBottomRowExclusive = 17L, totalScrollableRows = 19L),
+                extent = GridVerticalExtent(occupiedBottomRowExclusive = 17L, totalScrollableRows = 17L),
             ),
         )
 
         composeRule.onAllNodesWithContentDescription("Near App").assertCountEquals(2)
-        composeRule.onNodeWithText("Near App").assertDoesNotExist()
-        // Large empty gap produces no row allocation: distant tile is not composed yet.
-        composeRule.onAllNodesWithContentDescription("Distant App").assertCountEquals(0)
-        composeRule.onNodeWithText("Distant App").assertDoesNotExist()
+        composeRule.onAllNodesWithContentDescription("Near App")[0].assertIsDisplayed()
+        composeRule.onAllNodesWithContentDescription("Distant App").assertCountEquals(2)
+        composeRule.onAllNodesWithContentDescription("Distant App")[0].assertIsNotDisplayed()
 
-        // Scroll the canvas grid directly; the distant placement must render when it
-        // scrolls into range. Swipe repeatedly (up to 10) until the window moves.
-        var nearExists = true
-        var farExists = false
+        // Scroll the canvas grid directly until the distant tile is on screen.
+        var farShown = false
         repeat(10) {
-            if (farExists || !nearExists) return@repeat
+            if (farShown) return@repeat
             composeRule.onNodeWithTag(HOME_CANVAS_GRID_TAG, useUnmergedTree = true)
                 .performTouchInput { swipeUp() }
             composeRule.waitForIdle()
-            nearExists = composeRule.onAllNodesWithContentDescription("Near App")
-                .fetchSemanticsNodes().size == 2
-            farExists = composeRule.onAllNodesWithContentDescription("Distant App")
-                .fetchSemanticsNodes().size == 2
+            farShown = runCatching {
+                composeRule.onAllNodesWithContentDescription("Distant App")[0].assertIsDisplayed()
+            }.isSuccess
         }
-        composeRule.waitForIdle()
-        assertTrue(
-            "scroll must move the window (nearExists=$nearExists farExists=$farExists)",
-            !nearExists || farExists,
-        )
+        assertTrue("scrolling must bring the distant row into view", farShown)
     }
 
     // ---- Pre-decoded icons ----
@@ -1100,7 +1089,7 @@ class HomeCanvasTest {
                 iconsByIdentity = emptyMap(),
                 onLaunchApp = { launched = it },
                 onRequestDefaultHome = {},
-                onMoveTile = { id, _, _ -> moved = id },
+                onMoveTile = { id, _ -> moved = id },
                 onResizeTile = { id, _ -> resized = id },
                 onRemoveTile = { removed = it },
             )
@@ -1175,7 +1164,7 @@ class HomeCanvasTest {
                 iconsByIdentity = emptyMap(),
                 onLaunchApp = {},
                 onRequestDefaultHome = {},
-                onMoveTile = { id, _, _ -> moved = id },
+                onMoveTile = { id, _ -> moved = id },
                 onRemoveTile = { removed = it },
             )
         }
@@ -1217,7 +1206,7 @@ class HomeCanvasTest {
                 iconsByIdentity = emptyMap(),
                 onLaunchApp = {},
                 onRequestDefaultHome = {},
-                onMoveTile = { id, _, _ -> moved = id },
+                onMoveTile = { id, _ -> moved = id },
                 onResizeTile = { id, _ -> resized = id },
                 onRemoveTile = { removed = it },
             )
@@ -1685,16 +1674,6 @@ class HomeCanvasTest {
             "HomeCanvas must accept pre-decoded ImageBitmap snapshots: $signature",
             signature.contains("ImageBitmap"),
         )
-        // Window/overscan math is checked/saturating: near-Long-limit windows stay bounded.
-        val window = visibleWindowFor(
-            scrollPx = Int.MAX_VALUE,
-            viewportHeightPx = Int.MAX_VALUE,
-            rowStridePx = 1L,
-            overscanRows = 1L,
-        )
-        assertTrue(window.firstRow >= 0L)
-        assertTrue(window.lastRowExclusive >= window.firstRow)
-        assertEquals(Long.MAX_VALUE, GridRowWindow(Long.MAX_VALUE - 5, Long.MAX_VALUE).withOverscan(10L).lastRowExclusive)
     }
 
     // ---- A3 unified edit-drag + page-swipe arbitration (real pointer) ----
@@ -1702,7 +1681,7 @@ class HomeCanvasTest {
     private fun setMoveCanvas(
         tiles: List<HomeRenderTile>,
         onLaunchApp: (AppIdentity) -> Unit = {},
-        onMoveTile: (ItemId, LogicalPosition, Long) -> Unit = { _, _, _ -> },
+        onMoveTile: (ItemId, LogicalPosition) -> Unit = { _, _ -> },
         onResizeTile: (ItemId, LogicalSpan) -> Unit = { _, _ -> },
         pinnedByTile: Map<ItemId, List<PinnedTileShortcut>> = emptyMap(),
         onPinnedShortcutClick: (ItemId, String) -> Unit = { _, _ -> },
@@ -1742,7 +1721,7 @@ class HomeCanvasTest {
         setMoveCanvas(
             tiles,
             onLaunchApp = { launched.add(it) },
-            onMoveTile = { id, pos, _ -> moves.add(id to pos) },
+            onMoveTile = { id, pos -> moves.add(id to pos) },
             onResizeTile = { id, span -> resizes.add(id to span) },
             onSelectedTileChange = { selected.add(it) },
             onPagerHoldChange = { holds.add(it) },
@@ -1803,7 +1782,7 @@ class HomeCanvasTest {
         setMoveCanvas(
             tiles,
             onLaunchApp = { launched.add(it) },
-            onMoveTile = { id, pos, _ -> moves.add(id to pos) },
+            onMoveTile = { id, pos -> moves.add(id to pos) },
             pinnedByTile = mapOf(
                 ItemId("wide") to listOf(
                     PinnedTileShortcut("new-post", "New post"),
@@ -1861,7 +1840,7 @@ class HomeCanvasTest {
         setMoveCanvas(
             tiles,
             onLaunchApp = { launched.add(it) },
-            onMoveTile = { id, pos, _ -> moves.add(id to pos) },
+            onMoveTile = { id, pos -> moves.add(id to pos) },
             onSelectedTileChange = { selected.add(it) },
         )
         composeRule.waitForIdle()
@@ -1926,10 +1905,12 @@ class HomeCanvasTest {
         setCanvas(loaded(tiles, extent = projectedExtent))
         composeRule.waitForIdle()
 
-        fun hasNear() = composeRule.onAllNodesWithContentDescription("Near App")
-            .fetchSemanticsNodes().size == 2
-        fun hasFar() = composeRule.onAllNodesWithContentDescription("Distant App")
-            .fetchSemanticsNodes().size == 2
+        // Every tile is composed (Phase 5), so reachability means on screen, not present.
+        fun shown(name: String) = runCatching {
+            composeRule.onAllNodesWithContentDescription(name)[0].assertIsDisplayed()
+        }.isSuccess
+        fun hasNear() = shown("Near App")
+        fun hasFar() = shown("Distant App")
 
         // Down: lowest becomes reachable.
         var downReached = false

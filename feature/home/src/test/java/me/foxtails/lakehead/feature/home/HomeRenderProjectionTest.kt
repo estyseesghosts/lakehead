@@ -3,11 +3,9 @@ package me.foxtails.lakehead.feature.home
 import me.foxtails.lakehead.core.grid.GridColumns
 import me.foxtails.lakehead.core.grid.GridPlacement
 import me.foxtails.lakehead.core.grid.GridPosition
-import me.foxtails.lakehead.core.grid.GridRowWindow
 import me.foxtails.lakehead.core.grid.GridSpan
 import me.foxtails.lakehead.core.grid.GridVerticalLayout
 import me.foxtails.lakehead.core.grid.GridViewportAdaptation
-import me.foxtails.lakehead.core.grid.GridVisiblePlacements
 import me.foxtails.lakehead.core.model.AppIdentity
 import me.foxtails.lakehead.core.model.AppPlacement
 import me.foxtails.lakehead.core.model.ComponentIdentity
@@ -60,8 +58,6 @@ class HomeRenderProjectionTest {
         minimumCellWidthPx: Int = 160,
         viewportRows: Long = 10L,
         workingMarginRows: Long = 2L,
-        overscanRows: Long = 1L,
-        visibleRows: GridRowWindow = GridRowWindow(0L, 10L),
     ) = HomeViewportInputs(
         viewportWidthPx = viewportWidthPx,
         horizontalInsetPx = horizontalInsetPx,
@@ -70,8 +66,6 @@ class HomeRenderProjectionTest {
         minimumCellWidthPx = minimumCellWidthPx,
         viewportRows = viewportRows,
         workingMarginRows = workingMarginRows,
-        overscanRows = overscanRows,
-        visibleRows = visibleRows,
     )
 
     // ---- HomeIconBytes ----
@@ -441,35 +435,6 @@ class HomeRenderProjectionTest {
         assertEquals(7L, HomeRenderProjection.measureExtent(twoRows, 20L, 0L).occupiedHeightRows)
     }
 
-    // ---- resolveWindow: overscan, span-crossing, saturation ----
-
-    @Test
-    fun resolveWindow_matchesWithOverscanOracle() {
-        val visible = GridRowWindow(5L, 10L)
-        assertEquals(visible.withOverscan(3L), HomeRenderProjection.resolveWindow(visible, 3L))
-        assertEquals(GridRowWindow(2L, 13L), HomeRenderProjection.resolveWindow(visible, 3L))
-    }
-
-    @Test
-    fun resolveWindow_spanCrossingPlacementSelectedViaGridApi() {
-        val window = HomeRenderProjection.resolveWindow(GridRowWindow(5L, 10L), 3L)
-        // Extended window is rows 2..13; a tile spanning rows 1..3 crosses the lower boundary.
-        val crossing = GridPlacement(ItemId("cross"), GridPosition(0, 1), GridSpan(1, 2))
-        val outside = GridPlacement(ItemId("out"), GridPosition(0, 0), GridSpan(1, 1))
-        val selected = GridVisiblePlacements.select(listOf(crossing, outside), GridRowWindow(5L, 10L), 3L)
-        assertEquals(listOf(crossing), selected)
-        // The resolved window itself already covers the crossing placement's lower rows.
-        assertTrue(window.firstRow <= 2L && window.lastRowExclusive >= 3L)
-    }
-
-    @Test
-    fun resolveWindow_saturatesAtLongMax() {
-        val visible = GridRowWindow(Long.MAX_VALUE - 5, Long.MAX_VALUE)
-        val resolved = HomeRenderProjection.resolveWindow(visible, 10L)
-        assertEquals(visible.withOverscan(10L), resolved)
-        assertEquals(Long.MAX_VALUE, resolved.lastRowExclusive)
-    }
-
     // ---- invalid inputs ----
 
     @Test
@@ -482,7 +447,6 @@ class HomeRenderProjectionTest {
             { inputs(minimumCellWidthPx = 0) },
             { inputs(viewportRows = 0L) },
             { inputs(workingMarginRows = -1L) },
-            { inputs(overscanRows = -1L) },
         )
         cases.forEach { block ->
             try {
@@ -536,7 +500,7 @@ class HomeRenderProjectionTest {
     }
 
     @Test
-    fun project_computesColumnsTilesExtentWindowWithoutReordering() {
+    fun project_computesColumnsTilesExtentWithoutReordering() {
         val a = identity("p0", "com.a", "A")
         val b = identity("p0", "com.b", "B")
         val placements = listOf(
@@ -554,10 +518,6 @@ class HomeRenderProjectionTest {
         assertEquals(
             HomeRenderProjection.measureExtent(placements, viewport.viewportRows, viewport.workingMarginRows),
             loaded.extent,
-        )
-        assertEquals(
-            viewport.visibleRows.withOverscan(viewport.overscanRows),
-            loaded.window,
         )
         assertEquals(4L, loaded.extent.occupiedBottomRowExclusive)
     }

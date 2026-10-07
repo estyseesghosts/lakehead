@@ -1,7 +1,7 @@
 ---
 description: Targeted implementer that takes a narrow, well-scoped task with explicit requirements and exit deliverables, refuses anything larger than one safe commit, and returns a structured report of changes or errors encountered.
 mode: subagent
-model: opencode-go/longcat-2.5-preview-free
+model: commandcode/xiaomi/mimo-v2.5-pro
 permissions:
   - action: "*"
     resource: "*"

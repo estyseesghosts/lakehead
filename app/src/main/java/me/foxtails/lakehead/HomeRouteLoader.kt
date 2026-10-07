@@ -15,6 +15,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import me.foxtails.lakehead.core.grid.GridRules
 import me.foxtails.lakehead.core.model.AppIdentity
 import me.foxtails.lakehead.core.model.AppPlacement
 import me.foxtails.lakehead.core.model.HomeId
@@ -35,7 +36,12 @@ import me.foxtails.lakehead.platform.launcherapps.AppIconSnapshotCache
 import me.foxtails.lakehead.platform.launcherapps.LauncherAppsIconSnapshotRefresher
 import java.util.Collections
 
-/** Route-scoped, read-only loader for the explicitly selected Home. */
+/**
+ * Route-scoped owner of the projected state of the explicitly selected Home.
+ *
+ * It loads persisted placements and is also the only place that acknowledges
+ * and reconciles move/resize/remove commits, so gesture code only emits intents.
+ */
 internal class HomeRouteLoader(
     private val homeId: HomeId,
     private val repository: HomePlacementRepository,
@@ -57,6 +63,11 @@ internal class HomeRouteLoader(
     private var generation = 0L
     private var catalogueGeneration = 0L
     private val iconRefreshMutex = Mutex()
+
+    // Serializes repository writes in call order; mutationsInFlight counts
+    // move/resize commits between their optimistic apply and reconciliation.
+    private val writeMutex = Mutex()
+    private var mutationsInFlight = 0
     private var placements: List<AppPlacement>? = null
     private var notFound = false
     private var currentEntries: List<LauncherAppEntry> = emptyList()
@@ -116,81 +127,136 @@ internal class HomeRouteLoader(
                     }
                 }
             }
-            val catalogueSnapshot = synchronized(this@HomeRouteLoader) {
-                currentEntries to catalogueGeneration
-            }
-            refreshCatalogueProjection(catalogueSnapshot.first, catalogueSnapshot.second)
+            refreshIconsForCurrentCatalogue()
         }
     }
 
     /**
-     * Commits a drag-finished tile move on the IO dispatcher and reloads on success.
+     * Commits a drag-finished tile move: the requested cell is applied to the
+     * projected state immediately, the repository write runs on the IO
+     * dispatcher, and the returned normalized grid becomes the final state.
+     * See [commitMutation] for the reconciliation rules.
      *
      * Callers must be in a coroutine scope (typically `lifecycleScope`).
-     * The repository write is synchronous (Room transaction) and is wrapped in
-     * `withContext(Dispatchers.IO)` so the caller never blocks the main thread.
-     * Only [MutationResult.Accepted] triggers a reload — rejected or cancelled
-     * writes persist nothing.
      */
-    suspend fun commitMove(itemId: ItemId, position: LogicalPosition): MutationResult {
-        return withContext(ioDispatcher) {
-            val result = repository.move(
-                homeId = homeId,
-                itemId = itemId,
-                position = position,
-                columns = viewport.columnsBound,
-            )
-            if (result is MutationResult.Accepted) {
-                reload()
-            }
-            result
-        }
-    }
+    suspend fun commitMove(itemId: ItemId, position: LogicalPosition): MutationResult =
+        commitMutation(
+            optimistic = { withRequestedMove(it, itemId, position) },
+            write = {
+                repository.move(
+                    homeId = homeId,
+                    itemId = itemId,
+                    position = position,
+                    columns = viewport.columnsBound,
+                )
+            },
+        )
 
     /**
-     * Commits a drag-finished tile resize on the IO dispatcher and reloads on success.
-     *
-     * Callers must be in a coroutine scope (typically `lifecycleScope`).
-     * The repository write is synchronous (Room transaction) and is wrapped in
-     * `withContext(Dispatchers.IO)` so the caller never blocks the main thread.
-     * Only [MutationResult.Accepted] triggers a reload — rejected or cancelled
-     * writes persist nothing.
+     * Commits a drag-finished tile resize with the same optimistic apply and
+     * reconciliation as [commitMove].
      */
-    suspend fun commitResize(itemId: ItemId, span: LogicalSpan): MutationResult {
-        return withContext(ioDispatcher) {
-            val result = repository.resize(
-                homeId = homeId,
-                itemId = itemId,
-                span = span,
-                columns = viewport.columnsBound,
-            )
-            if (result is MutationResult.Accepted) {
-                reload()
-            }
-            result
-        }
-    }
+    suspend fun commitResize(itemId: ItemId, span: LogicalSpan): MutationResult =
+        commitMutation(
+            optimistic = { withRequestedSpan(it, itemId, span) },
+            write = {
+                repository.resize(
+                    homeId = homeId,
+                    itemId = itemId,
+                    span = span,
+                    columns = viewport.columnsBound,
+                )
+            },
+        )
 
     /**
      * Commits a tile removal on the IO dispatcher and reloads on success.
      *
      * Callers must be in a coroutine scope (typically `lifecycleScope`).
-     * The repository write is synchronous (Room transaction) and is wrapped in
-     * `withContext(Dispatchers.IO)` so the caller never blocks the main thread.
-     * Only [RemoveResult.Removed] triggers a reload — [RemoveResult.NotFound] or
-     * [RemoveResult.WrongHome] persist nothing.
+     * The write is serialized with move/resize writes. Only [RemoveResult.Removed]
+     * reloads — [RemoveResult.NotFound] or [RemoveResult.WrongHome] persist
+     * nothing — and a move/resize still in flight reconciles afterwards instead,
+     * from a grid that already excludes the removed tile.
      */
     suspend fun commitRemove(itemId: ItemId): RemoveResult {
-        return withContext(ioDispatcher) {
-            val result = repository.remove(
-                homeId = homeId,
-                itemId = itemId,
-            )
-            if (result is RemoveResult.Removed) {
-                reload()
-            }
-            result
+        val result = writeMutex.withLock {
+            withContext(ioDispatcher) { repository.remove(homeId = homeId, itemId = itemId) }
         }
+        if (result is RemoveResult.Removed) reloadWhenNoMutationInFlight()
+        return result
+    }
+
+    /**
+     * Shared reconciliation for placement mutations.
+     *
+     * 1. [optimistic] is applied to the projected state before the first
+     *    suspension, so the dropped tile does not wait for the database.
+     * 2. Writes are serialized by [writeMutex] in call order.
+     * 3. [MutationResult.Accepted] carries the full normalized grid; the last
+     *    in-flight mutation replaces the state with it directly (no reload).
+     *    Normalization can move several tiles, so the request is never assumed
+     *    to be the final layout.
+     * 4. Rejection, not-found, failure or cancellation of the last in-flight
+     *    mutation reloads the persisted state, undoing the optimistic apply. An
+     *    earlier mutation never reconciles while a later one is in flight: the
+     *    later result already reflects every earlier write.
+     */
+    private suspend fun commitMutation(
+        optimistic: (List<AppPlacement>) -> List<AppPlacement>?,
+        write: () -> MutationResult,
+    ): MutationResult {
+        beginMutation(optimistic)
+        val result = try {
+            writeMutex.withLock { withContext(ioDispatcher) { write() } }
+        } catch (failure: Throwable) {
+            finishMutation(accepted = null)
+            throw failure
+        }
+        val appliedDirectly = finishMutation((result as? MutationResult.Accepted)?.gridResult)
+        if (appliedDirectly) refreshIconsForCurrentCatalogue()
+        return result
+    }
+
+    @Synchronized
+    private fun beginMutation(optimistic: (List<AppPlacement>) -> List<AppPlacement>?) {
+        mutationsInFlight++
+        val current = placements ?: return
+        val requested = optimistic(current) ?: return
+        // A load that started before this write would land the old cells over it.
+        generation++
+        placements = requested
+        projectCurrent()
+    }
+
+    /** Returns true when the state was replaced from [accepted] without a reload. */
+    @Synchronized
+    private fun finishMutation(accepted: GridRules.Result.Accepted<ItemId>?): Boolean {
+        mutationsInFlight--
+        if (mutationsInFlight > 0) return false
+        val current = placements
+        val final = if (accepted != null && current != null && scope != null) {
+            withAcceptedGrid(current, accepted)
+        } else {
+            null
+        }
+        if (final == null) {
+            reload()
+            return false
+        }
+        generation++
+        placements = final
+        projectCurrent()
+        return true
+    }
+
+    @Synchronized
+    private fun reloadWhenNoMutationInFlight() {
+        if (mutationsInFlight == 0) reload()
+    }
+
+    private suspend fun refreshIconsForCurrentCatalogue() {
+        val snapshot = synchronized(this) { currentEntries to catalogueGeneration }
+        refreshCatalogueProjection(snapshot.first, snapshot.second)
     }
 
     private suspend fun refreshCatalogueProjection(entries: List<LauncherAppEntry>, revision: Long) {

@@ -81,7 +81,8 @@ data class HomeEditState(
         grabOffsetYPx: Float,
     ): HomeEditState {
         if (!isEditing || !tile.isLaunchable) return this
-        val validity = moveValidity(placements, tile.itemId, tile.position, metrics.columns)
+        val snapshot = placements.toGridPlacements()
+        val validity = moveValidity(snapshot, tile.itemId, tile.position, metrics.columns)
         if (validity == CandidateValidity.UNKNOWN_ITEM) return this
         return copy(
             selectedTileId = tile.itemId,
@@ -96,6 +97,7 @@ data class HomeEditState(
                 requestedCell = RequestedCell(tile.position.column.toLong(), tile.position.row.toLong()),
                 previewPosition = tile.position,
                 validity = validity,
+                snapshot = snapshot,
             ),
         )
     }
@@ -103,6 +105,7 @@ data class HomeEditState(
     /** Starts a RESIZE of the armed, selected [tile]; the arm is retained. */
     fun beginResize(
         tile: HomeRenderTile,
+        placements: List<HomeRenderTile>,
         metrics: HomeGridMetrics,
     ): HomeEditState {
         if (!isEditing || selectedTileId != tile.itemId || !resizeArmed || !tile.isLaunchable) return this
@@ -115,18 +118,19 @@ data class HomeEditState(
                 requestedSpan = tile.span,
                 previewSpan = tile.span,
                 validity = CandidateValidity.VALID,
+                snapshot = placements.toGridPlacements(),
             ),
         )
     }
 
-    fun updateMove(result: MoveCellResult, placements: List<HomeRenderTile>): HomeEditState {
+    fun updateMove(result: MoveCellResult): HomeEditState {
         val move = drag as? DragState.Move ?: return this
         return when (result) {
             is MoveCellResult.Rejected -> copy(
                 drag = move.copy(requestedCell = result.request, validity = CandidateValidity.OUT_OF_BOUNDS),
             )
             is MoveCellResult.Valid -> {
-                val validity = moveValidity(placements, move.itemId, result.position, move.metrics.columns)
+                val validity = moveValidity(move.snapshot, move.itemId, result.position, move.metrics.columns)
                 when (validity) {
                     CandidateValidity.UNKNOWN_ITEM -> cancelDrag()
                     CandidateValidity.VALID -> copy(
@@ -146,7 +150,6 @@ data class HomeEditState(
         pointerXPx: Float,
         pointerYPxViewport: Float,
         scrollYPx: Float,
-        placements: List<HomeRenderTile>,
     ): HomeEditState {
         val move = drag as? DragState.Move ?: return this
         val result = MoveDragMath.cellForPixel(
@@ -155,12 +158,12 @@ data class HomeEditState(
             pointerYPxViewport = pointerYPxViewport,
             currentScrollPx = scrollYPx,
         )
-        return updateMove(result, placements)
+        return updateMove(result)
     }
 
-    fun updateResize(requested: LogicalSpan, placements: List<HomeRenderTile>): HomeEditState {
+    fun updateResize(requested: LogicalSpan): HomeEditState {
         val resize = drag as? DragState.Resize ?: return this
-        val validity = resizeValidity(placements, resize.itemId, requested, resize.metrics.columns)
+        val validity = resizeValidity(resize.snapshot, resize.itemId, requested, resize.metrics.columns)
         return copy(
             drag = if (validity == CandidateValidity.VALID) {
                 resize.copy(requestedSpan = requested, previewSpan = requested, validity = validity)
@@ -174,7 +177,6 @@ data class HomeEditState(
         pointerXPx: Float,
         pointerYPxViewport: Float,
         scrollYPx: Float,
-        placements: List<HomeRenderTile>,
     ): HomeEditState {
         val resize = drag as? DragState.Resize ?: return this
         val raw = ResizeDragMath.rawSpan(
@@ -184,34 +186,22 @@ data class HomeEditState(
             pointerYPxViewport = pointerYPxViewport,
             currentScrollYPx = scrollYPx,
         )
-        return updateResize(RenderableSpans.quantize(raw, resize.metrics.columns), placements)
+        return updateResize(RenderableSpans.quantize(raw, resize.metrics.columns))
     }
 
     /**
-     * Temporary bridge: swaps the drag's metrics when the animated rest offset
-     * moves. Delete when the rendered rest offset is frozen per edit session
-     * (plan Slice 5.3). The only operation that may change drag metrics.
+     * A drag keeps the coordinate frame it began in; nothing adopts a new one. When
+     * the grid's current [metrics] differ (width adaptation, rotation: the rest
+     * offset is frozen for the session and cannot be the cause) the drag is
+     * cancelled with no commit instead of being re-mapped. Selection and arm stay.
      */
-    fun rebaseMetrics(metrics: HomeGridMetrics): HomeEditState = when (val current = drag) {
-        is DragState.Move -> if (current.metrics == metrics) this else copy(drag = current.copy(metrics = metrics))
-        is DragState.Resize -> if (current.metrics == metrics) this else copy(drag = current.copy(metrics = metrics))
-        DragState.None -> this
-    }
-
-    /**
-     * Adopts [metrics] when they differ from the MOVE drag's, then re-maps the
-     * held pointer through them. Returns this when nothing changed.
-     */
-    fun rebaseAndMoveTo(
-        metrics: HomeGridMetrics,
-        pointerXPx: Float,
-        pointerYPxViewport: Float,
-        scrollYPx: Float,
-        placements: List<HomeRenderTile>,
-    ): HomeEditState {
-        val move = moveDrag ?: return this
-        if (move.metrics == metrics) return this
-        return rebaseMetrics(metrics).moveTo(pointerXPx, pointerYPxViewport, scrollYPx, placements)
+    fun cancelDragIfFrameChanged(metrics: HomeGridMetrics): HomeEditState {
+        val frame = when (val current = drag) {
+            is DragState.Move -> current.metrics
+            is DragState.Resize -> current.metrics
+            DragState.None -> return this
+        }
+        return if (frame == metrics) this else cancelDrag()
     }
 
     /** Ends the drag, keeping selection and arm, and reports what (if anything) to commit. */
@@ -265,6 +255,8 @@ sealed interface DragState {
         val previewPosition: LogicalPosition,
         /** Validity of the last request. */
         val validity: CandidateValidity,
+        /** Occupancy snapshot taken at drag begin; reused for all validity checks. */
+        val snapshot: List<GridPlacement<ItemId>>,
     ) : DragState {
         val frame: MoveCoordinateFrame
             get() = MoveCoordinateFrame(metrics, GridSpan(span.columns, span.rows), grabOffsetXPx, grabOffsetYPx)
@@ -279,6 +271,8 @@ sealed interface DragState {
         /** Last valid span, held while requests are blocked. */
         val previewSpan: LogicalSpan,
         val validity: CandidateValidity,
+        /** Occupancy snapshot taken at drag begin; reused for all validity checks. */
+        val snapshot: List<GridPlacement<ItemId>>,
     ) : DragState
 }
 
@@ -306,28 +300,83 @@ private fun List<HomeRenderTile>.toGridPlacements(): List<GridPlacement<ItemId>>
     }
 
 private fun moveValidity(
-    placements: List<HomeRenderTile>,
+    snapshot: List<GridPlacement<ItemId>>,
     itemId: ItemId,
     position: LogicalPosition,
     columns: Int,
 ): CandidateValidity = validityOf(
-    GridRules.move(placements.toGridPlacements(), itemId, GridPosition(position.column, position.row), columns),
+    GridRules.moveRejection(snapshot, itemId, GridPosition(position.column, position.row), columns),
 )
 
 private fun resizeValidity(
-    placements: List<HomeRenderTile>,
+    snapshot: List<GridPlacement<ItemId>>,
     itemId: ItemId,
     span: LogicalSpan,
     columns: Int,
 ): CandidateValidity = validityOf(
-    GridRules.resize(placements.toGridPlacements(), itemId, GridSpan(span.columns, span.rows), columns),
+    GridRules.resizeRejection(snapshot, itemId, GridSpan(span.columns, span.rows), columns),
 )
 
-private fun validityOf(result: GridRules.Result<ItemId>): CandidateValidity = when (result) {
-    is GridRules.Result.Accepted -> CandidateValidity.VALID
-    is GridRules.Result.Rejected -> when (result.reason) {
-        GridRules.Rejection.OUT_OF_BOUNDS -> CandidateValidity.OUT_OF_BOUNDS
-        GridRules.Rejection.COLLISION -> CandidateValidity.COLLIDING
-        GridRules.Rejection.UNKNOWN_ITEM -> CandidateValidity.UNKNOWN_ITEM
-    }
+/** Maps a null (legal) or a rejection reason onto [CandidateValidity]. */
+private fun validityOf(rejection: GridRules.Rejection?): CandidateValidity = when (rejection) {
+    null -> CandidateValidity.VALID
+    GridRules.Rejection.OUT_OF_BOUNDS -> CandidateValidity.OUT_OF_BOUNDS
+    GridRules.Rejection.COLLISION -> CandidateValidity.COLLIDING
+    GridRules.Rejection.UNKNOWN_ITEM -> CandidateValidity.UNKNOWN_ITEM
 }
+
+/**
+ * A3 transfer-drag predicate: true when [editState] is in edit mode
+ * and the geometric down hit names a tile
+ * other than the current selection (including a null selection — any
+ * edit-mode tile down transfers).
+ *
+ * Whole-tile surface only: callers pass the geometric downTile id (or null
+ * for background), never a subregion. Pure, framework-free and unit-testable.
+ */
+internal fun isEditTransferDrag(
+    editState: HomeEditState,
+    downTileId: ItemId?,
+): Boolean {
+    if (!editState.isEditing || downTileId == null) return false
+    return downTileId != editState.selectedTileId
+}
+
+/**
+ * Release commit from the pointer loop's single state.
+ *
+ * Returns [HomeEditFinish.commit] unless the gesture was stolen, the page hid
+ * mid-gesture ([isVisible] false), or the loop exited without an explicit
+ * pointer-up ([completedByUp] false — null await, coroutine cancellation, or a
+ * consumed change), in which case null (zero-write).
+ */
+internal fun releaseCommit(
+    finished: HomeEditFinish,
+    stolen: Boolean,
+    isVisible: Boolean,
+    completedByUp: Boolean = true,
+): HomeEditCommit? {
+    if (stolen || !isVisible || !completedByUp) return null
+    return finished.commit
+}
+
+/**
+ * A1 hold predicate: transient home state that must hold pager swipe. Edit mode
+ * (which includes any drag) holds it. The caller (shell) ANDs the negation into
+ * `userScrollEnabled`; the pill's programmatic `animateScrollToPage` is unaffected.
+ */
+internal fun isHomeHold(editState: HomeEditState): Boolean = editState.isEditing
+
+/**
+ * P0 empty-guard hold signal for [HomeCanvasGrid].
+ *
+ * The grid early-returns on empty tiles before transient edit state
+ * exists, so an empty grid must never hold regardless of stale inputs: empty
+ * forces false, non-empty delegates to [isHomeHold]. The composable emits false
+ * via `LaunchedEffect` on the empty path and on dispose, so shell `homeHold`
+ * resets on populated→empty transitions and on grid removal.
+ */
+internal fun gridHoldSignal(
+    tilesEmpty: Boolean,
+    editState: HomeEditState,
+): Boolean = if (tilesEmpty) false else isHomeHold(editState)

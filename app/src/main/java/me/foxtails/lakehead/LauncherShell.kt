@@ -135,7 +135,7 @@ internal fun LauncherShell(
     // hosts the provider surface when Available, else the honest fallback.
     // Required (no default) so callers cannot silently hide Unavailable.
     feedAvailability: FeedAvailability,
-    onMoveTile: (ItemId, LogicalPosition, Long) -> Unit = { _, _, _ -> },
+    onMoveTile: (ItemId, LogicalPosition) -> Unit = { _, _ -> },
     onResizeTile: (ItemId, LogicalSpan) -> Unit = { _, _ -> },
     onRemoveTile: (ItemId) -> Unit = { },
     // B4 edit-menu rows (thin read-only domain interface via :app): rank-ordered
@@ -176,9 +176,6 @@ internal fun LauncherShell(
     modifier: Modifier = Modifier,
     initialPage: Int = LAUNCHER_PAGE_TILE,
     viewportStyle: HomeCanvasViewportStyle = HomeCanvasViewportStyle(),
-    // Softlock ack: commit-result for the last reported MOVE, forwarded to
-    // HomeCanvas (feature-owned type; repository mapping stays in :app).
-    moveCommitAck: me.foxtails.lakehead.feature.home.HomeMoveCommitAck? = null,
 ) {
     var restoredPage by rememberSaveable {
         mutableIntStateOf(initialPage.coerceIn(0, LAUNCHER_PAGE_COUNT - 1))
@@ -409,7 +406,6 @@ internal fun LauncherShell(
                     onTransientHoldChange = { homeHold = it },
                     onPagerHoldChange = { pagerHold = it },
                     isVisible = homeVisible,
-                    moveCommitAck = moveCommitAck,
                 )
             }
         }

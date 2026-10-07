@@ -146,6 +146,35 @@ class RoomHomePlacementRepositoryTest {
         assertEquals(other, dao.placement(other.itemId.value)!!.toDomain())
     }
 
+    @Test fun moveResultSeparatesTheRequestedDropCellFromTheNormalizedFinalCells() {
+        val home = HomeId("home")
+        seedHome(home.value)
+        val anchor = placement(home.value, "anchor", 0)
+        val mover = placement(home.value, "mover", 1)
+        val distant = placement(home.value, "distant", 2).copy(position = LogicalPosition(2, 10))
+        seed(anchor)
+        seed(mover)
+        seed(distant)
+
+        // The drop lands far below the content, so the requested row is not the final row.
+        val requested = LogicalPosition(1, 16)
+        val result = repository.move(home, mover.itemId, requested, 6) as MutationResult.Accepted
+
+        val final = result.gridResult.placements.associate {
+            it.id to LogicalPosition(it.position.column, it.position.row)
+        }
+        assertEquals(LogicalPosition(0, 0), final.getValue(anchor.itemId))
+        // Gaps of 9 and 5 empty rows are each reduced to 2: distant 10 -> 3, then mover 16 -> 6.
+        assertEquals(LogicalPosition(2, 3), final.getValue(distant.itemId))
+        assertEquals(LogicalPosition(1, 6), final.getValue(mover.itemId))
+        assertTrue(final.getValue(mover.itemId) != requested)
+        // The persisted rows and a later load agree with the accepted result, not with the request.
+        assertEquals(LogicalPosition(1, 6), dao.placement(mover.itemId.value)!!.toDomain().position)
+        val loaded = (repository.load(home, 6) as LoadResult.Loaded).placements
+            .associate { it.itemId to it.position }
+        assertEquals(final, loaded)
+    }
+
     @Test fun resizeNormalizesExcessiveGapWithoutChangingShiftedFieldsOrOtherHome() {
         val home = HomeId("home")
         val otherHome = HomeId("other")

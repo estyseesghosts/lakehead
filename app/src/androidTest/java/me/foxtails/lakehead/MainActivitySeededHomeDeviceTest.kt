@@ -174,9 +174,8 @@ class MainActivitySeededHomeDeviceTest {
         try {
             awaitActivityCatalogue(scenario, entries.mapTo(mutableSetOf()) { it.identity })
             waitForText(nearEntry.label)
-            composeRule.waitUntil(timeoutMillis = 30_000) {
-                composeRule.onAllNodesWithText(distantEntry.label).fetchSemanticsNodes().isEmpty()
-            }
+            // Phase 5: Home composes every tile, so the distant row exists before it is scrolled to.
+            waitForText(distantEntry.label)
             waitForText("Set ProtoLaunch as default home")
 
             var distantVisible = false

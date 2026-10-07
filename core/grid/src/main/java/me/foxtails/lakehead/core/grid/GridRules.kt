@@ -44,12 +44,30 @@ object GridRules {
         position: GridPosition,
         columns: Int,
     ): Result<T> {
+        val rejection = moveRejection(placements, id, position, columns)
+        if (rejection != null) return Result.Rejected(rejection)
+        val index = placements.indexOfFirst { it.id == id }
+        return Result.Accepted(replaced(placements, index, placements[index].copy(position = position)))
+    }
+
+    /**
+     * Legality of moving an existing item, or `null` when the move is legal.
+     *
+     * Same rule as [move], but it answers only the legality question and does
+     * not materialize the replaced list, so a per-frame preview query costs a
+     * scan instead of an O(n) copy. [move] delegates here, so the two can
+     * never disagree.
+     */
+    fun <T : Any> moveRejection(
+        placements: List<GridPlacement<T>>,
+        id: T,
+        position: GridPosition,
+        columns: Int,
+    ): Rejection? {
         requireValidColumns(columns)
         val index = placements.indexOfFirst { it.id == id }
-        if (index == -1) return Result.Rejected(Rejection.UNKNOWN_ITEM)
-        val current = placements[index]
-        val moved = current.copy(position = position)
-        return replaceExisting(placements, index, moved, columns)
+        if (index == -1) return Rejection.UNKNOWN_ITEM
+        return legality(placements[index].copy(position = position), placements, columns, index)
     }
 
     /** Resizes an existing item, ignoring its own current occupied cells. */
@@ -59,12 +77,26 @@ object GridRules {
         span: GridSpan,
         columns: Int,
     ): Result<T> {
+        val rejection = resizeRejection(placements, id, span, columns)
+        if (rejection != null) return Result.Rejected(rejection)
+        val index = placements.indexOfFirst { it.id == id }
+        return Result.Accepted(replaced(placements, index, placements[index].copy(span = span)))
+    }
+
+    /**
+     * Legality of resizing an existing item, or `null` when it is legal.
+     * Allocation-free counterpart of [resize], which delegates here.
+     */
+    fun <T : Any> resizeRejection(
+        placements: List<GridPlacement<T>>,
+        id: T,
+        span: GridSpan,
+        columns: Int,
+    ): Rejection? {
         requireValidColumns(columns)
         val index = placements.indexOfFirst { it.id == id }
-        if (index == -1) return Result.Rejected(Rejection.UNKNOWN_ITEM)
-        val current = placements[index]
-        val resized = current.copy(span = span)
-        return replaceExisting(placements, index, resized, columns)
+        if (index == -1) return Rejection.UNKNOWN_ITEM
+        return legality(placements[index].copy(span = span), placements, columns, index)
     }
 
     private fun <T : Any> insertOrReplace(
@@ -92,9 +124,18 @@ object GridRules {
     ): Result<T> {
         val rejection = legality(candidate, placements, columns, index)
         if (rejection != null) return Result.Rejected(rejection)
+        return Result.Accepted(replaced(placements, index, candidate))
+    }
+
+    /** Returns [placements] with the entry at [index] replaced, order and length retained. */
+    private fun <T : Any> replaced(
+        placements: List<GridPlacement<T>>,
+        index: Int,
+        candidate: GridPlacement<T>,
+    ): List<GridPlacement<T>> {
         val result = placements.toMutableList()
         result[index] = candidate
-        return Result.Accepted(result.toList())
+        return result.toList()
     }
 
     private fun <T : Any> legality(

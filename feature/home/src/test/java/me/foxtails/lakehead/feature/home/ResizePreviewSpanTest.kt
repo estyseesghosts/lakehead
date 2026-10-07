@@ -60,8 +60,8 @@ class ResizePreviewSpanTest {
         var state = HomeEditState.Normal
             .enterOnLongPress(t.itemId)
             .toggleResizeArmed()
-            .beginResize(t, metrics)
-        requests.forEach { state = state.updateResize(it, placements) }
+            .beginResize(t, placements, metrics)
+        requests.forEach { state = state.updateResize(it) }
         return state.drag as DragState.Resize
     }
 
@@ -137,8 +137,8 @@ class ResizePreviewSpanTest {
         val state = HomeEditState.Normal
             .enterOnLongPress(t.itemId)
             .toggleResizeArmed()
-            .beginResize(t, metrics)
-            .updateResize(LogicalSpan(2, 1), placements)
+            .beginResize(t, placements, metrics)
+            .updateResize(LogicalSpan(2, 1))
         val resize = state.drag as DragState.Resize
 
         assertEquals(CandidateValidity.COLLIDING, resize.validity)

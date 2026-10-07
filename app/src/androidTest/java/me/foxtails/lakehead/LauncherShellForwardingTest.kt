@@ -8,7 +8,6 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import me.foxtails.lakehead.core.grid.GridColumns
-import me.foxtails.lakehead.core.grid.GridRowWindow
 import me.foxtails.lakehead.core.grid.GridVerticalExtent
 import me.foxtails.lakehead.core.model.AppIdentity
 import me.foxtails.lakehead.core.model.ComponentIdentity
@@ -69,7 +68,6 @@ class LauncherShellForwardingTest {
         tiles = tiles,
         columns = GridColumns(6),
         extent = GridVerticalExtent(4L, 10L),
-        window = GridRowWindow(0L, 10L),
     )
 
     @Test

@@ -10,7 +10,6 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import me.foxtails.lakehead.core.grid.GridColumns
-import me.foxtails.lakehead.core.grid.GridRowWindow
 import me.foxtails.lakehead.core.grid.GridVerticalExtent
 import me.foxtails.lakehead.core.model.HomeId
 import me.foxtails.lakehead.feature.allapps.AllAppsViewState
@@ -386,6 +385,5 @@ class FeedSurfaceTest {
         tiles = emptyList(),
         columns = GridColumns(6),
         extent = GridVerticalExtent(4L, 10L),
-        window = GridRowWindow(0L, 10L),
     )
 }

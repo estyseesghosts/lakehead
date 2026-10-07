@@ -172,8 +172,8 @@ class EditTransferDragTest {
 
         // Resize A to 2x1, release: selection and arm are kept, no drag remains.
         val resized = editingA.toggleResizeArmed()
-            .beginResize(tiles[0], metrics)
-            .updateResize(LogicalSpan(2, 1), tiles)
+            .beginResize(tiles[0], tiles, metrics)
+            .updateResize(LogicalSpan(2, 1))
             .finish()
         assertEquals(HomeEditCommit.Resize(tileA, LogicalSpan(2, 1)), resized.commit)
         assertEquals(DragState.None, resized.state.drag)
@@ -183,7 +183,7 @@ class EditTransferDragTest {
         val moved = resized.state
             .selectOnTap(tileB)
             .beginMove(after[1], after, metrics, 0f, 0f)
-            .updateMove(valid(3, 1), after)
+            .updateMove(valid(3, 1))
             .finish()
 
         assertEquals(HomeEditCommit.Move(tileB, LogicalPosition(3, 1)), moved.commit)
@@ -200,7 +200,7 @@ class EditTransferDragTest {
             transferDragRoute(isTransfer = false, arrowHit = true, armed = true, hasTile = true),
         )
         val tiles = listOf(tile(tileA, 0, 0), tile(tileB, 3, 0))
-        val resizing = editingA.toggleResizeArmed().beginResize(tiles[0], metrics)
+        val resizing = editingA.toggleResizeArmed().beginResize(tiles[0], tiles, metrics)
         assertEquals(tileA, resizing.resizeDrag!!.itemId)
     }
 }
