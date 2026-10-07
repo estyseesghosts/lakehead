@@ -225,7 +225,7 @@ class MoveResizeRoutingTest {
     }
 
     @Test
-    fun smallTile_signedFrame_bodyDrag_routesMove() {
+    fun smallTile_pixelFrame_bodyDrag_routesMove() {
         // Signed G3 frame overload shrinks identically: body above the row
         // origin stays body.
         val frame = SignedPixelFrame(left = 0, top = -100, widthPx = 48, heightPx = 48)

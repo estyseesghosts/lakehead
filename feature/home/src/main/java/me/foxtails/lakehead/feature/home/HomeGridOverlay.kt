@@ -82,7 +82,7 @@ internal fun HomeGridOverlay(
             // corner during a resize drag.
             // Frame from `gridMetrics`: its top is final Box content coordinates.
             val previewSpan = editState.renderedSpan(controlItemId, activeTile.span)
-            val tileBounds = gridMetrics.signedFrame(
+            val tileBounds = gridMetrics.pixelFrame(
                 moveDrag?.originalPosition ?: activeTile.position,
                 previewSpan,
             )

@@ -306,10 +306,6 @@ class HomeDragRoutingTest {
             resolveDragEnd(DragExit.LIFTED, finished, isVisible = false),
         )
         assertEquals(
-            HomeDragEnd.Discarded(HomeDragDiscard.STOLEN),
-            resolveDragEnd(DragExit.STOLEN, finished, isVisible = true),
-        )
-        assertEquals(
             HomeDragEnd.Discarded(HomeDragDiscard.CANCELLED),
             resolveDragEnd(DragExit.CANCELLED, finished, isVisible = true),
         )

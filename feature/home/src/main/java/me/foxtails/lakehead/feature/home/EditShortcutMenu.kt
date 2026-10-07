@@ -104,7 +104,7 @@ internal fun EditShortcutMenu(
     }
     val density = LocalDensity.current
     val scheme = MaterialTheme.colorScheme
-    val tileFrame = metrics.signedFrame(tile.position, tile.span)
+    val tileFrame = metrics.pixelFrame(tile.position, tile.span)
     // Single measured content size: the width cap and the natural height are
     // derived once from the shared row height plus the exact vertical padding
     // rendered below (two half-pads, one computation, so math and render

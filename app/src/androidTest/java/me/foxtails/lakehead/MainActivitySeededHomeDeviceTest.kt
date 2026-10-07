@@ -2,6 +2,8 @@ package me.foxtails.lakehead
 
 import android.content.Context
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
+import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -71,7 +73,7 @@ class MainActivitySeededHomeDeviceTest {
     }
 
     @Test
-    fun explicitlySeededEmptyHomeShowsEmptyStateAndOnlyTruthfulHomeRoleControl() {
+    fun explicitlySeededEmptyHomeShowsEmptyStateAndNoHomeRoleOverlay() {
         cleanDatabase()
         insertHomeOnly()
         val catalogue = discoverCatalogue()
@@ -79,14 +81,15 @@ class MainActivitySeededHomeDeviceTest {
         try {
             awaitActivityCatalogue(scenario, setOf(catalogue.first().identity))
             waitForText("Home is empty")
-            waitForText("Set ProtoLaunch as default home")
-            assertEquals(
-                1,
-                composeRule.onAllNodesWithText("Set ProtoLaunch as default home").fetchSemanticsNodes().size,
-            )
-            catalogue.firstOrNull()?.label?.let { label ->
-                waitForTextAbsent(label)
-            }
+            // HomeCanvas :33-35: no HOME-role overlay is rendered; onRequestDefaultHome is
+            // retained for a future settings entry. No surface currently renders a
+            // HOME-role control, so the overlay string must not appear.
+            waitForTextAbsent("Set ProtoLaunch as default home")
+            // No home-tile-icon nodes exist on the home surface; a global
+            // label-absence check is wrong because the adjacent All Apps
+            // pager also composes catalogue labels as text nodes.
+            composeRule.onAllNodesWithTag("home-tile-icon", useUnmergedTree = true)
+                .assertCountEquals(0)
         } finally {
             scenario.close()
             cleanDatabase()
@@ -149,7 +152,7 @@ class MainActivitySeededHomeDeviceTest {
     }
 
     @Test
-    fun sparsePlacementsScrollToDistantRowWhileHomeRoleOverlayStaysPresent() {
+    fun sparsePlacementsScrollToDistantRowWithNoHomeRoleOverlay() {
         cleanDatabase()
         val catalogueEntries = discoverCatalogue()
         val entries = catalogueEntries
@@ -176,7 +179,6 @@ class MainActivitySeededHomeDeviceTest {
             waitForText(nearEntry.label)
             // Phase 5: Home composes every tile, so the distant row exists before it is scrolled to.
             waitForText(distantEntry.label)
-            waitForText("Set ProtoLaunch as default home")
 
             var distantVisible = false
             repeat(10) {
@@ -204,11 +206,9 @@ class MainActivitySeededHomeDeviceTest {
                 "Scroll must move the sparse window (near=$nearStillVisible distant=$distantNowVisible)",
                 !nearStillVisible || distantNowVisible,
             )
-            waitForText("Set ProtoLaunch as default home")
-            assertEquals(
-                1,
-                composeRule.onAllNodesWithText("Set ProtoLaunch as default home").fetchSemanticsNodes().size,
-            )
+            // HomeCanvas :33-35: no HOME-role overlay is rendered; the overlay string must
+            // not appear after scroll either.
+            waitForTextAbsent("Set ProtoLaunch as default home")
         } finally {
             scenario.close()
             cleanDatabase()

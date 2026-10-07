@@ -398,7 +398,7 @@ class HomeRenderProjectionTest {
         // extent — an empty grid has no intrinsic rows. The usable-viewport minimum
         // is imposed by the viewport owner, not the measurement.
         val extent = HomeRenderProjection.measureExtent(emptyList(), 10L, 2L)
-        val expected = GridVerticalLayout.measure<GridPlacement<ItemId>>(emptyList(), 10L, 2L)
+        val expected = GridVerticalLayout.measure(emptyList(), 10L, 2L)
         assertEquals(expected, extent)
         assertEquals(0L, extent.occupiedBottomRowExclusive)
         assertEquals(0L, extent.totalScrollableRows)

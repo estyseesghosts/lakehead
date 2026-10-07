@@ -345,18 +345,17 @@ internal fun isEditTransferDrag(
 /**
  * Release commit from the pointer loop's single state.
  *
- * Returns [HomeEditFinish.commit] unless the gesture was stolen, the page hid
- * mid-gesture ([isVisible] false), or the loop exited without an explicit
+ * Returns [HomeEditFinish.commit] unless the page hid
+ * mid-gesture ([isVisible] false) or the loop exited without an explicit
  * pointer-up ([completedByUp] false — null await, coroutine cancellation, or a
  * consumed change), in which case null (zero-write).
  */
 internal fun releaseCommit(
     finished: HomeEditFinish,
-    stolen: Boolean,
     isVisible: Boolean,
     completedByUp: Boolean = true,
 ): HomeEditCommit? {
-    if (stolen || !isVisible || !completedByUp) return null
+    if (!isVisible || !completedByUp) return null
     return finished.commit
 }
 

@@ -11,11 +11,11 @@ import org.junit.Test
 /**
  * Rest-offset and content-height coverage for the home canvas helpers.
  *
- * Covers [contentMinHeightPx] (row-count height, saturating), [signedRestFor]
+ * Covers [contentMinHeightPx] (row-count height, saturating), [restFor]
  * (tall anchors zero, short applies the 0.45 bias) and the absolute
- * [HomeGridMetrics.signedFrame] top formula.
+ * [HomeGridMetrics.pixelFrame] top formula.
  */
-class HomeCanvasSignedRendererTest {
+class HomeCanvasRestOffsetTest {
 
     private val geometry = SquareCellGeometry(
         columnCount = 5,
@@ -65,10 +65,10 @@ class HomeCanvasSignedRendererTest {
     }
 
     @Test
-    fun signedRestFor_tallContentAnchorsAtZero() {
+    fun restFor_tallContentAnchorsAtZero() {
         // Content (3290px for 30 rows of stride 110 minus final gap) exceeds the
         // 1000px viewport: tall branch anchors minRow 0 at the viewport top.
-        val rest = signedRestFor(
+        val rest = restFor(
             viewportHeightPx = 1000,
             contentHeightPx = 3290,
             rowStridePx = 110L,
@@ -79,9 +79,9 @@ class HomeCanvasSignedRendererTest {
     }
 
     @Test
-    fun signedRestFor_shortContentAppliesBias() {
+    fun restFor_shortContentAppliesBias() {
         // Viewport 2000, content 800, stride 200: free 1200 × 0.45 → origin 540.
-        val rest = signedRestFor(
+        val rest = restFor(
             viewportHeightPx = 2000,
             contentHeightPx = 800,
             rowStridePx = 200L,
@@ -91,14 +91,14 @@ class HomeCanvasSignedRendererTest {
     }
 
     @Test
-    fun signedRestFor_emptyViewportReturnsNull() {
+    fun restFor_emptyViewportReturnsNull() {
         assertNull(
-            signedRestFor(viewportHeightPx = 0, contentHeightPx = 100, rowStridePx = 108L),
+            restFor(viewportHeightPx = 0, contentHeightPx = 100, rowStridePx = 108L),
         )
     }
 
     @Test
-    fun signedFrames_applyRestOffsetFromPermanentRowZero() {
+    fun pixelFrames_applyRestOffsetFromPermanentRowZero() {
         val metrics = homeGridMetricsFor(geometry, columns = 5, originXPx = 0, restOffsetYPx = 540f)
         val spans = listOf(
             LogicalSpan(1, 1),
@@ -110,10 +110,10 @@ class HomeCanvasSignedRendererTest {
         for (row in 0..2) {
             val expectedTop = 540 + row * 108
             for (span in spans) {
-                assertEquals(expectedTop, metrics.signedFrame(LogicalPosition(0, row), span).top)
+                assertEquals(expectedTop, metrics.pixelFrame(LogicalPosition(0, row), span).top)
             }
         }
-        val first = metrics.signedFrame(LogicalPosition(0, 0), LogicalSpan(1, 1))
+        val first = metrics.pixelFrame(LogicalPosition(0, 0), LogicalSpan(1, 1))
         assertEquals(540, first.top)
         assertEquals(640, first.bottom)
     }

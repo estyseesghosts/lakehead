@@ -47,12 +47,12 @@ class HomeCanvasOriginAnimTest {
         // (15 * 100 + 14 * 8 = 1612px) fit → short, biased origin
         // round((2000 - 1612) * 0.45) = round(174.6) = 175.
         val viewportHeightPx = 2000
-        val beforeRest = signedRestFor(
+        val beforeRest = restFor(
             viewportHeightPx = viewportHeightPx,
             contentHeightPx = 3232,
             rowStridePx = stride,
         )
-        val afterRest = signedRestFor(
+        val afterRest = restFor(
             viewportHeightPx = viewportHeightPx,
             contentHeightPx = 1612,
             rowStridePx = stride,
@@ -75,8 +75,8 @@ class HomeCanvasOriginAnimTest {
         val beforeTops = mutableListOf<Int>()
         val afterTops = mutableListOf<Int>()
         for (row in 0..2) {
-            val before = beforeMetrics.signedFrame(LogicalPosition(0, row), LogicalSpan(1, 1))
-            val after = afterMetrics.signedFrame(LogicalPosition(0, row), LogicalSpan(1, 1))
+            val before = beforeMetrics.pixelFrame(LogicalPosition(0, row), LogicalSpan(1, 1))
+            val after = afterMetrics.pixelFrame(LogicalPosition(0, row), LogicalSpan(1, 1))
             assertEquals(delta, (after.top - before.top).toLong())
             assertEquals(delta, (after.bottom - before.bottom).toLong())
             beforeTops += before.top

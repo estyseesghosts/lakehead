@@ -11,7 +11,7 @@ import org.junit.Test
  * A3 normal-viewport policy coverage for the home canvas.
  *
  * - [usableCanvasHeightPx]: raw viewport minus bottom clearance, floored at zero.
- * - Exact overflow through [signedRestFor]: short/exact-fit content is not scrollable
+ * - Exact overflow through [restFor]: short/exact-fit content is not scrollable
  *   (range 0, no scroll), one stride of overflow scrolls exactly one stride (the last
  *   cell is reachable with no tail).
  * - Floating pill through [contentContainerHeightPx]: the container is
@@ -64,7 +64,7 @@ class HomeNormalViewportTest {
     @Test
     fun exactFitContent_hasZeroRangeAndCannotScroll() {
         // Natural 1800 in usable 1800: exact fit, range 0, not scrollable.
-        val rest = signedRestFor(
+        val rest = restFor(
             viewportHeightPx = 1800,
             contentHeightPx = 1800,
             rowStridePx = 108L,
@@ -75,7 +75,7 @@ class HomeNormalViewportTest {
 
     @Test
     fun shortContent_hasZeroRangeAndCannotScroll() {
-        val rest = signedRestFor(
+        val rest = restFor(
             viewportHeightPx = 1800,
             contentHeightPx = 424,
             rowStridePx = 108L,
@@ -89,7 +89,7 @@ class HomeNormalViewportTest {
         // Natural one stride over usable: the range is exactly that stride, so
         // scrolling to the maximum lands the last cell flush with no tail.
         // 17 rows × 100px cells + 16 × 8px gaps = 1828; usable 1720 → range 108.
-        val rest = signedRestFor(
+        val rest = restFor(
             viewportHeightPx = 1720,
             contentHeightPx = 1828,
             rowStridePx = 108L,
@@ -107,7 +107,7 @@ class HomeNormalViewportTest {
         )
         // 17 rows × 100 + 16 × 8 = 1828; usable 1827 → range 1.
         assertEquals(1, committedScrollMaxPx(extent, 100, 8, 1827))
-        val rest = signedRestFor(1827, 1828, 108L)
+        val rest = restFor(1827, 1828, 108L)
         assertEquals(1L, rest?.scrollRangePx)
         assertTrue(rest?.scrollable ?: false)
     }
@@ -120,7 +120,7 @@ class HomeNormalViewportTest {
             totalScrollableRows = 20L,
         )
         assertEquals(432, committedScrollMaxPx(extent, 100, 8, 1720))
-        val rest = signedRestFor(1720, 2152, 108L)
+        val rest = restFor(1720, 2152, 108L)
         assertEquals(432L, rest?.scrollRangePx)
     }
 
@@ -158,7 +158,7 @@ class HomeNormalViewportTest {
         val safe = usableCanvasHeightPx(rawHeightPx = raw, bottomClearancePx = clearance)
         assertEquals(1720, safe)
         assertEquals(raw, contentContainerHeightPx(208, raw, clearance))
-        val rest = signedRestFor(safe, 208, 108L)
+        val rest = restFor(safe, 208, 108L)
         assertEquals(0L, rest?.scrollRangePx)
         assertFalse(rest?.scrollable ?: true)
     }
@@ -171,7 +171,7 @@ class HomeNormalViewportTest {
         val clearance = 280
         val safe = usableCanvasHeightPx(rawHeightPx = raw, bottomClearancePx = clearance)
         assertEquals(raw, contentContainerHeightPx(safe, raw, clearance))
-        val rest = signedRestFor(safe, safe, 108L)
+        val rest = restFor(safe, safe, 108L)
         assertEquals(0L, rest?.scrollRangePx)
         assertFalse(rest?.scrollable ?: true)
     }
@@ -187,7 +187,7 @@ class HomeNormalViewportTest {
         val container = contentContainerHeightPx(1828, raw, clearance)
         assertEquals(2108, container)
         assertEquals(108, container - raw)
-        val rest = signedRestFor(safe, 1828, 108L)
+        val rest = restFor(safe, 1828, 108L)
         assertEquals(108L, rest?.scrollRangePx)
         assertTrue(rest?.scrollable ?: false)
         assertEquals(rest?.scrollRangePx?.toInt(), container - raw)
@@ -200,8 +200,8 @@ class HomeNormalViewportTest {
         val clearance = 280
         val safeBefore = usableCanvasHeightPx(rawHeightPx = 2000, bottomClearancePx = clearance)
         val safeAfter = usableCanvasHeightPx(rawHeightPx = 2200, bottomClearancePx = clearance)
-        assertEquals(108L, signedRestFor(safeBefore, 1828, 108L)?.scrollRangePx)
-        assertEquals(0L, signedRestFor(safeAfter, 1828, 108L)?.scrollRangePx)
+        assertEquals(108L, restFor(safeBefore, 1828, 108L)?.scrollRangePx)
+        assertEquals(0L, restFor(safeAfter, 1828, 108L)?.scrollRangePx)
         assertEquals(2108, contentContainerHeightPx(1828, 2000, clearance))
         assertEquals(2200, contentContainerHeightPx(1828, 2200, clearance))
     }
@@ -213,10 +213,10 @@ class HomeNormalViewportTest {
         val raw = 2000
         val clearance = 280
         val safe = usableCanvasHeightPx(rawHeightPx = raw, bottomClearancePx = clearance)
-        assertEquals(1L, signedRestFor(safe, safe + 1, 108L)?.scrollRangePx)
-        assertTrue(signedRestFor(safe, safe + 1, 108L)?.scrollable ?: false)
-        assertEquals(0L, signedRestFor(safe, safe - 1, 108L)?.scrollRangePx)
-        assertFalse(signedRestFor(safe, safe - 1, 108L)?.scrollable ?: true)
+        assertEquals(1L, restFor(safe, safe + 1, 108L)?.scrollRangePx)
+        assertTrue(restFor(safe, safe + 1, 108L)?.scrollable ?: false)
+        assertEquals(0L, restFor(safe, safe - 1, 108L)?.scrollRangePx)
+        assertFalse(restFor(safe, safe - 1, 108L)?.scrollable ?: true)
     }
 
     @Test

@@ -19,7 +19,7 @@ class HomeGridLayoutTest {
     )
 
     private fun frame(m: HomeGridMetrics, column: Int, row: Int, cols: Int = 1, rows: Int = 1) =
-        m.signedFrame(LogicalPosition(column, row), LogicalSpan(cols, rows))
+        m.pixelFrame(LogicalPosition(column, row), LogicalSpan(cols, rows))
 
     @Test
     fun tileFrame_dependsOnlyOnItsOwnRowAndColumn() {

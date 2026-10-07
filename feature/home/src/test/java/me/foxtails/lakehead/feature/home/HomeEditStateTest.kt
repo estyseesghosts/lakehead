@@ -391,4 +391,118 @@ class HomeEditStateTest {
         assertEquals(LogicalSpan(1, 1), s.renderedSpan(ItemId("b"), LogicalSpan(1, 1)))
         assertEquals(LogicalSpan(1, 1), moving().renderedSpan(ItemId("a"), LogicalSpan(1, 1)))
     }
+
+    // ── P1 ticker integration: stationary remap via HomeEditState.moveTo ─
+
+    private fun tickerTile(id: String, column: Int = 0, row: Int = 0) = HomeRenderTile(
+        itemId = ItemId(id),
+        appIdentity = identity,
+        position = LogicalPosition(column, row),
+        span = LogicalSpan(1, 1),
+        availability = ItemAvailability.AVAILABLE,
+        label = id,
+        icon = null,
+        isLaunchable = true,
+    )
+
+    private fun tickerMetrics() = HomeGridMetrics(
+        columns = 6,
+        cellWidthPx = 100f,
+        cellHeightPx = 100f,
+        columnGapPx = 0f,
+        rowGapPx = 8f,
+        originXPx = 0f,
+        restOffsetYPx = 0f,
+    )
+
+    private fun enteredFrom(t: HomeRenderTile, tiles: List<HomeRenderTile>): HomeEditState =
+        HomeEditState.Normal
+            .enterOnLongPress(t.itemId)
+            .beginMove(t, tiles, tickerMetrics(), 0f, 0f)
+
+    private fun remap(
+        state: HomeEditState,
+        x: Float,
+        y: Float,
+        scroll: Int,
+    ) = state.moveTo(
+        pointerXPx = x,
+        pointerYPxViewport = y,
+        scrollYPx = scroll.toFloat(),
+    )
+
+    private fun HomeEditState.movePreview() = (drag as DragState.Move)
+
+    @Test
+    fun tickerRemap_stationaryHold_advancingScroll_updatesCandidate() {
+        val tiles = listOf(tickerTile("a", 0, 0), tickerTile("b", 2, 2))
+        val entered = enteredFrom(tiles[1], tiles)
+        val atRest = remap(entered, 250f, 1700f, scroll = 0)
+        val scrolled = remap(atRest, 250f, 1700f, scroll = 108)
+        assertEquals(LogicalPosition(2, 15), atRest.movePreview().previewPosition)
+        assertEquals(LogicalPosition(2, 16), scrolled.movePreview().previewPosition)
+        assertEquals(
+            HomeEditCommit.Move(ItemId("b"), LogicalPosition(2, 16)),
+            scrolled.finish().commit,
+        )
+    }
+
+    @Test
+    fun tickerRemap_blockedPostScrollCell_holdsLastValid() {
+        val tiles = listOf(tickerTile("a", 0, 0), tickerTile("b", 2, 2))
+        val entered = enteredFrom(tiles[0], tiles)
+        val atRest = remap(entered, 50f, 50f, scroll = 0)
+        // content y 50 + 200 = 250 → row 2, column 2 → tile b's cell.
+        val scrolled = remap(atRest, 250f, 50f, scroll = 200)
+        assertEquals(CandidateValidity.COLLIDING, scrolled.movePreview().validity)
+        assertEquals(atRest.movePreview().previewPosition, scrolled.movePreview().previewPosition)
+    }
+
+    @Test
+    fun tickerRemap_pastEdge_isRejectedNotClamped_keepsLastValid() {
+        val tiles = listOf(tickerTile("a", 0, 0))
+        val entered = enteredFrom(tiles[0], tiles)
+        val atRest = remap(entered, 150f, 50f, scroll = 0)
+        val past = remap(atRest, 650f, 50f, scroll = 0)
+
+        assertEquals(LogicalPosition(1, 0), past.movePreview().previewPosition)
+        assertEquals(CandidateValidity.OUT_OF_BOUNDS, past.movePreview().validity)
+        assertEquals(null, past.finish().commit)
+    }
+
+    // ── release-only commit / zero-write cancel ─────────────────────────
+
+    private fun movingWithSnapshot(
+        t: HomeRenderTile = a,
+        snapshot: List<HomeRenderTile>,
+    ) = editing(t.itemId.value).beginMove(t, snapshot, metrics, 10f, 10f)
+
+    @Test
+    fun releaseCommit_singlePositionFromLastValid() {
+        // Scrolling/edge steps never commit: only finish() at release yields
+        // a position, exactly once, from the last valid cell.
+        val tB = tile("b", column = 2, row = 2)
+        val snapshot = listOf(a, tB)
+        val state = movingWithSnapshot(tB, snapshot).updateMove(
+            MoveCellResult.Valid(RequestedCell(3, 3), LogicalPosition(3, 3)),
+        )
+        assertEquals(HomeEditCommit.Move(ItemId("b"), LogicalPosition(3, 3)), state.finish().commit)
+    }
+
+    @Test
+    fun cancel_zeroWrite_noCommitPosition() {
+        val tB = tile("b", column = 2, row = 2)
+        val snapshot = listOf(a, tB)
+        val state = movingWithSnapshot(tB, snapshot).updateMove(
+            MoveCellResult.Valid(RequestedCell(3, 3), LogicalPosition(3, 3)),
+        )
+        // Cancel (back/empty-tap/pager steal): no drag carries no commit.
+        assertNull(state.cancelDrag().finish().commit)
+    }
+
+    @Test
+    fun noMoveRelease_noCommitPosition() {
+        // A drag that never leaves the origin commits nothing.
+        assertNull(moving(a).finish().commit)
+    }
 }

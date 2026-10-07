@@ -88,19 +88,17 @@ class HomePointerLoopRegressionTest {
         .updateResize(LogicalSpan(2, 2))
 
     private fun HomeEditState.releaseMove(
-        stolen: Boolean = false,
         isVisible: Boolean = true,
         completedByUp: Boolean = true,
     ): LogicalPosition? = (
-        releaseCommit(finish(), stolen, isVisible, completedByUp) as? HomeEditCommit.Move
+        releaseCommit(finish(), isVisible, completedByUp) as? HomeEditCommit.Move
         )?.position
 
     private fun HomeEditState.releaseResize(
-        stolen: Boolean = false,
         isVisible: Boolean = true,
         completedByUp: Boolean = true,
     ): LogicalSpan? = (
-        releaseCommit(finish(), stolen, isVisible, completedByUp) as? HomeEditCommit.Resize
+        releaseCommit(finish(), isVisible, completedByUp) as? HomeEditCommit.Resize
         )?.span
 
     // ── P1: stationary-hold-then-release commits the post-scroll cell ──
@@ -174,16 +172,6 @@ class HomePointerLoopRegressionTest {
         val state = resized()
         assertEquals(LogicalSpan(2, 2), state.releaseResize(completedByUp = true))
         assertNull(state.releaseResize(completedByUp = false))
-    }
-
-    @Test
-    fun stolenMoveRelease_suppressesCommit() {
-        assertNull(movedTo(3, 3).releaseMove(stolen = true))
-    }
-
-    @Test
-    fun stolenResizeRelease_suppressesCommit() {
-        assertNull(resized().releaseResize(stolen = true))
     }
 
     @Test

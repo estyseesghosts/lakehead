@@ -44,7 +44,7 @@ internal fun HomeGridLayout(
             check(measurables.size == tiles.size) {
                 "measurables (${measurables.size}) must match tiles (${tiles.size})"
             }
-            val frames = tiles.map { tile -> metrics.signedFrame(tile.position, renderedSpan(tile)) }
+            val frames = tiles.map { tile -> metrics.pixelFrame(tile.position, renderedSpan(tile)) }
             val placeables = measurables.mapIndexed { index, measurable ->
                 measurable.measure(Constraints.fixed(frames[index].widthPx, frames[index].heightPx))
             }

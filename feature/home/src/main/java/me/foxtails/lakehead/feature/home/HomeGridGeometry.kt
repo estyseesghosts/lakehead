@@ -79,7 +79,7 @@ data class HomeGridMetrics(
      * [rect] converted to the Int frame the designsystem placement helpers consume.
      * The metrics' float origins carry whole pixels, so rounding is exact.
      */
-    fun signedFrame(position: LogicalPosition, span: LogicalSpan): SignedPixelFrame {
+    fun pixelFrame(position: LogicalPosition, span: LogicalSpan): SignedPixelFrame {
         val rect = rect(position, span)
         return SignedPixelFrame(
             left = rect.left.roundToInt(),
@@ -187,7 +187,7 @@ internal fun centeredOriginX(
  * G5 animated-origin target: the signed rest origin as a Float for the single
  * origin [Animatable] in [HomeCanvasGrid].
  *
- * The rest is the [signedRestFor] result, so this equals the signed
+ * The rest is the [restFor] result, so this equals the signed
  * `gridOriginY` target (bias centering for short content, zero anchor for tall
  * content); a `null` rest yields `0`. Placements are untouched — only the
  * shared origin moves.
@@ -207,7 +207,7 @@ internal fun shouldSnapOrigin(
 ): Boolean = isFirstFrame || rest == null || viewportHeightPx <= 0
 
 /**
- * Computes the G2 rest offset for the content.
+ * Computes the rest offset for the content.
  *
  * The rest is computed with `minRow = 0`: row zero is the permanent origin and
  * `gridOriginY` is the offset added on top of it (bias centering for short
@@ -215,7 +215,7 @@ internal fun shouldSnapOrigin(
  * is not positive or the rest arithmetic overflows; callers fall back to `0L`
  * via the rest's `gridOriginY`.
  */
-internal fun signedRestFor(
+internal fun restFor(
     viewportHeightPx: Int,
     contentHeightPx: Int,
     rowStridePx: Long,
@@ -498,7 +498,7 @@ internal fun committedFrameFor(
     val naturalHeightPx = contentMinHeightPx(extent, geometry.cellSizePx, geometry.rowGapPx)
     return HomeCommittedFrame(
         extent = extent,
-        rest = signedRestFor(usableHeightPx, naturalHeightPx, rowStridePx),
+        rest = restFor(usableHeightPx, naturalHeightPx, rowStridePx),
     )
 }
 

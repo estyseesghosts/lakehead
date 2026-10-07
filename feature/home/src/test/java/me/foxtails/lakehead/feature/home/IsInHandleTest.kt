@@ -106,7 +106,7 @@ class IsInHandleTest {
     // ---- B3 hardening: signed-frame parity ----
 
     @Test
-    fun signedFrame_parityWithPixelRect() {
+    fun pixelFrame_parityWithPixelRect() {
         // B3: the G3 SignedPixelFrame overload applies the identical
         // bottom-right inward rule. Same 200x200 footprint, same 48px handle:
         // every verdict must agree with the PixelRect overload above.
@@ -122,7 +122,7 @@ class IsInHandleTest {
     }
 
     @Test
-    fun signedFrame_negativeTop_stillInward() {
+    fun pixelFrame_negativeTop_stillInward() {
         // B3: content above the row origin carries a negative top. A frame at
         // top=-100 (height 200 → bottom=100): the handle is [52,100] in y,
         // still inward over the corner, never outward past the tile.
@@ -135,7 +135,7 @@ class IsInHandleTest {
     }
 
     @Test(expected = IllegalArgumentException::class)
-    fun signedFrame_nonPositiveHandle_throws() {
+    fun pixelFrame_nonPositiveHandle_throws() {
         val signed = SignedPixelFrame(left = 0, top = 0, widthPx = 200, heightPx = 200)
         isInHandle(180f, 180f, signed, 0)
     }

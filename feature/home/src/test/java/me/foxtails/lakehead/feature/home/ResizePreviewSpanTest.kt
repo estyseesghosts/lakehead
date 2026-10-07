@@ -84,11 +84,11 @@ class ResizePreviewSpanTest {
 
         val animatedSpan = resizePreviewSpan(resize, reducedMotion = false)
         val snappedSpan = resizePreviewSpan(resize, reducedMotion = true)
-        val animatedFrame = metrics.signedFrame(
+        val animatedFrame = metrics.pixelFrame(
             resize.position,
             LogicalSpan(animatedSpan.columns, animatedSpan.rows),
         )
-        val snappedFrame = metrics.signedFrame(
+        val snappedFrame = metrics.pixelFrame(
             resize.position,
             LogicalSpan(snappedSpan.columns, snappedSpan.rows),
         )

@@ -33,7 +33,7 @@ internal interface HomeDragHost {
 }
 
 /** Why a drag that had begun produced no commit. */
-internal enum class HomeDragDiscard { CANCELLED, STOLEN, ABORTED, NO_CHANGE }
+internal enum class HomeDragDiscard { CANCELLED, ABORTED, NO_CHANGE }
 
 /** The commit intent or the discard reason emitted once when a drag ends. */
 internal sealed interface HomeDragEnd {
@@ -42,7 +42,7 @@ internal sealed interface HomeDragEnd {
 }
 
 /** How the pointer loop stopped. */
-internal enum class DragExit { LIFTED, CANCELLED, STOLEN, STALE }
+internal enum class DragExit { LIFTED, CANCELLED, STALE }
 
 /** Pure: maps a loop exit and the finished edit state to the one outward end. */
 internal fun resolveDragEnd(
@@ -53,14 +53,12 @@ internal fun resolveDragEnd(
     if (exit == DragExit.CANCELLED) return HomeDragEnd.Discarded(HomeDragDiscard.CANCELLED)
     val commit = releaseCommit(
         finished = finished,
-        stolen = exit == DragExit.STOLEN,
         isVisible = isVisible,
         completedByUp = exit == DragExit.LIFTED,
     )
     if (commit != null) return HomeDragEnd.Commit(commit)
     return HomeDragEnd.Discarded(
         when {
-            exit == DragExit.STOLEN -> HomeDragDiscard.STOLEN
             !isVisible || exit != DragExit.LIFTED -> HomeDragDiscard.ABORTED
             else -> HomeDragDiscard.NO_CHANGE
         },
@@ -124,11 +122,11 @@ private suspend fun AwaitPointerEventScope.awaitDownTile(
     val downTile = metrics.tileAt(snapshot.tiles, start.x, metrics.contentY(start.y, scrollYPx))
     val selectedTile = edit.selectedTileId?.let { id -> snapshot.tiles.firstOrNull { it.itemId == id } }
     val selectedInHandle = selectedTile?.let {
-        isInHandle(start.x, start.y + scrollYPx, metrics.signedFrame(it.position, it.span), handleSizePx)
+        isInHandle(start.x, start.y + scrollYPx, metrics.pixelFrame(it.position, it.span), handleSizePx)
     } == true
     if (!edit.isEditing || (downTile == null && !selectedInHandle)) return null
     val tile = downTile ?: selectedTile ?: return null
-    val bounds = metrics.signedFrame(tile.position, tile.span)
+    val bounds = metrics.pixelFrame(tile.position, tile.span)
     return DragDown(
         pointerId = first.id,
         position = start,
