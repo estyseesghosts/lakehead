@@ -736,12 +736,47 @@ class HomeRouteLoaderTest {
         val second = cache.snapshot()
         assertEquals(2, decoded)
         assertEquals(listOf(appA, appB), first.keys.toList())
-        assertNotSame(first, second)
+        assertSame(first, second)
         assertTrue(first[appB] === imageA)
         try {
             (first as MutableMap<*, *>).clear()
             throw AssertionError("snapshot must be immutable")
         } catch (_: UnsupportedOperationException) { }
+    }
+
+    @Test
+    fun decodedCacheDecodesOnlyNewOrChangedSnapshotsAndPublishesOnlyOnChange() {
+        var decodeCount = 0
+        val cache = DecodedIconCache<Any> { png ->
+            decodeCount++
+            Any().also { _ -> png.size }
+        }
+        val snapshotA = AppIconSnapshot(appA, byteArrayOf(1))
+        val snapshotB = AppIconSnapshot(appB, byteArrayOf(2))
+        val first = cache.replace(linkedMapOf(appA to snapshotA, appB to snapshotB))
+        assertEquals(2, decodeCount)
+
+        val unchanged = cache.replace(linkedMapOf(appA to snapshotA, appB to snapshotB))
+        assertEquals("Unchanged snapshots are not decoded again", 2, decodeCount)
+        assertSame("Nothing changed, so nothing is republished", first, unchanged)
+
+        val changedB = AppIconSnapshot(appB, byteArrayOf(3))
+        val updated = cache.replace(linkedMapOf(appA to snapshotA, appB to changedB))
+        assertEquals("Only the changed snapshot is decoded", 3, decodeCount)
+        assertSame("Unchanged icon keeps the same image instance", first[appA], updated[appA])
+        assertNotSame(first[appB], updated[appB])
+
+        val removed = cache.replace(linkedMapOf(appA to snapshotA))
+        assertEquals(3, decodeCount)
+        assertEquals(listOf(appA), removed.keys.toList())
+    }
+
+    @Test
+    fun decodedCacheKeepsEntriesWhenGivenAnEmptyCatalogue() {
+        val cache = DecodedIconCache<String> { "decoded" }
+        val first = cache.replace(linkedMapOf(appA to AppIconSnapshot(appA, byteArrayOf(1))))
+
+        assertSame(first, cache.replace(emptyMap()))
     }
 
     @Test

@@ -4,14 +4,12 @@ import android.app.Activity
 import android.os.Bundle
 import android.app.role.RoleManager
 import android.content.Context
-import android.graphics.BitmapFactory
 import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.setContent
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.graphics.asImageBitmap
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -103,9 +101,7 @@ class MainActivity : ComponentActivity() {
         )
     }
     private val decodedIcons by lazy(LazyThreadSafetyMode.NONE) {
-        DecodedIconCache { png ->
-            BitmapFactory.decodeByteArray(png, 0, png.size)?.asImageBitmap()
-        }
+        DecodedIconCache(::decodeAlpha8Icon)
     }
     private val homeViewportStyle by lazy(LazyThreadSafetyMode.NONE) {
         HomeCanvasViewportStyle(

@@ -4,7 +4,7 @@
 - Active objective: next slice per `docs/first_draft.md` roadmap (orchestrator directs).
 - Owner: orchestrator / next agent.
 - Latest handoff: [handoffs/2026-10-07-move-drag-repair.md](handoffs/2026-10-07-move-drag-repair.md) (move/drag repair slices 1-6 done; unit and `:feature:home` device tests PASS; real-finger pass pending; task `docs/agents/tasks/move-drag-repair.md`). Next: real-finger pass on R5CN70E2SGV, including scroll-then-drag coordinate check.
-- Icon cache work (in progress, uncommitted): slice 1 done, see [handoffs/2026-10-07-icon-cache-slice1.md](handoffs/2026-10-07-icon-cache-slice1.md). Next: slice 2 (incremental refresh + ALPHA_8 decode).
+- Icon cache work: slice 1 committed (`6aef799`), see [handoffs/2026-10-07-icon-cache-slice1.md](handoffs/2026-10-07-icon-cache-slice1.md). Slice 2 done, uncommitted: [handoffs/2026-10-07-icon-cache-slice2.md](handoffs/2026-10-07-icon-cache-slice2.md). Next: slice 3 (monochrome usability decision, resolver only).
 - Prior handoff retained as history: [handoffs/2026-10-07-release-builds-setup.md](handoffs/2026-10-07-release-builds-setup.md).
 - Newest prior handoff retained as history: [handoffs/2026-10-07-home-layout-export-import.md](handoffs/2026-10-07-home-layout-export-import.md).
 - Newest prior handoff retained as history: [handoffs/2026-10-07-grid-repair-phase10.md](handoffs/2026-10-07-grid-repair-phase10.md).

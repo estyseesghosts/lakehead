@@ -5,6 +5,7 @@ import me.foxtails.lakehead.core.model.ComponentIdentity
 import me.foxtails.lakehead.core.model.ProfileId
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -12,6 +13,7 @@ import org.junit.Test
 class AppIconSnapshotCacheTest {
     private val personal = ProfileId("personal")
     private val work = ProfileId("work")
+    private val provenance = AppIconProvenance(sourceStamp = 1L, encoderVersion = 1)
 
     @Test
     fun sameComponentInDifferentProfilesHasDistinctSnapshots() {
@@ -19,7 +21,8 @@ class AppIconSnapshotCacheTest {
         val workSnapshot = icon(work, "same.app", 2)
         val cache = AppIconSnapshotCache()
 
-        cache.replaceAll(listOf(personalSnapshot, workSnapshot))
+        cache.put(personalSnapshot, provenance)
+        cache.put(workSnapshot, provenance)
 
         assertEquals(personalSnapshot, cache[personalSnapshot.identity])
         assertEquals(workSnapshot, cache[workSnapshot.identity])
@@ -27,33 +30,33 @@ class AppIconSnapshotCacheTest {
     }
 
     @Test
-    fun replaceAllReplacesValuesAndRemovesIdentitiesNotInCurrentSet() {
+    fun retainOnlyDropsLeftIdentitiesAndKeepsTheOthersUntouched() {
         val removed = icon(personal, "removed.app", 1)
-        val retainedOld = icon(personal, "retained.app", 2)
-        val retainedFresh = icon(personal, "retained.app", 3)
-        val added = icon(work, "added.app", 4)
+        val retained = icon(personal, "retained.app", 2)
         val cache = AppIconSnapshotCache()
-        cache.replaceAll(listOf(removed, retainedOld))
+        cache.put(removed, provenance)
+        cache.put(retained, provenance)
 
-        cache.replaceAll(listOf(retainedFresh, added))
+        cache.retainOnly(setOf(retained.identity, identity(work, "never-cached.app")))
 
         assertNull(cache[removed.identity])
-        assertEquals(retainedFresh, cache[retainedFresh.identity])
-        assertEquals(added, cache[added.identity])
-        assertEquals(listOf(retainedFresh.identity, added.identity), cache.snapshot().keys.toList())
+        assertSame(retained, cache[retained.identity])
+        assertEquals(listOf(retained.identity), cache.snapshot().keys.toList())
     }
 
     @Test
-    fun repeatedIdentityKeepsLastSnapshotAtItsLastPosition() {
-        val aOld = icon(personal, "a.app", 1)
-        val b = icon(personal, "b.app", 2)
-        val aNew = icon(personal, "a.app", 3)
+    fun putReplacesSnapshotAndProvenanceOfOneIdentity() {
+        val old = icon(personal, "a.app", 1)
+        val fresh = icon(personal, "a.app", 3)
         val cache = AppIconSnapshotCache()
+        cache.put(old, provenance)
 
-        cache.replaceAll(listOf(aOld, b, aNew))
+        val newer = AppIconProvenance(sourceStamp = 2L, encoderVersion = 1)
+        cache.put(fresh, newer)
 
-        assertEquals(listOf(b.identity, aNew.identity), cache.snapshot().keys.toList())
-        assertEquals(aNew, cache[aNew.identity])
+        assertSame(fresh, cache[fresh.identity])
+        assertEquals(newer, cache.provenanceOf(fresh.identity))
+        assertNull(cache.provenanceOf(identity(work, "absent.app")))
     }
 
     @Test
@@ -61,7 +64,7 @@ class AppIconSnapshotCacheTest {
         val all = (0 until 500).map { icon(personal, "app$it", it) }
         val cache = AppIconSnapshotCache()
 
-        cache.replaceAll(all)
+        all.forEach { cache.put(it, provenance) }
 
         assertEquals(500, cache.snapshot().size)
         assertEquals(all.map { it.identity }, cache.snapshot().keys.toList())
@@ -77,7 +80,7 @@ class AppIconSnapshotCacheTest {
         assertEquals(listOf<Byte>(1, 2, 3), snapshot.pngBytes.toList())
 
         val cache = AppIconSnapshotCache()
-        cache.replaceAll(listOf(snapshot))
+        cache.put(snapshot, provenance)
         val published = cache.snapshot()
         assertThrows(UnsupportedOperationException::class.java) {
             @Suppress("UNCHECKED_CAST")
@@ -102,17 +105,18 @@ class AppIconSnapshotCacheTest {
     }
 
     @Test
-    fun invalidateRemovesAllEntriesAndAllowsSubsequentReplacement() {
+    fun invalidateRemovesAllEntriesAndAllowsSubsequentPuts() {
         val first = icon(personal, "first.app", 1)
         val second = icon(work, "second.app", 2)
         val cache = AppIconSnapshotCache()
-        cache.replaceAll(listOf(first, second))
+        cache.put(first, provenance)
+        cache.put(second, provenance)
 
         cache.invalidate()
 
         assertTrue(cache.snapshot().isEmpty())
         assertNull(cache[first.identity])
-        cache.replaceAll(listOf(second))
+        cache.put(second, provenance)
         assertEquals(second, cache[second.identity])
     }
 

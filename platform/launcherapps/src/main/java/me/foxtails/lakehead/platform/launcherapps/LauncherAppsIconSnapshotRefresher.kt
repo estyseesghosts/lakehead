@@ -2,6 +2,7 @@ package me.foxtails.lakehead.platform.launcherapps
 
 import android.content.ComponentName
 import android.content.Context
+import android.content.pm.LauncherActivityInfo
 import android.content.pm.LauncherApps
 import android.graphics.Bitmap
 import android.graphics.Canvas
@@ -26,17 +27,27 @@ interface LauncherAppIcon
 /** Finds the launchable activity's icon for its complete profile-aware identity. */
 fun interface LauncherAppIconLookup {
     fun findIcon(identity: AppIdentity): LauncherAppIcon?
+
+    /**
+     * A value that changes whenever the app's icon source may have changed (install, update),
+     * or null when unknown. Unknown stamps are never treated as fresh.
+     */
+    fun sourceStamp(identity: AppIdentity): Long? = null
 }
 
 /** Encodes a platform icon as a bounded PNG, or returns null when it cannot be encoded. */
 fun interface LauncherAppIconPngEncoder {
     fun encode(icon: LauncherAppIcon): ByteArray?
+
+    /** Revision of the encoding output; a change re-encodes every cached entry once. */
+    val version: Int get() = 1
 }
 
 /**
- * Refreshes the shared icon cache from one complete catalogue snapshot. Missing activities and
- * icons that fail lookup/encoding are omitted; replacement consequently removes stale and failed
- * identities as well as identities no longer present in [entries].
+ * Brings the shared icon cache in line with one complete catalogue snapshot, doing work only for
+ * what changed: entries whose identity left [entries] are dropped, entries whose source stamp and
+ * encoder version are unchanged are kept as-is, and the rest are looked up and encoded. A failed
+ * or missing lookup/encode keeps the last-good entry instead of removing it.
  *
  * Both lookup (including Android activity/icon access) and encoding execute on [ioDispatcher].
  */
@@ -57,11 +68,22 @@ class LauncherAppsIconSnapshotRefresher(
 
     private suspend fun refreshLocked(entries: List<LauncherAppEntry>) {
         withContext(ioDispatcher) {
-            val snapshots = LinkedHashMap<AppIdentity, AppIconSnapshot>()
-            val visited = HashSet<AppIdentity>()
-            entries.forEach { entry ->
-                val identity = entry.identity
-                if (!visited.add(identity)) return@forEach
+            val encoderVersion = encoder.version
+            val current = LinkedHashSet<AppIdentity>()
+            entries.forEach { current.add(it.identity) }
+            cache.retainOnly(current)
+            current.forEach { identity ->
+                val stamp = try {
+                    lookup.sourceStamp(identity)
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Exception) {
+                    null
+                }
+                val cached = cache.provenanceOf(identity)
+                if (stamp != null && cached == AppIconProvenance(stamp, encoderVersion)) {
+                    return@forEach
+                }
 
                 val png = try {
                     lookup.findIcon(identity)?.let(encoder::encode)
@@ -72,10 +94,9 @@ class LauncherAppsIconSnapshotRefresher(
                     null
                 }
                 if (png != null && png.isNotEmpty() && png.size <= AppIconSnapshot.MAX_PNG_BYTES) {
-                    snapshots[identity] = AppIconSnapshot(identity, png)
+                    cache.put(AppIconSnapshot(identity, png), AppIconProvenance(stamp, encoderVersion))
                 }
             }
-            cache.replaceAll(snapshots.values)
         }
     }
 }
@@ -104,12 +125,35 @@ class LauncherAppsIconActivityLookup(
         profileTokens = ProfileTokenAdapter(launcherApps, userManager)
     }
 
-    override fun findIcon(identity: AppIdentity): LauncherAppIcon? {
+    /**
+     * Combines install time and the installed APK path. Android gives each install or update a
+     * new randomised APK directory, so this changes on update for every profile without needing
+     * per-user [android.content.pm.PackageManager] access.
+     */
+    override fun sourceStamp(identity: AppIdentity): Long? {
+        val info = findActivity(identity) ?: return null
+        val sourceDir = info.applicationInfo?.sourceDir ?: return null
+        return info.firstInstallTime * 31L + sourceDir.hashCode()
+    }
+
+    private fun findActivity(identity: AppIdentity): LauncherActivityInfo? {
         val user = profileTokens.userFor(identity.profileId) ?: return null
         val component = ComponentName(identity.component.packageName, identity.component.className)
         return try {
             launcherApps.getActivityList(identity.component.packageName, user)
                 .firstOrNull { it.componentName == component }
+        } catch (_: SecurityException) {
+            null
+        } catch (_: IllegalArgumentException) {
+            null
+        } catch (_: IllegalStateException) {
+            null
+        }
+    }
+
+    override fun findIcon(identity: AppIdentity): LauncherAppIcon? {
+        return try {
+            findActivity(identity)
                 ?.getBadgedIcon(0)
                 ?.let { sourceResolver.resolve(it).drawable }
                 ?.let(::DrawableLauncherAppIcon)
@@ -144,6 +188,8 @@ class BoundedLauncherAppIconPngEncoder(
     init {
         require(sizePx in 1..MAX_SIZE_PX) { "sizePx must be between 1 and $MAX_SIZE_PX" }
     }
+
+    override val version: Int = ENCODER_VERSION
 
     override fun encode(icon: LauncherAppIcon): ByteArray? {
         val drawable = (icon as? DrawableLauncherAppIconAccess)?.drawable ?: return null
@@ -210,6 +256,9 @@ class BoundedLauncherAppIconPngEncoder(
     companion object {
         const val DEFAULT_SIZE_PX: Int = 96
         const val MAX_SIZE_PX: Int = 512
+
+        /** Bump whenever the encoded output changes, so cached entries are re-encoded once. */
+        const val ENCODER_VERSION: Int = 1
 
         /** Fraction of the output box reserved for padding on each side (content = 75%). */
         private const val NORMALISED_PADDING = 0.125f

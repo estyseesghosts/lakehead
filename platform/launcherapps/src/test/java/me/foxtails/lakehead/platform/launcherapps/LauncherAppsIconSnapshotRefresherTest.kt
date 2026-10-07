@@ -11,7 +11,9 @@ import me.foxtails.lakehead.core.model.ProfileId
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNotSame
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.util.concurrent.Executors
@@ -90,7 +92,7 @@ class LauncherAppsIconSnapshotRefresherTest {
     }
 
     @Test
-    fun replacementRemovesNoLongerPresentAndFailedOldSnapshots() = runTest {
+    fun identitiesLeavingTheCatalogueAreDroppedButFailedLookupsKeepLastGood() = runTest {
         val retained = entry("0", "retained")
         val removed = entry("0", "removed")
         val cache = AppIconSnapshotCache()
@@ -100,13 +102,148 @@ class LauncherAppsIconSnapshotRefresherTest {
         }
         refresher.refresh(listOf(retained, removed))
         assertEquals(2, cache.snapshot().size)
+        val lastGood = cache[retained.identity]
 
         available.clear()
-        available.add(retained.identity)
         refresher.refresh(listOf(retained, entry("0", "new-missing")))
 
         assertEquals(setOf(retained.identity), cache.snapshot().keys)
+        assertSame(lastGood, cache[retained.identity])
     }
+
+    @Test
+    fun unchangedCatalogueEncodesNothingAndKeepsSnapshotInstances() = runTest {
+        val entries = (0 until 5).map { entry("0", "app$it") }
+        val harness = CountingHarness()
+        harness.refresher.refresh(entries)
+        val before = harness.cache.snapshot()
+        harness.encoded.clear()
+
+        harness.refresher.refresh(entries)
+
+        assertTrue(harness.encoded.isEmpty())
+        entries.forEach { assertSame(before[it.identity], harness.cache[it.identity]) }
+    }
+
+    @Test
+    fun addedAppIsTheOnlyOneEncoded() = runTest {
+        val entries = (0 until 3).map { entry("0", "app$it") }
+        val harness = CountingHarness()
+        harness.refresher.refresh(entries)
+        harness.encoded.clear()
+        val added = entry("0", "added")
+
+        harness.refresher.refresh(entries + added)
+
+        assertEquals(listOf(added.identity), harness.encoded)
+        assertEquals(4, harness.cache.snapshot().size)
+    }
+
+    @Test
+    fun updatedPackageIsTheOnlyOneReEncoded() = runTest {
+        val entries = (0 until 3).map { entry("0", "app$it") }
+        val harness = CountingHarness()
+        harness.refresher.refresh(entries)
+        harness.encoded.clear()
+        val old = harness.cache[entries[1].identity]
+
+        harness.stamps[entries[1].identity] = 2L
+        harness.refresher.refresh(entries)
+
+        assertEquals(listOf(entries[1].identity), harness.encoded)
+        assertNotSame(old, harness.cache[entries[1].identity])
+    }
+
+    @Test
+    fun removedAppDropsOnlyItsEntry() = runTest {
+        val entries = (0 until 3).map { entry("0", "app$it") }
+        val harness = CountingHarness()
+        harness.refresher.refresh(entries)
+        harness.encoded.clear()
+
+        harness.refresher.refresh(entries.drop(1))
+
+        assertTrue(harness.encoded.isEmpty())
+        assertEquals(entries.drop(1).map { it.identity }, harness.cache.snapshot().keys.toList())
+    }
+
+    @Test
+    fun encoderVersionBumpReEncodesEverythingOnce() = runTest {
+        val entries = (0 until 3).map { entry("0", "app$it") }
+        val harness = CountingHarness()
+        harness.refresher.refresh(entries)
+        harness.encoded.clear()
+
+        harness.encoderVersion = 2
+        harness.refresher.refresh(entries)
+        assertEquals(entries.map { it.identity }, harness.encoded)
+
+        harness.encoded.clear()
+        harness.refresher.refresh(entries)
+        assertTrue(harness.encoded.isEmpty())
+    }
+
+    @Test
+    fun failedLookupAfterUpdateKeepsTheLastGoodEntry() = runTest {
+        val app = entry("0", "app")
+        val harness = CountingHarness()
+        harness.refresher.refresh(listOf(app))
+        val lastGood = harness.cache[app.identity]
+
+        harness.stamps[app.identity] = 2L
+        harness.failing.add(app.identity)
+        harness.refresher.refresh(listOf(app))
+
+        assertSame(lastGood, harness.cache[app.identity])
+        // The stale provenance is kept, so the update is retried on the next refresh.
+        harness.failing.clear()
+        harness.encoded.clear()
+        harness.refresher.refresh(listOf(app))
+        assertEquals(listOf(app.identity), harness.encoded)
+    }
+
+    @Test
+    fun unknownStampIsNeverTreatedAsFresh() = runTest {
+        val app = entry("0", "app")
+        val harness = CountingHarness(stampsKnown = false)
+        harness.refresher.refresh(listOf(app))
+        harness.encoded.clear()
+
+        harness.refresher.refresh(listOf(app))
+
+        assertEquals(listOf(app.identity), harness.encoded)
+    }
+
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    private class CountingHarness(private val stampsKnown: Boolean = true) {
+        val cache = AppIconSnapshotCache()
+        val encoded = mutableListOf<AppIdentity>()
+        val stamps = HashMap<AppIdentity, Long>()
+        val failing = HashSet<AppIdentity>()
+        var encoderVersion = 1
+
+        val refresher = LauncherAppsIconSnapshotRefresher(
+            lookup = object : LauncherAppIconLookup {
+                override fun findIcon(identity: AppIdentity): LauncherAppIcon? =
+                    if (identity in failing) null else IdentityIcon(identity)
+
+                override fun sourceStamp(identity: AppIdentity): Long? =
+                    if (stampsKnown) stamps.getOrDefault(identity, 1L) else null
+            },
+            encoder = object : LauncherAppIconPngEncoder {
+                override val version: Int get() = encoderVersion
+
+                override fun encode(icon: LauncherAppIcon): ByteArray {
+                    encoded += (icon as IdentityIcon).identity
+                    return byteArrayOf(1)
+                }
+            },
+            cache = cache,
+            ioDispatcher = UnconfinedTestDispatcher(),
+        )
+    }
+
+    private data class IdentityIcon(val identity: AppIdentity) : LauncherAppIcon
 
     @Test
     fun oversizedEncoderOutputIsRejectedAndSnapshotBytesStayBounded() = runTest {
