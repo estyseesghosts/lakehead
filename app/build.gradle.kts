@@ -16,6 +16,44 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    // Debug keystore re-used for release in this slice. The Android Gradle
+    // Plugin auto-creates ~/.android/debug.keystore on first run, so the
+    // build does not depend on a pre-existing keystore on a fresh machine.
+    //
+    // To wire a real Play upload key, add a non-committed
+    // `keystore.properties` (see `keystore.properties.example`) and read
+    // it through `Properties().apply { load(...) }` here. AGENTS.md §7
+    // forbids committing real secrets; this slice ships the template
+    // and an example consumer, no real values.
+    signingConfigs {
+        // No extra `release` signing config in this slice; we reuse
+        // `signingConfigs.debug` (AGP-managed) directly from the
+        // `release` build type below.
+    }
+
+    buildTypes {
+        getByName("debug") {
+            // Default; explicitly recorded for symmetry with `release`.
+            isMinifyEnabled = false
+            isShrinkResources = false
+        }
+        getByName("release") {
+            isMinifyEnabled = true
+            isShrinkResources = true
+            isDebuggable = false
+            isCrunchPngs = true
+            // Use the debug keystore so `assembleRelease` produces a
+            // runnable APK without committing a release key. Swap to a
+            // dedicated `signingConfigs.release { ... }` once a real
+            // Play keystore is available.
+            signingConfig = signingConfigs.getByName("debug")
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+            )
+        }
+    }
+
     buildFeatures { compose = true }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
