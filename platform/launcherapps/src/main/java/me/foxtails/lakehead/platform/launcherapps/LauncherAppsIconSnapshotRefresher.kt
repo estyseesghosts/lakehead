@@ -155,8 +155,8 @@ class LauncherAppsIconActivityLookup(
         return try {
             findActivity(identity)
                 ?.getBadgedIcon(0)
-                ?.let { sourceResolver.resolve(it).drawable }
-                ?.let(::DrawableLauncherAppIcon)
+                ?.let { sourceResolver.resolve(it) }
+                ?.let { DrawableLauncherAppIcon(it.drawable, it is AppSymbolSource.Monochrome) }
         } catch (_: SecurityException) {
             null
         } catch (_: IllegalArgumentException) {
@@ -173,7 +173,8 @@ class LauncherAppsIconActivityLookup(
  * Normalisation (per `docs/grid.md` §7) ensures every app symbol occupies the same
  * visual box regardless of source type (monochrome / adaptive foreground / legacy):
  *
- *  1. Render the drawable at its intrinsic size.
+ *  1. Render the drawable at its intrinsic size, then reduce it to a white alpha mask: the
+ *     monochrome layer's own alpha, or [ColourMask] for foreground/legacy colour sources.
  *  2. Find the tight bounding box of non-transparent pixels (trim transparent insets).
  *  3. Scale the content to fit inside a centred padded square ([NORMALISED_PADDING]
  *     fraction on each side) so mono/foreground/legacy produce identical visual boxes.
@@ -192,7 +193,8 @@ class BoundedLauncherAppIconPngEncoder(
     override val version: Int = ENCODER_VERSION
 
     override fun encode(icon: LauncherAppIcon): ByteArray? {
-        val drawable = (icon as? DrawableLauncherAppIconAccess)?.drawable ?: return null
+        val access = icon as? DrawableLauncherAppIconAccess ?: return null
+        val drawable = access.drawable
 
         // 1. Render drawable at its intrinsic size to discover content bounds.
         val srcW = drawable.intrinsicWidth.coerceAtLeast(1)
@@ -209,6 +211,14 @@ class BoundedLauncherAppIconPngEncoder(
         // 2. Scan for the tight content bounding box (trim transparent insets).
         val pixels = IntArray(srcW * srcH)
         srcBitmap.getPixels(pixels, 0, srcW, 0, 0, srcW, srcH)
+        // Monochrome layers already are masks; colour sources get one derived (docs/grid.md §7).
+        val maskAlpha = if (access.isMonochrome) {
+            IntArray(pixels.size) { pixels[it] ushr 24 }
+        } else {
+            ColourMask.derive(pixels, srcW, srcH)
+        }
+        for (i in pixels.indices) pixels[i] = (maskAlpha[i] shl 24) or 0x00FFFFFF
+        srcBitmap.setPixels(pixels, 0, srcW, 0, 0, srcW, srcH)
         var minX = srcW; var minY = srcH; var maxX = -1; var maxY = -1
         for (i in pixels.indices) {
             if (pixels[i] ushr 24 > 0) {
@@ -258,7 +268,7 @@ class BoundedLauncherAppIconPngEncoder(
         const val MAX_SIZE_PX: Int = 512
 
         /** Bump whenever the encoded output changes, so cached entries are re-encoded once. */
-        const val ENCODER_VERSION: Int = 2
+        const val ENCODER_VERSION: Int = 3
 
         /** Fraction of the output box reserved for padding on each side (content = 75%). */
         private const val NORMALISED_PADDING = 0.125f
@@ -268,8 +278,10 @@ class BoundedLauncherAppIconPngEncoder(
 // Kept private to the platform implementation so no Drawable crosses the resolver's boundary.
 private interface DrawableLauncherAppIconAccess : LauncherAppIcon {
     val drawable: Drawable
+    val isMonochrome: Boolean
 }
 
 private class DrawableLauncherAppIcon(
     override val drawable: Drawable,
+    override val isMonochrome: Boolean,
 ) : DrawableLauncherAppIconAccess

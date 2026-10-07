@@ -339,6 +339,8 @@ sealed interface AppSymbolSource {
 }
 ```
 
+A monochrome layer is used only when it is **usable**: after rasterizing it small, between roughly 1.5% and 95% of its pixels must be visibly opaque. A blank, speck-only or solid-fill layer would tint to an invisible or featureless tile, so the resolver falls back to the adaptive foreground instead (`MonochromeUsability`).
+
 Do not let icon extraction logic leak into the home-grid and app-list composables.
 
 ---
@@ -374,6 +376,15 @@ The icon renderer should handle:
 - caching.
 
 Do not solve these independently in `AppListRow` and `HomeTile`.
+
+### Every symbol is an alpha mask
+
+Symbols are drawn as a single tinted mask, so the cache stores and decodes alpha only (`ALPHA_8`; no colour channels). The encoder reduces every source to a white alpha mask before normalization:
+
+- **Monochrome layer**: its own alpha is the mask.
+- **Adaptive foreground / legacy**: a mask is derived (`ColourMask`). If the border is mostly transparent, the icon's own alpha is the shape. If it has an opaque backdrop, each pixel's mask strength is how far its colour departs from the mean border colour (ramping from about 12% to 35% difference), so a glyph on a coloured tile survives and the tile does not. If that leaves almost nothing (a one-colour icon), the opaque shape is kept.
+
+Colour is never persisted; tinting uses the theme colour at draw time. Cached entries record the encoder version (`ENCODER_VERSION`) and are re-encoded once when it changes. Refreshes are incremental: entries are keyed by `AppIdentity`, re-encoded only when the app's source stamp changes, and dropped only when the app leaves the catalogue.
 
 Use one symbol pipeline.
 
