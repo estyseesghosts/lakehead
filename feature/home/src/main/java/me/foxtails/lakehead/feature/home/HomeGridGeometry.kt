@@ -105,6 +105,19 @@ data class HomeGridMetrics(
         )
 
     /**
+     * Cell whose top-left corner is nearest a dragged tile's top-left corner
+     * (round, half up). Symmetric: half a stride past a cell boundary in either
+     * direction switches cells, which equals snapping the tile by its centre.
+     * Used for moves only; hit-testing a point stays the floor of
+     * [requestedTopLeftCell]. The result is never clamped.
+     */
+    fun nearestTopLeftCell(contentX: Float, contentY: Float): RequestedCell =
+        RequestedCell(
+            column = floor((contentX - originXPx) / columnStridePx + 0.5f).toLong(),
+            row = floor((contentY - restOffsetYPx) / rowStridePx + 0.5f).toLong(),
+        )
+
+    /**
      * Raw span for a resize: the bottom-right corner follows the content point
      * while the tile's top-left [origin] stays fixed. Minimum 1×1.
      */

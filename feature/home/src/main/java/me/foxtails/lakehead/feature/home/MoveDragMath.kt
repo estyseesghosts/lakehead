@@ -39,13 +39,13 @@ sealed class MoveCellResult {
  */
 object MoveDragMath {
 
-    /** `tileTopLeft = (pointer + scroll) − grabOffset`, then the metrics' inverse. Never clamped. */
+    /** `tileTopLeft = (pointer + scroll) − grabOffset`, snapped to the nearest cell. Never clamped. */
     fun requestedCell(
         frame: MoveCoordinateFrame,
         pointerXPx: Float,
         pointerYPxViewport: Float,
         currentScrollPx: Float,
-    ): RequestedCell = frame.metrics.requestedTopLeftCell(
+    ): RequestedCell = frame.metrics.nearestTopLeftCell(
         contentX = pointerXPx - frame.grabOffsetXPx,
         contentY = frame.metrics.contentY(pointerYPxViewport, currentScrollPx) - frame.grabOffsetYPx,
     )

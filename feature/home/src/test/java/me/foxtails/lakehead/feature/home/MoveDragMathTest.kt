@@ -53,13 +53,34 @@ class MoveDragMathTest {
 
     @Test
     fun requestAboveRowZeroIsNegativeAndRejectedNotClampedToRowZero() {
-        assertEquals(outOfBounds(0, -1), map(frame(), 0f, -1f))
+        assertEquals(outOfBounds(0, -1), map(frame(), 0f, -0.6f * stride))
         assertEquals(outOfBounds(0, -3), map(frame(), 0f, -3 * stride))
     }
 
     @Test
     fun requestLeftOfGridIsNegativeAndRejected() {
-        assertEquals(outOfBounds(-1, 0), map(frame(), -1f, 0f))
+        assertEquals(outOfBounds(-1, 0), map(frame(), -0.6f * stride, 0f))
+    }
+
+    @Test
+    fun snapIsToTheNearestCellAndSymmetricAroundACellBoundary() {
+        // Less than half a stride past a cell in any direction keeps that cell;
+        // more than half switches. 1px up/left must not jump a whole cell.
+        val row3 = 3 * stride
+        assertEquals(valid(2, 3), map(frame(), 2 * stride - 1f, row3 - 1f))
+        assertEquals(valid(2, 3), map(frame(), 2 * stride + 1f, row3 + 1f))
+        assertEquals(valid(2, 3), map(frame(), 2 * stride - 0.4f * stride, row3 - 0.4f * stride))
+        assertEquals(valid(2, 3), map(frame(), 2 * stride + 0.4f * stride, row3 + 0.4f * stride))
+        assertEquals(valid(1, 2), map(frame(), 2 * stride - 0.6f * stride, row3 - 0.6f * stride))
+        assertEquals(valid(3, 4), map(frame(), 2 * stride + 0.6f * stride, row3 + 0.6f * stride))
+    }
+
+    @Test
+    fun hitTestingKeepsTheFloorMapping() {
+        // The nearest rule is for moves only; a touch point still belongs to the cell it is inside.
+        val m = metrics()
+        assertEquals(RequestedCell(2, 3), m.requestedTopLeftCell(2 * stride + 0.9f * stride, 3 * stride + 0.9f * stride))
+        assertEquals(RequestedCell(3, 4), m.nearestTopLeftCell(2 * stride + 0.9f * stride, 3 * stride + 0.9f * stride))
     }
 
     @Test

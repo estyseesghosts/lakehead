@@ -437,8 +437,8 @@ class HomeEditStateTest {
     fun tickerRemap_stationaryHold_advancingScroll_updatesCandidate() {
         val tiles = listOf(tickerTile("a", 0, 0), tickerTile("b", 2, 2))
         val entered = enteredFrom(tiles[1], tiles)
-        val atRest = remap(entered, 250f, 1700f, scroll = 0)
-        val scrolled = remap(atRest, 250f, 1700f, scroll = 108)
+        val atRest = remap(entered, 200f, 1620f, scroll = 0)
+        val scrolled = remap(atRest, 200f, 1620f, scroll = 108)
         assertEquals(LogicalPosition(2, 15), atRest.movePreview().previewPosition)
         assertEquals(LogicalPosition(2, 16), scrolled.movePreview().previewPosition)
         assertEquals(
@@ -451,9 +451,9 @@ class HomeEditStateTest {
     fun tickerRemap_blockedPostScrollCell_holdsLastValid() {
         val tiles = listOf(tickerTile("a", 0, 0), tickerTile("b", 2, 2))
         val entered = enteredFrom(tiles[0], tiles)
-        val atRest = remap(entered, 50f, 50f, scroll = 0)
-        // content y 50 + 200 = 250 → row 2, column 2 → tile b's cell.
-        val scrolled = remap(atRest, 250f, 50f, scroll = 200)
+        val atRest = remap(entered, 0f, 0f, scroll = 0)
+        // content y 0 + 216 (two row strides) → row 2, column 2 → tile b's cell.
+        val scrolled = remap(atRest, 200f, 0f, scroll = 216)
         assertEquals(CandidateValidity.COLLIDING, scrolled.movePreview().validity)
         assertEquals(atRest.movePreview().previewPosition, scrolled.movePreview().previewPosition)
     }
@@ -462,8 +462,8 @@ class HomeEditStateTest {
     fun tickerRemap_pastEdge_isRejectedNotClamped_keepsLastValid() {
         val tiles = listOf(tickerTile("a", 0, 0))
         val entered = enteredFrom(tiles[0], tiles)
-        val atRest = remap(entered, 150f, 50f, scroll = 0)
-        val past = remap(atRest, 650f, 50f, scroll = 0)
+        val atRest = remap(entered, 100f, 0f, scroll = 0)
+        val past = remap(atRest, 650f, 0f, scroll = 0)
 
         assertEquals(LogicalPosition(1, 0), past.movePreview().previewPosition)
         assertEquals(CandidateValidity.OUT_OF_BOUNDS, past.movePreview().validity)

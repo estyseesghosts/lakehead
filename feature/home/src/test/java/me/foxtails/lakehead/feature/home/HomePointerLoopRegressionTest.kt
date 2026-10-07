@@ -108,10 +108,10 @@ class HomePointerLoopRegressionTest {
         // Slop event mapped the held pointer at scroll 0 (pre-scroll cell),
         // then the ticker advanced one stride with no further pointer events.
         // Both write the one edit state, so release sees the ticker's cell.
-        val atSlop = moving().moveTo(250f, 1700f, 0f)
+        val atSlop = moving().moveTo(200f, 1620f, 0f)
         assertEquals(LogicalPosition(2, 15), atSlop.move().previewPosition)
 
-        val afterTicker = atSlop.moveTo(250f, 1700f, 108f)
+        val afterTicker = atSlop.moveTo(200f, 1620f, 108f)
 
         assertEquals(LogicalPosition(2, 16), afterTicker.releaseMove())
     }
@@ -121,10 +121,10 @@ class HomePointerLoopRegressionTest {
         // The drag event loop and the stationary ticker both call moveTo; for
         // identical pointer + scroll they land on the same state regardless of
         // what the other did before, including a scrolled-during-hold delta.
-        val viaEventOnly = moving().moveTo(250f, 1700f, 108f)
+        val viaEventOnly = moving().moveTo(200f, 1620f, 108f)
         val viaTickerAfterEvent = moving()
-            .moveTo(250f, 1700f, 0f)
-            .moveTo(250f, 1700f, 108f)
+            .moveTo(200f, 1620f, 0f)
+            .moveTo(200f, 1620f, 108f)
         assertEquals(viaEventOnly, viaTickerAfterEvent)
         assertEquals(LogicalPosition(2, 16), viaEventOnly.move().previewPosition)
     }
@@ -267,8 +267,8 @@ class HomePointerLoopRegressionTest {
     @Test
     fun scrollOnly_keepsFrameWithLiveDelta() {
         // One stride of scroll advances one row through the same frame.
-        val atRest = moving().moveTo(250f, 1700f, 0f)
-        val scrolled = moving().moveTo(250f, 1700f, 108f)
+        val atRest = moving().moveTo(200f, 1620f, 0f)
+        val scrolled = moving().moveTo(200f, 1620f, 108f)
         assertEquals(LogicalPosition(2, 15), atRest.move().previewPosition)
         assertEquals(LogicalPosition(2, 16), scrolled.move().previewPosition)
         assertEquals(atRest.move().metrics, scrolled.move().metrics)
@@ -277,7 +277,7 @@ class HomePointerLoopRegressionTest {
     @Test
     fun moveUpdates_neverChangeTheFrameTheDragBeganIn() {
         val began = moving(grabX = 10f, grabY = 20f)
-        val updated = began.moveTo(250f, 1700f, 108f).moveTo(40f, 90f, 0f)
+        val updated = began.moveTo(200f, 1620f, 108f).moveTo(40f, 90f, 0f)
         assertEquals(began.move().metrics, updated.move().metrics)
         assertEquals(10f, updated.move().grabOffsetXPx)
         assertEquals(20f, updated.move().grabOffsetYPx)
@@ -285,14 +285,14 @@ class HomePointerLoopRegressionTest {
 
     @Test
     fun cancelDragIfFrameChanged_sameFrame_isUnchanged() {
-        val state = moving().moveTo(250f, 1700f, 0f)
+        val state = moving().moveTo(200f, 1620f, 0f)
         assertEquals(state, state.cancelDragIfFrameChanged(metrics()))
     }
 
     @Test
     fun cancelDragIfFrameChanged_columnsOrOriginChange_cancelsMoveWithoutCommit() {
         listOf(metrics(columns = 5), metrics(originX = 50f)).forEach { changed ->
-            val state = moving().moveTo(250f, 1700f, 0f)
+            val state = moving().moveTo(200f, 1620f, 0f)
             val cancelled = state.cancelDragIfFrameChanged(changed)
             assertEquals(DragState.None, cancelled.drag)
             assertNull(cancelled.finish().commit)
@@ -312,7 +312,7 @@ class HomePointerLoopRegressionTest {
         // same pointer maps to the same absolute row regardless of metadata.
         assertEquals(
             LogicalPosition(2, 15),
-            moving().moveTo(250f, 1700f, 0f).move().previewPosition,
+            moving().moveTo(200f, 1620f, 0f).move().previewPosition,
         )
     }
 
