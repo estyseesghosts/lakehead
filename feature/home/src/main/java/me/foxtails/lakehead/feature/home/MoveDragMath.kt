@@ -1,7 +1,11 @@
 package me.foxtails.lakehead.feature.home
 
 import androidx.compose.ui.geometry.Offset
+import me.foxtails.lakehead.core.grid.GridPlacement
+import me.foxtails.lakehead.core.grid.GridPosition
+import me.foxtails.lakehead.core.grid.GridRowGapNormalizer
 import me.foxtails.lakehead.core.grid.GridRules
+import me.foxtails.lakehead.core.model.ItemId
 import me.foxtails.lakehead.core.grid.GridSpan
 import me.foxtails.lakehead.core.model.LogicalPosition
 
@@ -68,6 +72,25 @@ object MoveDragMath {
             y = move.metrics.contentY(pointerYPxViewport, currentScrollPx) -
                 move.grabOffsetYPx - committed.top,
         )
+    }
+
+    /**
+     * Where [itemId] rests after moving to [position]: the same `GridRules.move`
+     * followed by `GridRowGapNormalizer.normalize` the repository applies on
+     * commit, so the drop-target outline equals the accepted result. Falls back to
+     * [position] when the move is not accepted.
+     */
+    internal fun settledPosition(
+        snapshot: List<GridPlacement<ItemId>>,
+        itemId: ItemId,
+        position: LogicalPosition,
+        columns: Int,
+    ): LogicalPosition {
+        val moved = GridRules.move(snapshot, itemId, GridPosition(position.column, position.row), columns)
+        val accepted = moved as? GridRules.Result.Accepted ?: return position
+        val settled = GridRowGapNormalizer.normalize(accepted.placements).firstOrNull { it.id == itemId }
+            ?: return position
+        return LogicalPosition(settled.position.column, settled.position.row)
     }
 
     /** Validates the complete occupied span of [request] before building a domain position. */

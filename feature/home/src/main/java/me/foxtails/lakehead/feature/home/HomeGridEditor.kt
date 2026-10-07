@@ -137,6 +137,12 @@ data class HomeEditState(
                         drag = move.copy(
                             requestedCell = result.candidate,
                             previewPosition = result.position,
+                            dropPosition = MoveDragMath.settledPosition(
+                                move.snapshot,
+                                move.itemId,
+                                result.position,
+                                move.metrics.columns,
+                            ),
                             validity = validity,
                         ),
                     )
@@ -257,6 +263,11 @@ sealed interface DragState {
         val validity: CandidateValidity,
         /** Occupancy snapshot taken at drag begin; reused for all validity checks. */
         val snapshot: List<GridPlacement<ItemId>>,
+        /**
+         * Where the tile will actually rest after the row-gap normaliser has run on
+         * [previewPosition]; the drop-target outline shows this cell.
+         */
+        val dropPosition: LogicalPosition = previewPosition,
     ) : DragState {
         val frame: MoveCoordinateFrame
             get() = MoveCoordinateFrame(metrics, GridSpan(span.columns, span.rows), grabOffsetXPx, grabOffsetYPx)

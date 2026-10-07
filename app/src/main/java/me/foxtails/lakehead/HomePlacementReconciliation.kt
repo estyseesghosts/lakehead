@@ -1,6 +1,10 @@
 package me.foxtails.lakehead
 
+import me.foxtails.lakehead.core.grid.GridPlacement
+import me.foxtails.lakehead.core.grid.GridPosition
+import me.foxtails.lakehead.core.grid.GridRowGapNormalizer
 import me.foxtails.lakehead.core.grid.GridRules
+import me.foxtails.lakehead.core.grid.GridSpan
 import me.foxtails.lakehead.core.model.AppPlacement
 import me.foxtails.lakehead.core.model.ItemId
 import me.foxtails.lakehead.core.model.LogicalPosition
@@ -15,14 +19,32 @@ import me.foxtails.lakehead.core.model.LogicalSpan
  * (not the request) is what finally replaces the optimistic state.
  */
 
-/** Optimistic apply of a requested move; null when [itemId] is not placed. */
+/**
+ * Optimistic apply of a requested move, computed exactly as the repository will
+ * (`GridRules.move`, then `GridRowGapNormalizer.normalize`) so the first emission
+ * already equals the accepted grid. Null when [itemId] is not placed or the move
+ * would be rejected; the projected state then stays as it was.
+ */
 internal fun withRequestedMove(
     placements: List<AppPlacement>,
     itemId: ItemId,
     position: LogicalPosition,
+    columns: Int,
 ): List<AppPlacement>? {
     if (placements.none { it.itemId == itemId }) return null
-    return placements.map { if (it.itemId == itemId) it.copy(position = position) else it }
+    val grid = placements.map {
+        GridPlacement(
+            it.itemId,
+            GridPosition(it.position.column, it.position.row),
+            GridSpan(it.span.columns, it.span.rows),
+        )
+    }
+    val moved = GridRules.move(grid, itemId, GridPosition(position.column, position.row), columns)
+    val accepted = moved as? GridRules.Result.Accepted ?: return null
+    return withAcceptedGrid(
+        placements,
+        GridRules.Result.Accepted(GridRowGapNormalizer.normalize(accepted.placements)),
+    )
 }
 
 /** Optimistic apply of a requested resize; null when [itemId] is not placed. */

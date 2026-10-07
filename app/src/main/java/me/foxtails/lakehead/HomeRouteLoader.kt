@@ -141,7 +141,7 @@ internal class HomeRouteLoader(
      */
     suspend fun commitMove(itemId: ItemId, position: LogicalPosition): MutationResult =
         commitMutation(
-            optimistic = { withRequestedMove(it, itemId, position) },
+            optimistic = { withRequestedMove(it, itemId, position, viewport.columnsBound) },
             write = {
                 repository.move(
                     homeId = homeId,

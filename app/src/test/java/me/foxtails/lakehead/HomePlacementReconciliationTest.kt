@@ -31,13 +31,42 @@ class HomePlacementReconciliationTest {
 
     @Test
     fun requestedMoveChangesOnlyTheNamedTile() {
-        val result = withRequestedMove(listOf(placed("a", 0, 0), placed("b", 1, 0)), ItemId("a"), LogicalPosition(3, 4))
-        assertEquals(listOf(LogicalPosition(3, 4), LogicalPosition(1, 0)), result!!.map { it.position })
+        val result = withRequestedMove(
+            listOf(placed("a", 0, 0), placed("b", 1, 0)),
+            ItemId("a"),
+            LogicalPosition(3, 1),
+            columns = 6,
+        )
+        assertEquals(listOf(LogicalPosition(3, 1), LogicalPosition(1, 0)), result!!.map { it.position })
+    }
+
+    @Test
+    fun requestedMoveFarBelowIsClosedUpExactlyAsTheRepositoryWould() {
+        val result = withRequestedMove(
+            listOf(placed("a", 0, 0), placed("b", 1, 0)),
+            ItemId("a"),
+            LogicalPosition(3, 20),
+            columns = 6,
+        )
+        // Two empty rows are tolerated between sections: row 20 settles at row 3.
+        assertEquals(listOf(LogicalPosition(3, 3), LogicalPosition(1, 0)), result!!.map { it.position })
+    }
+
+    @Test
+    fun requestedMoveOntoAnotherTileIsNull() {
+        assertNull(
+            withRequestedMove(
+                listOf(placed("a", 0, 0), placed("b", 1, 0)),
+                ItemId("a"),
+                LogicalPosition(1, 0),
+                columns = 6,
+            ),
+        )
     }
 
     @Test
     fun requestedMoveOfAnUnknownTileIsNull() {
-        assertNull(withRequestedMove(listOf(placed("a", 0, 0)), ItemId("x"), LogicalPosition(1, 1)))
+        assertNull(withRequestedMove(listOf(placed("a", 0, 0)), ItemId("x"), LogicalPosition(1, 1), columns = 6))
     }
 
     @Test

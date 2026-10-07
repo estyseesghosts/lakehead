@@ -31,7 +31,7 @@ internal fun MoveCandidateOverlay(
     modifier: Modifier = Modifier,
 ) {
     CandidateOutline(
-        frame = metrics.pixelFrame(move.previewPosition, move.span),
+        frame = metrics.pixelFrame(move.dropPosition, move.span),
         isValid = move.validity == CandidateValidity.VALID,
         tag = MOVE_CANDIDATE_OVERLAY_TAG,
         modifier = modifier,

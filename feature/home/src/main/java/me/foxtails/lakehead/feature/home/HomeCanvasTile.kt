@@ -1,9 +1,18 @@
 package me.foxtails.lakehead.feature.home
 
+import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Box
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.ui.layout.onPlaced
+import androidx.compose.ui.layout.positionInParent
+import me.foxtails.lakehead.core.model.LogicalPosition
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.ImageBitmap
@@ -143,24 +152,55 @@ internal fun HomeCanvasTile(
     val liftTarget = if (lift != null && isEditing) 1f else 0f
     val liftProgress by animateFloatAsState(targetValue = liftTarget, label = "moveLift")
     val liftShadowPx = with(LocalDensity.current) { LIFTED_ELEVATION_DP.dp.toPx() }
+    // Placement glide: a logical-cell change (drop, neighbour shuffle, rejected
+    // reload) glides from the old visual spot to the new one instead of jumping.
+    // A released lift hands its last translation over to the same glide, so the
+    // dropped tile travels from the finger to its cell.
+    val glide = remember { PlacementGlide() }
+    val tracker = remember { GlideTracker() }
+    val liftActive = lift != null && isEditing
+    SideEffect {
+        if (tracker.wasLifted && !liftActive) glide.retarget(tracker.lastLift)
+        tracker.wasLifted = liftActive
+    }
+    LaunchedEffect(glide.generation) {
+        if (glide.generation > 0) {
+            animate(0f, 1f, animationSpec = tween(PLACEMENT_GLIDE_MS)) { value, _ ->
+                glide.progress = value
+            }
+        }
+    }
+    val currentCell by rememberUpdatedState(tile.position)
     Box(
         modifier = Modifier
+            .onPlaced { coordinates ->
+                val placedAt = coordinates.positionInParent()
+                val previous = tracker.lastPlaced
+                if (previous != null && tracker.lastCell != currentCell) {
+                    glide.retarget(previous - placedAt)
+                }
+                tracker.lastPlaced = placedAt
+                tracker.lastCell = currentCell
+            }
             .graphicsLayer {
                 val raised = 1f + (LIFTED_SCALE - 1f) * liftProgress
                 scaleX = animatedScale * raised
                 scaleY = animatedScale * raised
+                var shift = glide.offset
                 if (lift != null && isEditing) {
                     val offset = lift()
-                    translationX = offset.x
-                    translationY = offset.y
+                    tracker.lastLift = offset
+                    shift += offset
                 }
+                translationX = shift.x
+                translationY = shift.y
                 if (liftProgress > 0f) {
                     shadowElevation = liftShadowPx * liftProgress
                     shape = AppTileDefaults.TileShape
                     clip = false
                 }
             }
-            .zIndex(if (isEditing) 2f else if (isSelected) 1f else 0f),
+            .zIndex(if (isEditing || liftProgress > 0f) 2f else if (isSelected) 1f else 0f),
     ) {
     AppTile(
         state = AppTileState(
@@ -232,6 +272,17 @@ internal fun HomeCanvasTile(
         isEditSelected = editSelected,
     )
     }
+}
+
+/** Duration of the glide to a new logical cell, in milliseconds. */
+internal const val PLACEMENT_GLIDE_MS: Int = 220
+
+/** Non-state bookkeeping for one tile's glide; read and written outside composition. */
+private class GlideTracker {
+    var wasLifted: Boolean = false
+    var lastLift: Offset = Offset.Zero
+    var lastPlaced: Offset? = null
+    var lastCell: LogicalPosition? = null
 }
 
 /** Render-only scale of the tile lifted by a move. */

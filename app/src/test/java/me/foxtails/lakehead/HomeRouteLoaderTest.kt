@@ -239,12 +239,11 @@ class HomeRouteLoaderTest {
 
         assertSame(moveResult, result)
         assertEquals(listOf(Triple(requestedHome, ItemId("a"), LogicalPosition(1, 1))), repository.moveCalls)
-        // The dropped tile sits at the requested cell while the write runs; others are untouched.
+        // The first emission already carries the normalised grid the write will accept.
         assertEquals(
-            mapOf(ItemId("a") to LogicalPosition(1, 1), ItemId("b") to LogicalPosition(0, 10)),
+            mapOf(ItemId("a") to LogicalPosition(1, 1), ItemId("b") to LogicalPosition(0, 4)),
             duringWrite,
         )
-        // The accepted grid also shifted another tile (row-gap normalization).
         assertEquals(
             mapOf(ItemId("a") to LogicalPosition(1, 1), ItemId("b") to LogicalPosition(0, 4)),
             positionsOf(loader),
@@ -270,7 +269,8 @@ class HomeRouteLoaderTest {
         loader.commitMove(ItemId("a"), LogicalPosition(0, 16))
         advanceUntilIdle()
 
-        assertEquals(LogicalPosition(0, 16), duringWrite!!.getValue(ItemId("a")))
+        // Optimistic apply is already normalised: row 16 closes up to row 3.
+        assertEquals(LogicalPosition(0, 3), duringWrite!!.getValue(ItemId("a")))
         assertEquals(LogicalPosition(0, 3), positionsOf(loader).getValue(ItemId("a")))
         loader.stop()
     }
