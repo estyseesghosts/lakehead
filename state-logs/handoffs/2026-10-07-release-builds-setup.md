@@ -1,6 +1,6 @@
 # 2026-10-07 — Release builds with release optimizations
 
-Status: completed
+Status: completed; merged to main as `4b6948b` (merge of `c0d91ba`).
 Owner/slice: `:app` Gradle build script; task spec
 `docs/agents/tasks/release-builds-setup.md`.
 
@@ -11,9 +11,12 @@ Owner/slice: `:app` Gradle build script; task spec
   `release-builds` branch in `.worktrees/release-builds/`, isolated
   from the Phase 10 dirty worktree on `main` (orchestrator directive:
   "current slice already finished, youre good").
-- Branch: `release-builds`. Worktree path
-  `/Users/terezi/AndroidStudioProjects/lakehead/.worktrees/release-builds`.
-  `local.properties` created (gitignored) pointing at
+- Branch: `release-builds` (deleted after merge).
+- Worktree path
+  `/Users/terezi/AndroidStudioProjects/lakehead/.worktrees/release-builds`
+  (removed via `git worktree remove` + `git branch -d release-builds`
+  after the merge).
+- `local.properties` created (gitignored) pointing at
   `~/Library/Android/sdk` for Gradle SDK discovery.
 - `~/.android/debug.keystore` already exists on this machine; the
   release variant re-uses it (no committed secret).
