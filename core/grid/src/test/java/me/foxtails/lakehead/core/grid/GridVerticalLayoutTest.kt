@@ -154,128 +154,18 @@ class GridVerticalLayoutTest {
     }
 
     @Test
-    fun signedRowsRetainOriginAndMeasureIntrinsicHeight() {
+    fun verticalMeasurementIgnoresColumnsAndNeverRejectsWideGridPlacements() {
         val result = GridVerticalLayout.measure(
-            listOf(
-                SignedGridPlacement("above", column = 0, row = -3, span = GridSpan(1, 2)),
-                SignedGridPlacement("below", column = 0, row = 4, span = GridSpan(1, 1)),
-            ),
-            viewportRows = 99L,
-            workingMarginRows = 99L,
-        )
-
-        assertEquals(-3L, result.occupiedMinRow)
-        assertEquals(5L, result.occupiedMaxRowExclusive)
-        assertEquals(8L, result.occupiedHeightRows)
-        assertEquals(8L, result.totalScrollableRows)
-    }
-
-    @Test
-    fun mixedAbsoluteAndSignedRowsAreRejectedInsteadOfChoosingAnExtentPolicy() {
-        assertIllegalArgument {
-            GridVerticalLayout.measure(
-                listOf(
-                    placement("absolute", row = 5),
-                    SignedGridPlacement("signed", column = 0, row = -2, span = GridSpan(1, 1)),
-                ),
-                viewportRows = 1L,
-                workingMarginRows = 0L,
-            )
-        }
-    }
-
-    @Test
-    fun verticalMeasurementDoesNotRejectPlacementBeyondDefaultFiveColumns() {
-        val result = GridVerticalLayout.measure(
-            listOf(SignedGridPlacement("wide-grid-item", column = 5, row = 7, span = GridSpan(1, 3))),
+            listOf(placement("wide-grid-item", row = 7, spanRows = 3, column = 5)),
             viewportRows = 1L,
             workingMarginRows = 0L,
         )
 
-        assertEquals(7L, result.occupiedMinRow)
-        assertEquals(10L, result.occupiedMaxRowExclusive)
-        assertEquals(3L, result.occupiedHeightRows)
+        assertEquals(GridVerticalExtent(10L, 10L, 7L, 10L, 10L), result)
     }
 
-    @Test
-    fun editMarginIsCappedBeforeItExtendsTheBoundary() {
-        val boundary = GridVerticalLayout.createEditBoundary(
-            extent = GridVerticalExtent(10_000L, 10_000L),
-            viewportRows = 8L,
-            workingMarginRows = Long.MAX_VALUE,
-        )
-
-        assertEquals(GridVerticalLayout.MAX_WORKING_MARGIN_ROWS, boundary.marginRows)
-        assertEquals(14_096L, boundary.exclusiveRow)
-    }
-
-    @Test
-    fun editBoundaryAdvancesOnlyAtTheTrailingMargin() {
-        val boundary = GridVerticalLayout.createEditBoundary(
-            extent = GridVerticalExtent(20L, 20L),
-            viewportRows = 4L,
-            workingMarginRows = 4L,
-        )
-
-        assertEquals(boundary, GridVerticalLayout.advanceEditBoundary(boundary, 19L))
-        assertEquals(
-            GridVerticalLayout.EditBoundary(28L, 4L),
-            GridVerticalLayout.advanceEditBoundary(boundary, 24L),
-        )
-    }
-
-    @Test
-    fun repeatedAdvancesAreBoundedOneMarginAtATime() {
-        var boundary = GridVerticalLayout.createEditBoundary(
-            extent = GridVerticalExtent(1L, 1L),
-            viewportRows = 1L,
-            workingMarginRows = 2L,
-        )
-
-        boundary = GridVerticalLayout.advanceEditBoundary(boundary, 3L)
-        assertEquals(5L, boundary.exclusiveRow)
-        boundary = GridVerticalLayout.advanceEditBoundary(boundary, 5L)
-        assertEquals(7L, boundary.exclusiveRow)
-        boundary = GridVerticalLayout.advanceEditBoundary(boundary, 5L)
-        assertEquals(9L, boundary.exclusiveRow)
-    }
-
-    @Test
-    fun advancingDirectlyConstructedBoundaryClampsMalformedMargin() {
-        val oversized = GridVerticalLayout.advanceEditBoundary(
-            GridVerticalLayout.EditBoundary(exclusiveRow = 10L, marginRows = 99_999L),
-            movedBottomRowExclusive = 10L,
-        )
-        assertEquals(GridVerticalLayout.MAX_WORKING_MARGIN_ROWS, oversized.marginRows)
-        assertEquals(10L + GridVerticalLayout.MAX_WORKING_MARGIN_ROWS, oversized.exclusiveRow)
-
-        val negative = GridVerticalLayout.advanceEditBoundary(
-            GridVerticalLayout.EditBoundary(exclusiveRow = 10L, marginRows = -5L),
-            movedBottomRowExclusive = Long.MAX_VALUE,
-        )
-        assertEquals(0L, negative.marginRows)
-        assertEquals(10L, negative.exclusiveRow)
-    }
-
-    @Test
-    fun editBoundaryUsesExactArithmeticAtLongOverflow() {
-        assertArithmeticException {
-            GridVerticalLayout.createEditBoundary(
-                extent = GridVerticalExtent(Long.MAX_VALUE, Long.MAX_VALUE),
-                viewportRows = 1L,
-                workingMarginRows = 1L,
-            )
-        }
-        assertArithmeticException {
-            GridVerticalLayout.advanceEditBoundary(
-                GridVerticalLayout.EditBoundary(Long.MAX_VALUE, 1L),
-                movedBottomRowExclusive = Long.MAX_VALUE - 1L,
-            )
-        }
-    }
-
-    private fun placement(id: String, row: Int, spanRows: Int = 1) =
-        GridPlacement(id, GridPosition(column = 0, row = row), GridSpan(columns = 1, rows = spanRows))
+    private fun placement(id: String, row: Int, spanRows: Int = 1, column: Int = 0) =
+        GridPlacement(id, GridPosition(column = column, row = row), GridSpan(columns = 1, rows = spanRows))
 
     private fun assertIllegalArgument(block: () -> Unit) {
         try {
@@ -286,12 +176,4 @@ class GridVerticalLayoutTest {
         throw AssertionError("expected IllegalArgumentException")
     }
 
-    private fun assertArithmeticException(block: () -> Unit) {
-        try {
-            block()
-        } catch (_: ArithmeticException) {
-            return
-        }
-        throw AssertionError("expected ArithmeticException")
-    }
 }

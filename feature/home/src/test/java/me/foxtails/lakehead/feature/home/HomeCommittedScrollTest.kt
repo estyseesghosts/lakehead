@@ -18,9 +18,8 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * Softlock regression: committed geometry owns the idle scroll range; the
- * transient MOVE workspace ([HomeEditWorkspace]) is covered separately. The
- * commit-result ack clears only on reject for the matching attempt id.
+ * Committed geometry owns the idle scroll range; the transient MOVE workspace
+ * ([HomeEditWorkspace]) is covered separately.
  */
 class HomeCommittedScrollTest {
 

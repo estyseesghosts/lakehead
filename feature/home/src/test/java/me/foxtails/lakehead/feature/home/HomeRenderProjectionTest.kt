@@ -543,22 +543,6 @@ class HomeRenderProjectionTest {
         assertEquals(5L, extent.occupiedMinRow)
         assertEquals(20L, extent.occupiedHeightRows)
         assertEquals(20L, extent.totalScrollableRows)
-        // The signed bounds helper remains a separate compatibility policy.
-        val bounds = me.foxtails.lakehead.core.grid.GridContentBounds.contentBoundsOf(
-            placements.map {
-                me.foxtails.lakehead.core.grid.SignedGridPlacement(
-                    id = it.itemId,
-                    column = it.position.column,
-                    row = it.position.row,
-                    span = me.foxtails.lakehead.core.grid.GridSpan(
-                        it.span.columns,
-                        it.span.rows,
-                    ),
-                )
-            },
-            columns = 6,
-        )!!
-        assertEquals(15L, me.foxtails.lakehead.core.grid.GridContentBounds.contentHeightRows(bounds))
     }
 
     @Test

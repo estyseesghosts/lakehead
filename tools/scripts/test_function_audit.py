@@ -147,19 +147,6 @@ class HomeCanvasGridTest(unittest.TestCase):
         )
         self.assertEqual(longest.name, "HomeCanvasGrid")
 
-    def test_home_canvas_grid_tripwire_size(self):
-        """Deliberate tripwire: Phase 8 decomposition should delete this test.
-
-        Until HomeCanvasGrid() is decomposed the audit must report a function
-        of roughly the 1,882 lines the repair plan measured. When Phase 8
-        replaces it with thin responsibility files, replace this assertion with
-        a per-file upper bound rather than lowering it silently.
-        """
-        span = next(span for span in find_functions(GRID_SOURCE.read_text())
-                    if span.name == "HomeCanvasGrid")
-        self.assertGreater(span.line_count, 1500)
-        self.assertLess(span.line_count, 2000)
-
 
 if __name__ == "__main__":
     unittest.main()

@@ -55,13 +55,13 @@ internal suspend fun runMoveEdgeAutoScroll(
         }
         if (held == null || zone == AutoScrollZone.NONE) {
             dwellZone = AutoScrollZone.NONE
-            delay(HomeEditFrontier.AUTO_SCROLL_MAX_INTERVAL_MS)
+            delay(HomeAutoScroll.AUTO_SCROLL_MAX_INTERVAL_MS)
             continue
         }
         if (zone != dwellZone) {
             // Edge entry or zone change: dwell, then re-read the pointer.
             dwellZone = zone
-            delay(HomeEditFrontier.AUTO_SCROLL_DWELL_MS)
+            delay(HomeAutoScroll.AUTO_SCROLL_DWELL_MS)
             continue
         }
         val step = stepPx()
@@ -73,7 +73,7 @@ internal suspend fun runMoveEdgeAutoScroll(
         if (scrollState.value != before) onScrolled(held)
         delay(
             autoScrollIntervalMs(held.y, bandHeightPx(), edgePx)
-                ?: HomeEditFrontier.AUTO_SCROLL_MAX_INTERVAL_MS,
+                ?: HomeAutoScroll.AUTO_SCROLL_MAX_INTERVAL_MS,
         )
     }
 }

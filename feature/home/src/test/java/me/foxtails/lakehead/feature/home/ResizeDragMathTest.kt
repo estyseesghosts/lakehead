@@ -150,8 +150,7 @@ class ResizeDragMathTest {
 
     @Test
     fun rawSpan_absoluteRow5WithRest_pointerAtOriginTop_returns1x1() {
-        // Absolute-row equivalent of the retired rowOrigin-relative test:
-        // origin row 5, rest 26 → top = 26 + 5*52 = 286. Pointer exactly at
+        // Absolute row: origin row 5, rest 26 → top = 26 + 5*52 = 286. Pointer exactly at
         // the origin top → 1x1.
         val span = ResizeDragMath.rawSpan(
             metrics = metrics(restOffsetYPx = 26f),
@@ -176,8 +175,7 @@ class ResizeDragMathTest {
 
     @Test
     fun rawSpan_absoluteRow50WithRest_offsetsByRestOnly() {
-        // Absolute-row equivalent of the retired originAtRowOrigin test:
-        // origin (2,50), rest 26 → top = 26 + 50*52 = 2626; pointer one
+        // Absolute row: origin (2,50), rest 26 → top = 26 + 50*52 = 2626; pointer one
         // stride down and one stride right of the origin top-left → 2x2.
         val span = ResizeDragMath.rawSpan(
             metrics = metrics(restOffsetYPx = 26f),

@@ -17,17 +17,8 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * MOVE auto-scroll, lease and remap primitives for the home canvas. The B3
- * frontier (init/advance/rebase, edit layout rows/height/scroll-max, steal
- * baseline) is gone; its replacement is covered by `HomeEditWorkspaceTest`.
- *
- * - Pending-commit lease gates a second MOVE until loaded reflects the target.
- * - Edge-zone classification for MOVE auto-scroll (top limited by range,
- *   bottom extends first).
- * - Stationary remap primitive: the same viewport-local pointer maps to a new
- *   row when the current scroll offset advances.
- * - Release-only commit and zero-write cancel/pager-steal session semantics.
- * - Exit collapse/clamp mirrors the viewport helpers (no production change).
+ * Covers auto-scroll helpers, `viewportRowsFor`, `MoveDragMath`/`HomeEditState`
+ * stationary-remap cases, and `preserveAnchorOnResize`/`clampViewportOffset`.
  */
 class HomeEditFrontierTest {
 
@@ -142,13 +133,13 @@ class HomeEditFrontierTest {
         val inner = autoScrollIntervalMs(95f, viewportHeightPx = 1800, edgePx = 96)
         val mid = autoScrollIntervalMs(48f, viewportHeightPx = 1800, edgePx = 96)
         val deep = autoScrollIntervalMs(0f, viewportHeightPx = 1800, edgePx = 96)
-        assertEquals(HomeEditFrontier.AUTO_SCROLL_MIN_INTERVAL_MS, deep)
+        assertEquals(HomeAutoScroll.AUTO_SCROLL_MIN_INTERVAL_MS, deep)
         assertTrue(inner!! > mid!! && mid > deep!!)
-        assertTrue(inner in HomeEditFrontier.AUTO_SCROLL_MIN_INTERVAL_MS..
-            HomeEditFrontier.AUTO_SCROLL_MAX_INTERVAL_MS)
+        assertTrue(inner in HomeAutoScroll.AUTO_SCROLL_MIN_INTERVAL_MS..
+            HomeAutoScroll.AUTO_SCROLL_MAX_INTERVAL_MS)
         val innerBottom = autoScrollIntervalMs(1705f, viewportHeightPx = 1800, edgePx = 96)
         val deepBottom = autoScrollIntervalMs(1800f, viewportHeightPx = 1800, edgePx = 96)
-        assertEquals(HomeEditFrontier.AUTO_SCROLL_MIN_INTERVAL_MS, deepBottom)
+        assertEquals(HomeAutoScroll.AUTO_SCROLL_MIN_INTERVAL_MS, deepBottom)
         assertEquals(inner, innerBottom)
     }
 

@@ -6,8 +6,6 @@ import me.foxtails.lakehead.core.model.LogicalSpan
 import me.foxtails.lakehead.core.designsystem.PixelRect
 import me.foxtails.lakehead.core.designsystem.SignedPixelFrame
 import me.foxtails.lakehead.core.designsystem.SquareCellGeometry
-import me.foxtails.lakehead.core.grid.ContentBounds
-import me.foxtails.lakehead.core.grid.GridContentBounds
 import me.foxtails.lakehead.core.grid.GridPlacement
 import me.foxtails.lakehead.core.grid.GridPosition
 import me.foxtails.lakehead.core.grid.GridRest
@@ -140,32 +138,18 @@ fun homeGridMetricsFor(
     restOffsetYPx = restOffsetYPx,
 )
 
-/** Whole-pixel row stride used by the integer row-window policies below. */
+/** Whole-pixel row stride used by the integer row arithmetic below. */
 val HomeGridMetrics.rowStrideCells: Long get() = rowStridePx.toLong()
 
 /**
- * Viewport rows for the edit-boundary policy: usable height over row stride,
- * floored, with a minimum of one so [GridVerticalLayout.createEditBoundary]'s
- * positive-viewport requirement never fails (including zero-height viewports).
+ * Viewport rows used to size the transient edit workspace: usable height over
+ * row stride, floored, with a minimum of one so zero-height viewports stay positive.
  */
 fun viewportRowsFor(usableHeightPx: Int, rowStridePx: Long): Long {
     require(usableHeightPx >= 0) { "usableHeightPx must be non-negative" }
     require(rowStridePx > 0L) { "rowStridePx must be positive" }
     if (usableHeightPx == 0) return 1L
     return maxOf(1L, usableHeightPx.toLong() / rowStridePx)
-}
-
-/** Positive validation extent: occupied rows or whole usable rows, never below one. */
-internal fun normalLegalityRows(
-    extent: GridVerticalExtent,
-    usableHeightPx: Int,
-    rowStridePx: Long,
-): Int {
-    require(usableHeightPx >= 0) { "usableHeightPx must be non-negative" }
-    require(rowStridePx > 0L) { "rowStridePx must be positive" }
-    val usableRows = if (usableHeightPx == 0) 0L else usableHeightPx.toLong() / rowStridePx
-    return maxOf(extent.occupiedMaxRowExclusive, usableRows, 1L)
-        .coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
 }
 
 /** The tile whose cell range contains the content point, or null (including above/left of the grid). */
@@ -200,13 +184,6 @@ internal fun centeredOriginX(
 }
 
 /**
- * Rest [GridRest.gridOriginY], or `0L` when no rest is available. May be negative
- * (tall content anchored above) or positive (short content bias centering); it
- * becomes [HomeGridMetrics.restOffsetYPx].
- */
-internal fun rendererOriginYPx(rest: GridRest?): Long = rest?.gridOriginY ?: 0L
-
-/**
  * G5 animated-origin target: the signed rest origin as a Float for the single
  * origin [Animatable] in [HomeCanvasGrid].
  *
@@ -230,33 +207,13 @@ internal fun shouldSnapOrigin(
 ): Boolean = isFirstFrame || rest == null || viewportHeightPx <= 0
 
 /**
- * Derives absolute content bounds from the loaded render tiles for the renderer
- * and row-window extent.
- *
- * Maps each tile to a [GridPlacement] once and delegates to the absolute helper;
- * returns `null` for empty input. Column legality and row extent stay owned by
- * `core:grid`.
- */
-internal fun contentBoundsForTiles(tiles: List<HomeRenderTile>, columns: Int): ContentBounds? {
-    if (tiles.isEmpty()) return null
-    val placements = tiles.map { tile ->
-        GridPlacement(
-            id = tile.itemId,
-            position = GridPosition(tile.position.column, tile.position.row),
-            span = GridSpan(tile.span.columns, tile.span.rows),
-        )
-    }
-    return GridContentBounds.absoluteContentBoundsOf(placements, columns)
-}
-
-/**
  * Computes the G2 rest offset for the content.
  *
  * The rest is computed with `minRow = 0`: row zero is the permanent origin and
  * `gridOriginY` is the offset added on top of it (bias centering for short
  * content, zero anchor for tall content). Returns `null` when the viewport height
  * is not positive or the rest arithmetic overflows; callers fall back to `0L`
- * via [rendererOriginYPx].
+ * via the rest's `gridOriginY`.
  */
 internal fun signedRestFor(
     viewportHeightPx: Int,
@@ -281,26 +238,13 @@ internal fun signedRestFor(
 /**
  * Derives a safe minimum content height in pixels from the loaded extent only.
  *
- * Kept for backward compatibility; delegates to [contentMinHeightPxSigned].
- * See [contentMinHeightPxSigned] for the row-count height contract.
- */
-internal fun contentMinHeightPx(
-    extent: GridVerticalExtent,
-    cellSizePx: Int,
-    rowGapPx: Int,
-): Int = contentMinHeightPxSigned(extent, cellSizePx, rowGapPx)
-
-/**
- * Derives a safe minimum content height in pixels from the loaded extent only,
- * for use with the signed renderer origin.
- *
  * Height is `totalScrollableRows * cellSizePx + (totalScrollableRows - 1) * rowGapPx`,
- * a row-count height independent of the signed origin: rebasing around `minRow`
- * preserves row counts, so no origin offset is subtracted here. Overflow or
+ * a row-count height measured from logical row zero, so leading empty rows count and
+ * no origin offset is subtracted here. Overflow or
  * results beyond [Int] saturate to [Int.MAX_VALUE] instead of wrapping; no
  * second extent policy is computed here.
  */
-internal fun contentMinHeightPxSigned(
+internal fun contentMinHeightPx(
     extent: GridVerticalExtent,
     cellSizePx: Int,
     rowGapPx: Int,
@@ -438,8 +382,8 @@ internal fun isInHandle(
  * In both cases the returned top-left is the corner minus half the control size;
  * it may extend outside the tile because the visual contract is center-pinned.
  *
- * Pure math, framework-free; signed G3 callers pass a [SignedPixelFrame] via the
- * overload below (already rebased around the signed origin plus the rest offset).
+ * Pure math, framework-free; callers holding a [SignedPixelFrame] (whose top may be
+ * above the viewport) use the overload below.
  * Legality stays owned by `core:grid`.
  */
 internal enum class ControlCorner { TOP_RIGHT, BOTTOM_RIGHT }
@@ -485,7 +429,7 @@ internal fun committedScrollMaxPx(
     require(cellSizePx > 0) { "cellSizePx must be positive" }
     require(rowGapPx >= 0) { "rowGapPx must be non-negative" }
     require(viewportHeightPx >= 0) { "viewportHeightPx must be non-negative" }
-    val committedHeight = contentMinHeightPxSigned(extent, cellSizePx, rowGapPx).toLong()
+    val committedHeight = contentMinHeightPx(extent, cellSizePx, rowGapPx).toLong()
     return Math.subtractExact(committedHeight, viewportHeightPx.toLong())
         .coerceIn(0L, Int.MAX_VALUE.toLong()).toInt()
 }
@@ -503,9 +447,8 @@ internal fun clampScrollToCommitted(actualPx: Int, committedMaxPx: Int): Int {
 }
 
 /**
- * Whether the loaded extent is consistent with all loaded tiles (parity with
- * [GridContentBounds]): the height count equals `maxExcl - min` and matches a
- * fresh [GridVerticalLayout.measure] over the tiles. Empty tiles require a
+ * Whether the loaded extent is consistent with all loaded tiles: the height
+ * count equals `maxExcl - min` and matches a fresh [GridVerticalLayout.measure] over the tiles. Empty tiles require a
  * zero extent. Pure, framework-free; the remeasure below uses the same grid
  * policy, never a second one.
  */
@@ -552,7 +495,7 @@ internal fun committedFrameFor(
     rowStridePx: Long,
 ): HomeCommittedFrame {
     val extent = committedExtentOrRemeasured(loadedExtent, tiles, usableHeightPx, rowStridePx)
-    val naturalHeightPx = contentMinHeightPxSigned(extent, geometry.cellSizePx, geometry.rowGapPx)
+    val naturalHeightPx = contentMinHeightPx(extent, geometry.cellSizePx, geometry.rowGapPx)
     return HomeCommittedFrame(
         extent = extent,
         rest = signedRestFor(usableHeightPx, naturalHeightPx, rowStridePx),

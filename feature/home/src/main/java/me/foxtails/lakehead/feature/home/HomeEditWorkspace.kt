@@ -89,6 +89,25 @@ internal fun extendedWorkspaceBottomRow(
 }
 
 /**
+ * Measured-content floor: the full viewport, or while a MOVE is active the
+ * edit workspace's bottom (plus clearance) when that is taller. Pure
+ * derivation; the workspace row itself stays owned by the composable.
+ */
+internal fun moveWorkspaceFloorPx(
+    workspaceBottomRow: Long?,
+    moveActive: Boolean,
+    metrics: HomeGridMetrics,
+    fullViewportPx: Int,
+    bottomClearancePx: Int,
+): Int = workspaceBottomRow?.takeIf { moveActive }?.let { rows ->
+    contentContainerHeightPx(
+        naturalHeightPx = workspaceBottomPx(rows, metrics),
+        fullHeightPx = fullViewportPx,
+        bottomClearancePx = bottomClearancePx,
+    )
+} ?: fullViewportPx
+
+/**
  * Pixel Y of the bottom edge of row `bottomRowExclusive - 1` in content
  * coordinates (rest offset included), saturating to [Int.MAX_VALUE]. Zero rows
  * is the rest offset itself.

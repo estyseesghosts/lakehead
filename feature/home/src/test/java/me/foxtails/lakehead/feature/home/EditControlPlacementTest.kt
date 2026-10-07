@@ -72,8 +72,8 @@ class EditControlPlacementTest {
 
     @Test
     fun center_preservesSignedTop() {
-        // Signed frame above the row origin stays rebased: the centered control
-        // tracks the negative top instead of clamping to zero.
+        // A frame whose top is above the viewport: the centered control tracks
+        // the negative top instead of clamping to zero.
         val frame = SignedPixelFrame(left = 0, top = -40, widthPx = 100, heightPx = 100)
         assertEquals(IntOffset(26, -14), removeControlOffset(frame, 48, RemoveControlPlacement.CENTER))
     }

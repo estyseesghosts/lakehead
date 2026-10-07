@@ -116,7 +116,7 @@ private suspend fun AwaitPointerEventScope.awaitDownTile(
 ): DragDown? {
     val first = awaitPointerEvent().changes.firstOrNull { it.pressed } ?: return null
     val start = first.position
-    // Viewport pointer coordinates are remapped with the scroll frozen at down.
+    // Pointer Y is viewport-local; adding the scroll read at down converts it to content space.
     val scrollYPx = host.scrollYPx.toFloat()
     val edit = host.editState
     val snapshot = host.hit

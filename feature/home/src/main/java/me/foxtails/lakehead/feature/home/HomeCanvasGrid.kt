@@ -2,13 +2,10 @@ package me.foxtails.lakehead.feature.home
 
 import androidx.compose.animation.core.Animatable
 import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
-import androidx.compose.foundation.layout.offset
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.verticalScroll
@@ -21,14 +18,12 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.pointer.PointerInputChange
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.unit.IntOffset
+
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
 import me.foxtails.lakehead.core.designsystem.AppTileDefaults
@@ -36,13 +31,9 @@ import me.foxtails.lakehead.core.designsystem.CORNER_CONTROL_TOUCH_SIZE
 import me.foxtails.lakehead.core.designsystem.GestureArbitration
 import me.foxtails.lakehead.core.designsystem.GestureArbitration.LockedAxis
 import me.foxtails.lakehead.core.designsystem.PinnedTileShortcut
-import me.foxtails.lakehead.core.designsystem.RemoveButton
-import me.foxtails.lakehead.core.designsystem.ResizeCandidateOverlay
-import me.foxtails.lakehead.core.designsystem.ResizeHandle
 import me.foxtails.lakehead.core.designsystem.ShortcutSurfaceEntry
 import me.foxtails.lakehead.core.designsystem.SquareCellGeometry
 import me.foxtails.lakehead.core.designsystem.TileBounds
-import me.foxtails.lakehead.core.grid.GridSpan
 import me.foxtails.lakehead.core.grid.GridVerticalExtent
 import me.foxtails.lakehead.core.model.AppIdentity
 import me.foxtails.lakehead.core.model.ItemId
@@ -129,10 +120,8 @@ data class HomeCanvasViewportStyle(
  *   error), and drag end commits the held last-valid span via [onResizeTile]
  *   when it differs from the origin span, staying in edit mode either way.
  *   Routing is decided once at drag start: a MOVE drag never promotes to RESIZE
- *   mid-gesture (gated for W4). Persistence itself stays
- *   with the caller: this grid only reports the committed [ItemId],
- *   [LogicalPosition] and per-attempt request id (carried back in the
- *   commit-result ack) or [LogicalSpan].
+ *   mid-gesture. Persistence itself stays with the caller: this grid only
+ *   reports the committed [ItemId] with a [LogicalPosition] or [LogicalSpan].
  * - A MOVE drag owns one transient edit workspace (`workspaceBottomRow`, see
  *   `HomeEditWorkspace.kt`) that only sizes the measured content, so the real
  *   `ScrollState` range grows below the last tile while the MOVE is active.
@@ -298,14 +287,10 @@ internal fun HomeCanvasGrid(
             // [HomePagerGate] (gesture state, never persisted), reset per home
             // via key(requestedHomeId); separate from the A1 isHold above.
             val pagerGate = remember { HomePagerGate() }
-            // B3 edge auto-scroll: latest viewport-local pointer position during
-            // a MOVE drag (null when no MOVE drag is active). Both axes are
-            // retained so the stationary ticker below can remap the held
-            // pointer with the current scroll after each step; the per-frame
-            // drag loop steps on the same values while the pointer moves.
-            // Grab offsets live in the MOVE frame beside the live session.
-            var moveEdgeYPx by remember { mutableStateOf<Float?>(null) }
-            var moveEdgeXPx by remember { mutableStateOf<Float?>(null) }
+            // B3 edge auto-scroll: single owner of the held viewport-local
+            // pointer during a MOVE drag (see MoveEdgePointer). Grab offsets
+            // live in the MOVE frame beside the live session.
+            val moveEdgePointer = remember { MoveEdgePointer() }
             val columns = loaded.columns.count
             val moveDrag = editState.moveDrag
             val dragging = editState.isDragging
@@ -338,8 +323,7 @@ internal fun HomeCanvasGrid(
             }
             BackHandler(enabled = editState.isEditing) {
                 editState = if (editState.isDragging) editState.cancelDrag() else editState.exit()
-                moveEdgeYPx = null
-                moveEdgeXPx = null
+                moveEdgePointer.clear()
             }
             // W1 navigate/Home reset: leaving the tile-grid surface exits
             // wiggle-editing via the pure transition (idempotent from Normal).
@@ -347,8 +331,7 @@ internal fun HomeCanvasGrid(
             // navigate-away reloads of the same home.
             LaunchedEffect(loaded.requestedHomeId) {
                 editState = editState.exit()
-                moveEdgeYPx = null
-                moveEdgeXPx = null
+                moveEdgePointer.clear()
             }
             // P2 pager-navigation exit: navigating to another pager page leaves
             // this grid composed (adjacent pages stay alive), so neither the
@@ -359,8 +342,7 @@ internal fun HomeCanvasGrid(
             LaunchedEffect(isVisible) {
                 if (!isVisible) {
                     editState = editState.exit()
-                    moveEdgeYPx = null
-                    moveEdgeXPx = null
+                    moveEdgePointer.clear()
                     pagerGate.release()
                 }
             }
@@ -405,14 +387,14 @@ internal fun HomeCanvasGrid(
             // so the real scroll range already covers it. Scrolling never calls
             // onMoveTile: release stays the sole commit.
             val autoScrollEdgePx = with(density) {
-                HomeEditFrontier.AUTO_SCROLL_EDGE_DP.dp.roundToPx()
+                HomeAutoScroll.AUTO_SCROLL_EDGE_DP.dp.roundToPx()
             }.coerceAtLeast(1)
             // Rest offset (centring of short content): presentation only, from the
             // viewport and the committed absolute content height. It glides while
             // not editing and is frozen for the whole edit session, so the one
             // [gridMetrics] used to render tiles and overlays and to map pointers
             // never changes under a drag. A drag that began in an earlier frame
-            // (width change, rotation) is cancelled below instead of rebased.
+            // (width change, rotation) is cancelled below instead of re-mapped.
             val restOffsetYPx = rememberRestOffsetYPx(
                 targetPx = originTargetFor(committedRest),
                 snapToTarget = shouldSnapOrigin(committedRest, availableHeightPx, isFirstFrame = false),
@@ -433,11 +415,7 @@ internal fun HomeCanvasGrid(
                 runMoveEdgeAutoScroll(
                     scrollState = scrollState,
                     isMoveActive = { editState.moveDrag?.itemId == moveTickItemId },
-                    pointer = {
-                        val x = moveEdgeXPx
-                        val y = moveEdgeYPx
-                        if (x == null || y == null) null else Offset(x, y)
-                    },
+                    pointer = { moveEdgePointer.position },
                     bandHeightPx = { bandHeightPx.value },
                     scrollViewportPx = { scrollViewportPx.value },
                     edgePx = autoScrollEdgePx,
@@ -468,13 +446,13 @@ internal fun HomeCanvasGrid(
             // (6.2), so measured height is max(committed content bottom, workspace
             // bottom) and the real ScrollState range grows with it. There is no
             // separately computed scroll maximum anywhere.
-            val minHeightPx = workspaceBottomRow?.takeIf { moveActive }?.let { rows ->
-                contentContainerHeightPx(
-                    naturalHeightPx = workspaceBottomPx(rows, gridMetrics),
-                    fullHeightPx = fullViewportPx,
-                    bottomClearancePx = viewportStyle.bottomClearancePx,
-                )
-            } ?: fullViewportPx
+            val minHeightPx = moveWorkspaceFloorPx(
+                workspaceBottomRow = workspaceBottomRow,
+                moveActive = moveActive,
+                metrics = gridMetrics,
+                fullViewportPx = fullViewportPx,
+                bottomClearancePx = viewportStyle.bottomClearancePx,
+            )
             // W3 renderedSpan = preview ?: persisted: while RESIZE-dragging the
             // active tile, its placement and content use the live last-valid
             // preview span so content adapts during the drag. Reduced-motion
@@ -512,8 +490,7 @@ internal fun HomeCanvasGrid(
                 detectTapGestures(
                     onTap = {
                         editState = editState.exit()
-                        moveEdgeYPx = null
-                        moveEdgeXPx = null
+                        moveEdgePointer.clear()
                     },
                 )
             }
@@ -561,8 +538,7 @@ internal fun HomeCanvasGrid(
                     override val isVisible: Boolean get() = isVisibleState.value
                     override val pager: HomePagerGate = pagerGate
                     override fun onMovePointer(pointerXPx: Float, pointerYPx: Float) {
-                        moveEdgeXPx = pointerXPx
-                        moveEdgeYPx = pointerYPx
+                        moveEdgePointer.set(pointerXPx, pointerYPx)
                     }
 
                     // The drag state is already cleared by the loop when this runs;
@@ -570,8 +546,7 @@ internal fun HomeCanvasGrid(
                     // belong to the caller that owns the placements.
                     override fun onDragEnded(route: DownDragRoute, end: HomeDragEnd) {
                         if (route == DownDragRoute.MOVE) {
-                            moveEdgeXPx = null
-                            moveEdgeYPx = null
+                            moveEdgePointer.clear()
                         }
                         if (end !is HomeDragEnd.Commit) return
                         when (val commit = end.commit) {
@@ -628,159 +603,39 @@ internal fun HomeCanvasGrid(
                         },
                     )
                 }
-                if (moveDrag != null) {
-                    MoveCandidateOverlay(move = moveDrag, metrics = gridMetrics)
-                }
-                val resizeDrag = editState.resizeDrag
-                if (resizeDrag != null) {
-                    // W3 preview overlay: frame at the held last-valid span (blocked
-                    // proposals keep the frame; validity flips the valid/error
-                    // color). Animated and reduced-motion branches share
-                    // [resizePreviewSpan], so geometry is identical.
-                    val previewSpan = resizePreviewSpan(
-                        resize = resizeDrag,
-                        reducedMotion = reducedMotion,
-                    )
-                    ResizeCandidateOverlay(
-                        originPosition = resizeDrag.position,
-                        candidateSpan = LogicalSpan(previewSpan.columns, previewSpan.rows),
-                        metrics = gridMetrics,
-                        isValid = resizeDrag.validity == CandidateValidity.VALID,
-                    )
-                }
-                // Resize handle overlay: the centered 48dp visual/touch Box is positioned
-                // over the selected/active tile's bottom-right corner. It is separate from
-                // the parent's inward-only 48dp routing hit rect: the parent receives only
-                // points in the tile's [right - touch, right] × [bottom - touch, bottom]
-                // corner, while this Box remains center-pinned and may extend outward.
-                // It is INSIDE the scrolling content so it shares the tiles/overlays
-                // coordinate space and tracks scroll. W3 single-BR-only: the touch
-                // target is exactly RESIZE_TOUCH_DP inward over the corner
-                // ([right - touch, right] x [bottom - touch, bottom]), never
-                // outward, so edge tiles never clip.
-                val controlItemId = editState.selectedTileId
-                if (controlItemId != null) {
-                    val activeTile = loaded.tiles.find { it.itemId == controlItemId }
-                    if (activeTile != null) {
-                        // Handle tracks the live last-valid preview span (not the
-                        // persisted span) so it stays on the growing/shrinking
-                        // corner during a resize drag.
-                        // Frame from `gridMetrics`: its top is final Box content coordinates.
-                        val previewSpan = editState.renderedSpan(controlItemId, activeTile.span)
-                        val tileBounds = gridMetrics.signedFrame(
-                            moveDrag?.originalPosition ?: activeTile.position,
-                            previewSpan,
-                        )
-                        val touchPx = with(density) { RESIZE_TOUCH_DP.dp.roundToPx() }
-                        val handleOffset = cornerControlOffset(
-                            tileBounds = tileBounds,
-                            controlSizePx = touchPx,
-                            corner = ControlCorner.BOTTOM_RIGHT,
-                        )
-                        // Resize handle: tap-only arm/disarm for the selected tile.
-                        // The tap consumes the arrow-tap so the tile below never
-                        // transfer-clears it (below slop toggles armed with no write
-                        // and no enterSelectedDrag); past slop the tap cancels and
-                        // the parent Box's unified drag handler owns routing. No drag
-                        // detector is installed here — a second one would lose the
-                        // slop race and leave the handle unreachable.
-                        val handleLabel = if (activeTile.label.isNullOrBlank()) {
-                            UNAVAILABLE_LABEL
-                        } else {
-                            activeTile.label
+                // Overlay layer: move/resize candidate outlines, resize handle,
+                // remove button and edit-mode shortcut menu. Reads the current
+                // editState snapshot; mutation callbacks are passed through from
+                // the owning composable.
+                HomeGridOverlay(
+                    moveDrag = moveDrag,
+                    resizeDrag = editState.resizeDrag,
+                    editState = editState,
+                    tiles = loaded.tiles,
+                    gridMetrics = gridMetrics,
+                    reducedMotion = reducedMotion,
+                    dragging = dragging,
+                    surfaceEntries = surfaceEntries,
+                    surfaceEntriesTileId = surfaceEntriesTileId,
+                    availableWidthPx = availableWidthPx,
+                    availableHeightPx = availableHeightPx,
+                    scrollYPx = scrollState.value,
+                    onToggleResizeArmed = { controlItemId ->
+                        if (editState.selectedTileId == controlItemId) {
+                            editState = editState.toggleResizeArmed()
                         }
-                        Box(
-                            modifier = Modifier
-                                .offset { handleOffset }
-                                .size(RESIZE_TOUCH_DP.dp),
-                        ) {
-                            ResizeHandle(
-                                label = handleLabel,
-                                armed = editState.isResizeArmedFor(controlItemId),
-                                onToggleArmed = {
-                                    if (editState.selectedTileId == controlItemId) {
-                                        editState = editState.toggleResizeArmed()
-                                    }
-                                },
-                            )
-                        }
-                        // Remove affordance: sibling overlay over the active tile in
-                        // both MOVE and RESIZE modes. Tracks the live candidate span
-                        // (same footprint as the handle) so it stays attached during
-                        // a resize drag. A5 placement: 1x1/1x2/2x1 pin top-right,
-                        // any larger preview span centers the control in the tile
-                        // footprint; the flip is driven by the live preview span so
-                        // a resize across the boundary re-anchors mid-drag. Tap
-                        // reports onRemoveTile only; the grid performs no
-                        // persistence delete and issues no move/resize.
-                        val removeLabel = handleLabel
-                        val buttonPx = with(density) { CORNER_CONTROL_TOUCH_SIZE.dp.roundToPx() }
-                        val removePlacement = removeControlPlacement(
-                            columns = previewSpan.columns,
-                            rows = previewSpan.rows,
-                        )
-                        val removeAbsolute = removeControlOffset(
-                            tileBounds = tileBounds,
-                            controlSizePx = buttonPx,
-                            placement = removePlacement,
-                        )
-                        // Signed frame already carries the row origin + rest offset, so
-                        // the remove anchor is final Box content coordinates.
-                        val removeTop = removeAbsolute.y
-                        Box(
-                            modifier = Modifier
-                                .offset { IntOffset(removeAbsolute.x, removeTop) }
-                                .size(CORNER_CONTROL_TOUCH_SIZE.dp),
-                        ) {
-                            RemoveButton(
-                                label = removeLabel,
-                                onRemove = {
-                                    onRemoveTile(controlItemId)
-                                    // B2: unpin selection → Editing(null) + cancel
-                                    // Active → Idle; stays in wiggle-edit.
-                                    editState = editState.onTileRemoved(controlItemId)
-                                    // B3: removal ends the transient edit too.
-                                    moveEdgeYPx = null
-                                    moveEdgeXPx = null
-                                },
-                            )
-                        }
-                    }
-                }
-                // B4 edit-mode shortcut menu: sibling overlay above the W1-selected
-                // tile, inside the scrolling content so it shares the tiles'
-                // coordinate space and tracks scroll. Follows
-                // (interaction as? Editing)?.selectedId: long-press shows,
-                // tap-other transfers with no Normal round-trip, and every
-                // dismiss path (empty-tap/Back/navigate to Normal, move/resize
-                // start to Active, removal/uninstall via a null selection or a
-                // tile-lookup miss, zero shortcuts) uncomposes the menu with
-                // zero activation. Only a row tap reports onSurfaceExecute/
-                // onSurfaceTogglePin with the selected ItemId and entry id;
-                // the menu never moves, resizes or pages tiles. The visible
-                // window is the grid scroll offset plus the app-safe usable
-                // height (pill/gesture reserve already excluded upstream).
-                val menuSelectedId = editState.selectedTileId
-                // B1 owner gate: rows scoped to another tile (stale A rows after
-                // an A→B switch) hide honestly until the caller's rows for B
-                // arrive; unscoped (null owner) rows keep the B4 behavior.
-                if (isEditShortcutMenuVisible(dragging, menuSelectedId, loaded.tiles, surfaceEntries) &&
-                    isSurfaceEntriesForSelection(surfaceEntriesTileId, menuSelectedId)
-                ) {
-                    val menuTile = loaded.tiles.find { it.itemId == menuSelectedId }
-                    if (menuTile != null) {
-                        EditShortcutMenu(
-                            tile = menuTile,
-                            entries = surfaceEntries,
-                            metrics = gridMetrics,
-                            availableWidthPx = availableWidthPx,
-                            visibleTopPx = scrollState.value,
-                            visibleBottomPx = scrollState.value + availableHeightPx.coerceAtLeast(1),
-                            onSurfaceExecute = onSurfaceExecute,
-                            onSurfaceTogglePin = onSurfaceTogglePin,
-                        )
-                    }
-                }
+                    },
+                    onRemove = { controlItemId ->
+                        onRemoveTile(controlItemId)
+                        // B2: unpin selection → Editing(null) + cancel
+                        // Active → Idle; stays in wiggle-edit.
+                        editState = editState.onTileRemoved(controlItemId)
+                        // B3: removal ends the transient edit too.
+                        moveEdgePointer.clear()
+                    },
+                    onSurfaceExecute = onSurfaceExecute,
+                    onSurfaceTogglePin = onSurfaceTogglePin,
+                )
             }
         }
     }
@@ -817,29 +672,3 @@ internal data class IdleHitSnapshot(
     val metrics: HomeGridMetrics,
     val scrollYPx: Float,
 )
-
-/**
- * Resize preview span for the RESIZE overlay, handle, and tile content.
- *
- * W3 `renderedSpan = preview ?: persisted`: returns the held last-valid span
- * ([DragState.Resize.previewSpan]) for a RESIZE drag, which is the
- * frame both the animated path and the reduced-motion snap path render — the
- * [reducedMotion] flag only selects snap-vs-animate presentation, never a
- * different span, so geometry is identical either way. Pure math,
- * framework-free. Legality stays owned by `core:grid`.
- */
-internal fun resizePreviewSpan(
-    resize: DragState.Resize,
-    reducedMotion: Boolean = false,
-): GridSpan {
-    // Snap branch (reduced-motion) and animated branch share one source: the
-    // held last-valid preview. No separate span computation per branch.
-    val preview = resize.previewSpan
-    return if (reducedMotion) {
-        // Snap: render the validated span immediately, no rapid animation.
-        GridSpan(preview.columns, preview.rows)
-    } else {
-        // Animated path target: the same validated span.
-        GridSpan(preview.columns, preview.rows)
-    }
-}

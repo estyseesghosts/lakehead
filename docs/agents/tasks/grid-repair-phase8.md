@@ -2,7 +2,7 @@
 
 Authority: `../../lakehead-grid-repair-plan.md` §3 (1–15 apply to every slice), §5 Phase 8 (slices 8.1–8.6), §9 non-goals.
 
-Status: **Slices 8.1–8.3 implemented and verified (2026-10-06/07). Slices 8.4–8.6 not started.** Evidence in `../../../state-logs/handoffs/2026-10-06-grid-repair-phase8.md` (8.1), `../../../state-logs/handoffs/2026-10-06-grid-repair-phase8-slice2.md` (8.2) and `../../../state-logs/handoffs/2026-10-07-grid-repair-phase8-slice3.md` (8.3).
+Status: **Phase 8 complete (2026-10-07): slices 8.1–8.6 done (8.4 was an audit with no code change, see `2026-10-07-grid-repair-phase8-slice4.md`; 8.5 see `2026-10-07-grid-repair-phase8-slice5.md`; 8.6 and the exit gate see `2026-10-07-grid-repair-phase8-slice6.md`).** Evidence in `../../../state-logs/handoffs/2026-10-06-grid-repair-phase8.md` (8.1), `../../../state-logs/handoffs/2026-10-06-grid-repair-phase8-slice2.md` (8.2) and `../../../state-logs/handoffs/2026-10-07-grid-repair-phase8-slice3.md` (8.3).
 
 ## Ownership
 
@@ -30,9 +30,35 @@ Status: **Slices 8.1–8.3 implemented and verified (2026-10-06/07). Slices 8.4�
 - `HomeCanvasGrid.kt` 921 → 845 lines; `HomeCanvasGrid()` still 621 lines.
 - Gate: gestures file holds no persistence, row-window or renderer-rebasing code.
 
-## Remaining (not started)
+## Slice 8.4 — layout extraction (done, no code moved)
 
-8.4 layout, 8.5 overlay (`HomeGridOverlay.kt`), 8.6 thin `HomeGrid.kt` assembly. Do in order; verify each. `test_home_canvas_grid_tripwire_size` stays until the plan gate is met; never lower its threshold.
+- `HomeGridLayout.kt` (earlier phase) already owns child composition, measurement and placement: `HomeGridLayout` and the pure `homeGridContentHeightPx`. It consumes tiles, `HomeGridMetrics`, a `renderedSpan` lambda, `minHeightPx` and `tailPx`, and decides no legality or edit transition.
+- `HomeCanvasGrid.kt` was audited: no `Layout`, `measure`, `place` or `layout(` remains; its only layout contact is the `HomeGridLayout(...)` call. `minHeightPx` (workspace-floor choice tied to `moveActive`) and `renderedSpanOf` (edit-state read) stay in the composable as edit-derived inputs, not layout.
+- No symbols moved, no tests moved; counts unchanged. `HomeCanvasGrid.kt` 845 lines; `HomeCanvasGrid()` 621 lines.
+
+## Slice 8.5 — overlay extraction (done)
+
+- `CandidateOverlays.kt` (earlier phase) already owned `MoveCandidateOverlay`/`ResizeCandidateOverlay`; untouched.
+- New `HomeGridOverlay.kt`: `HomeGridOverlay(...)` composable (move/resize candidate calls, resize handle, remove button, edit shortcut menu gate) moved verbatim from `HomeCanvasGrid()`, plus `resizePreviewSpan` (with KDoc). It reads state and calls callbacks only: `onToggleResizeArmed`/`onRemove` stay in `HomeCanvasGrid()` and perform the edit transitions and clear `moveEdgeXPx`/`moveEdgeYPx`. `scrollYPx` is read at the call site.
+- Not moved: `moveEdgeXPx`/`moveEdgeYPx`, `minHeightPx`, `renderedSpanOf` (8.6).
+- `HomeCanvasGrid.kt` 845 → 692 lines; `HomeCanvasGrid()` 621 → 502 lines. `ResizePreviewSpanTest` unchanged (same package); test counts unchanged.
+
+## Slice 8.6 — reduce assembly file (done)
+
+- Audit: `HomeCanvasGrid()` was already the assembly (scroll/edit/pager state, hold and selection emission, modifier wiring, forwarding commit intents). No editor transition logic, routing predicate or overlay rendering remains; what is left are one-line call-site transitions that sit with the state owner.
+- Moved: `moveEdgeXPx`/`moveEdgeYPx` → `MoveEdgePointer` (new `MoveEdgePointer.kt`, one owner of the held MOVE pointer: `set`/`clear`/`position`, replacing six paired clears); `minHeightPx` derivation → `moveWorkspaceFloorPx` in `HomeEditWorkspace.kt` (pure; `workspaceBottomRow` state stays in the composable).
+- Stays: `renderedSpanOf` (one-line `editState.renderedSpan` read passed to `HomeGridLayout`).
+- Decision: the file and composable keep the name `HomeCanvasGrid` (no `HomeGrid.kt` rename): `HomeCanvas.kt`, KDocs and the audit tests reference it and a rename adds churn without changing responsibility.
+- `HomeCanvasGrid.kt` 676 lines; `HomeCanvasGrid()` 487 lines (from 1,882). No test moved or edited.
+
+## Phase 8 exit gate — met (2026-10-07)
+
+- No new god file: largest new/extracted files are `HomeGridGeometry.kt` 593 (cohesive pure math, from 8.1), `HomeGridEditor.kt` 382, `HomeGridGestures.kt` 358, `HomeGridOverlay.kt` 217; none holds mixed responsibilities.
+- `function_audit.py` reports every production function; the largest Home-grid function is `HomeCanvasGrid()` at 487 lines, far from the 1,882-line scale (`LauncherShell` 309 is the next largest).
+- The 100–300 line aim is exceeded by Geometry/Editor/Gestures and the assembly; kept for cohesion per the plan.
+- `test_home_canvas_grid_tripwire_size` deleted; unittest discovery 15 tests, 0 failures. The "largest function" audit test still holds.
+
+Phase 8 complete. Phase 9 not started.
 
 ## Verification and exclusions
 

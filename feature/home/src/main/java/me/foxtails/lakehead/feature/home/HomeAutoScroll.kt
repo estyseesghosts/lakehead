@@ -1,15 +1,15 @@
 package me.foxtails.lakehead.feature.home
 
 /**
- * Edge auto-scroll timing and zone helpers.
+ * MOVE edge-auto-scroll constants and zone/step/interval helpers.
  *
- * Auto-scroll is deliberately simple: while a MOVE pointer stays in an edge
- * band the grid scrolls the real `ScrollState` one row stride per interval and
- * recomputes the candidate from the unchanged pointer and the new scroll. Edit
- * reachability below the content is owned by the workspace in
- * `HomeEditWorkspace.kt`, never by a synthetic scroll maximum here.
+ * This object holds only auto-scroll timing constants and the pure functions
+ * that classify edge-proximity zones, compute a one-row scroll step and scale
+ * the scroll interval by depth. It contains no legality checks, no workspace
+ * height and no synthetic scroll maximum; workspace extent is owned by
+ * `HomeEditWorkspace.kt`.
  */
-object HomeEditFrontier {
+object HomeAutoScroll {
     /** Edge-proximity band for auto-scroll, in dp. */
     const val AUTO_SCROLL_EDGE_DP: Int = 32
 
@@ -52,9 +52,9 @@ fun autoScrollStepPx(rowStridePx: Long): Int {
  *
  * Returns null when [pointerYPx] is outside both edge bands ([autoScrollZone]
  * reports NONE). Inside a band the interval scales linearly with depth: the
- * inner boundary scrolls slowest ([HomeEditFrontier.AUTO_SCROLL_MAX_INTERVAL_MS])
+ * inner boundary scrolls slowest ([HomeAutoScroll.AUTO_SCROLL_MAX_INTERVAL_MS])
  * and the viewport edge scrolls fastest
- * ([HomeEditFrontier.AUTO_SCROLL_MIN_INTERVAL_MS]). Top and bottom are
+ * ([HomeAutoScroll.AUTO_SCROLL_MIN_INTERVAL_MS]). Top and bottom are
  * symmetric for equal depths. Pointers past the viewport edge clamp to the
  * fastest interval. Pure, framework-free.
  */
@@ -73,7 +73,7 @@ fun autoScrollIntervalMs(
         AutoScrollZone.NONE -> return null
     }.coerceIn(0f, edgePx.toFloat())
     val fraction = depthPx / edgePx.toFloat()
-    val max = HomeEditFrontier.AUTO_SCROLL_MAX_INTERVAL_MS
-    val min = HomeEditFrontier.AUTO_SCROLL_MIN_INTERVAL_MS
+    val max = HomeAutoScroll.AUTO_SCROLL_MAX_INTERVAL_MS
+    val min = HomeAutoScroll.AUTO_SCROLL_MIN_INTERVAL_MS
     return (max - fraction * (max - min).toFloat()).toLong()
 }
