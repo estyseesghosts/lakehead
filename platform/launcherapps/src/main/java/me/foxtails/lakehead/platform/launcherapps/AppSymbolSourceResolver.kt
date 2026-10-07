@@ -40,23 +40,25 @@ class AppSymbolSourceResolver {
      * Resolves the best symbol source for the given [drawable] at the device's current SDK.
      */
     fun resolve(drawable: Drawable, sdkInt: Int = Build.VERSION.SDK_INT): AppSymbolSource =
-        resolve(drawable, sdkInt, ::readAdaptiveLayers)
+        resolve(drawable, sdkInt, ::readAdaptiveLayers, MonochromeUsability::isUsable)
 
     /**
-     * Testable seam: accepts an explicit [sdkInt] and a [readAdaptive] function that
-     * extracts adaptive icon layers (foreground / monochrome) from a drawable.
+     * Testable seam: accepts an explicit [sdkInt], a [readAdaptive] function that extracts
+     * adaptive icon layers (foreground / monochrome) from a drawable, and [isUsableMonochrome],
+     * which decides whether a declared monochrome layer is fit to be tinted as the symbol.
      */
     internal fun resolve(
         drawable: Drawable,
         sdkInt: Int,
         readAdaptive: (Drawable, Int) -> AdaptiveLayers?,
+        isUsableMonochrome: (Drawable) -> Boolean,
     ): AppSymbolSource {
         val layers = readAdaptive(drawable, sdkInt)
 
         if (layers != null) {
             if (sdkInt >= 33) {
                 val mono = layers.monochrome
-                if (mono != null) return AppSymbolSource.Monochrome(mono)
+                if (mono != null && isUsableMonochrome(mono)) return AppSymbolSource.Monochrome(mono)
                 return AppSymbolSource.AdaptiveForeground(layers.foreground)
             }
 

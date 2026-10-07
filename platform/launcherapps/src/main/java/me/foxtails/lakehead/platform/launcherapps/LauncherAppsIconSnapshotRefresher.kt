@@ -258,7 +258,7 @@ class BoundedLauncherAppIconPngEncoder(
         const val MAX_SIZE_PX: Int = 512
 
         /** Bump whenever the encoded output changes, so cached entries are re-encoded once. */
-        const val ENCODER_VERSION: Int = 1
+        const val ENCODER_VERSION: Int = 2
 
         /** Fraction of the output box reserved for padding on each side (content = 75%). */
         private const val NORMALISED_PADDING = 0.125f

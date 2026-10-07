@@ -3,6 +3,7 @@ package me.foxtails.lakehead.platform.launcherapps
 import android.graphics.Canvas
 import android.graphics.ColorFilter
 import android.graphics.drawable.Drawable
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -19,7 +20,7 @@ class AppSymbolSourceResolverTest {
         val fg = FakeDrawable("fg")
         val input = FakeAdaptiveDrawable(mono, fg)
 
-        val result = resolver.resolve(input, sdkInt = 33, readAdaptive = fakeReadAdaptive)
+        val result = resolver.resolve(input, sdkInt = 33, readAdaptive = fakeReadAdaptive, isUsableMonochrome = { true })
 
         assertTrue(result is AppSymbolSource.Monochrome)
         assertSame(mono, result.drawable)
@@ -31,7 +32,7 @@ class AppSymbolSourceResolverTest {
         val fg = FakeDrawable("fg")
         val input = FakeAdaptiveDrawable(mono, fg)
 
-        val result = resolver.resolve(input, sdkInt = 36, readAdaptive = fakeReadAdaptive)
+        val result = resolver.resolve(input, sdkInt = 36, readAdaptive = fakeReadAdaptive, isUsableMonochrome = { true })
 
         assertTrue(result is AppSymbolSource.Monochrome)
         assertSame(mono, result.drawable)
@@ -44,7 +45,7 @@ class AppSymbolSourceResolverTest {
         val fg = FakeDrawable("fg")
         val input = FakeAdaptiveDrawable(monochrome = null, foreground = fg)
 
-        val result = resolver.resolve(input, sdkInt = 33, readAdaptive = fakeReadAdaptive)
+        val result = resolver.resolve(input, sdkInt = 33, readAdaptive = fakeReadAdaptive, isUsableMonochrome = { true })
 
         assertTrue(result is AppSymbolSource.AdaptiveForeground)
         assertSame(fg, result.drawable)
@@ -57,7 +58,7 @@ class AppSymbolSourceResolverTest {
         val fg = FakeDrawable("fg")
         val input = FakeAdaptiveDrawable(monochrome = null, foreground = fg)
 
-        val result = resolver.resolve(input, sdkInt = 26, readAdaptive = fakeReadAdaptive)
+        val result = resolver.resolve(input, sdkInt = 26, readAdaptive = fakeReadAdaptive, isUsableMonochrome = { true })
 
         assertTrue(result is AppSymbolSource.AdaptiveForeground)
         assertSame(fg, result.drawable)
@@ -68,7 +69,7 @@ class AppSymbolSourceResolverTest {
         val fg = FakeDrawable("fg")
         val input = FakeAdaptiveDrawable(monochrome = FakeDrawable("mono"), foreground = fg)
 
-        val result = resolver.resolve(input, sdkInt = 29, readAdaptive = fakeReadAdaptive)
+        val result = resolver.resolve(input, sdkInt = 29, readAdaptive = fakeReadAdaptive, isUsableMonochrome = { true })
 
         assertTrue(result is AppSymbolSource.AdaptiveForeground)
         assertSame(fg, result.drawable)
@@ -79,7 +80,7 @@ class AppSymbolSourceResolverTest {
         val fg = FakeDrawable("fg")
         val input = FakeAdaptiveDrawable(monochrome = FakeDrawable("mono"), foreground = fg)
 
-        val result = resolver.resolve(input, sdkInt = 32, readAdaptive = fakeReadAdaptive)
+        val result = resolver.resolve(input, sdkInt = 32, readAdaptive = fakeReadAdaptive, isUsableMonochrome = { true })
 
         assertTrue(result is AppSymbolSource.AdaptiveForeground)
         assertSame(fg, result.drawable)
@@ -91,7 +92,7 @@ class AppSymbolSourceResolverTest {
     fun sdk29_nonAdaptive_returnsLegacy() {
         val input = FakeDrawable("icon")
 
-        val result = resolver.resolve(input, sdkInt = 29, readAdaptive = fakeReadAdaptive)
+        val result = resolver.resolve(input, sdkInt = 29, readAdaptive = fakeReadAdaptive, isUsableMonochrome = { true })
 
         assertTrue(result is AppSymbolSource.Legacy)
         assertSame(input, result.drawable)
@@ -101,10 +102,57 @@ class AppSymbolSourceResolverTest {
     fun sdk33_nonAdaptive_returnsLegacy() {
         val input = FakeDrawable("icon")
 
-        val result = resolver.resolve(input, sdkInt = 33, readAdaptive = fakeReadAdaptive)
+        val result = resolver.resolve(input, sdkInt = 33, readAdaptive = fakeReadAdaptive, isUsableMonochrome = { true })
 
         assertTrue(result is AppSymbolSource.Legacy)
         assertSame(input, result.drawable)
+    }
+
+    // --- Unusable monochrome falls back to the foreground ---
+
+    @Test
+    fun sdk33_unusableMonochrome_fallsBackToAdaptiveForeground() {
+        val fg = FakeDrawable("fg")
+        val input = FakeAdaptiveDrawable(FakeDrawable("blank-mono"), fg)
+
+        val result = resolver.resolve(
+            input, sdkInt = 33, readAdaptive = fakeReadAdaptive, isUsableMonochrome = { false },
+        )
+
+        assertTrue(result is AppSymbolSource.AdaptiveForeground)
+        assertSame(fg, result.drawable)
+    }
+
+    @Test
+    fun usabilityIsJudgedOnTheMonochromeLayerItself() {
+        val mono = FakeDrawable("mono")
+        val input = FakeAdaptiveDrawable(mono, FakeDrawable("fg"))
+        var judged: Drawable? = null
+
+        resolver.resolve(
+            input, sdkInt = 34, readAdaptive = fakeReadAdaptive,
+            isUsableMonochrome = { judged = it; true },
+        )
+
+        assertSame(mono, judged)
+    }
+
+    @Test
+    fun coverageRejectsEmptySpeckAndSolidFillButAcceptsAShape() {
+        fun alphas(visible: Int, total: Int = 1000) =
+            IntArray(total) { if (it < visible) 255 else 0 }
+
+        assertFalse(MonochromeUsability.isUsableCoverage(IntArray(0)))
+        assertFalse("blank", MonochromeUsability.isUsableCoverage(alphas(0)))
+        assertFalse("speck", MonochromeUsability.isUsableCoverage(alphas(5)))
+        assertFalse("solid fill", MonochromeUsability.isUsableCoverage(alphas(990)))
+        assertTrue("glyph", MonochromeUsability.isUsableCoverage(alphas(300)))
+        assertTrue("thin glyph at the lower bound", MonochromeUsability.isUsableCoverage(alphas(15)))
+    }
+
+    @Test
+    fun faintPixelsDoNotCountAsCoverage() {
+        assertFalse(MonochromeUsability.isUsableCoverage(IntArray(1000) { 8 }))
     }
 
     // --- Fakes ---
