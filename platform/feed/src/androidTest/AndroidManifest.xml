@@ -1,0 +1,14 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Test-APK visibility for the on-device discovery probe: mirrors the
+        production :app queries so queryIntentServices can see the providers.
+        Values mirror FEED_OVERLAY_ACTION / provider packages in platform:feed. -->
+    <queries>
+        <intent>
+            <action android:name="com.android.launcher3.WINDOW_OVERLAY" />
+            <data android:scheme="app" />
+        </intent>
+        <package android:name="app.lawnchair.lawnfeed" />
+        <package android:name="ch.deletescape.lawnchair.lawnfeed" />
+        <package android:name="com.saulhdev.neofeed" />
+    </queries>
+</manifest>

@@ -3,7 +3,9 @@ package me.foxtails.lakehead.platform.feed
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
+import android.os.Process
 
 /**
  * Production [FeedServiceQuery]: answers the overlay-service probe from `PackageManager`.
@@ -12,9 +14,11 @@ import android.os.Build
  * platform answer into framework-free [FeedServiceProbeResult] values at the boundary:
  * - the package's `getPackageInfo` throws `NameNotFoundException` → confirmed
  *   [FeedServiceProbeResult.absent]. "Confirmed" is relative to manifest visibility: the
- *   app manifest's `<queries>` covers the overlay action and every allowlisted provider
- *   package (D1 matrix), so a name-not-found there means not installed rather than
- *   filtered. Without that manifest coverage the same answer would be inconclusive.
+ *   app manifest's `<queries>` covers the overlay action with
+ *   `<data android:scheme="app" />` matching the host URI, and every allowlisted
+ *   provider package (D1 matrix), so a name-not-found there means not installed
+ *   rather than filtered. Without that manifest coverage the same answer would be
+ *   inconclusive.
  * - the package is visible and `queryIntentServices` lists services for
  *   [FEED_OVERLAY_ACTION] → [FeedServiceProbeResult.present] with the exact matched
  *   services as [FeedServiceComponent] strings (no `ResolveInfo` escapes).
@@ -45,6 +49,7 @@ class AndroidFeedServiceQuery(private val applicationContext: Context) : FeedSer
         }
 
         val intent = Intent(action).setPackage(packageName)
+            .setData(Uri.parse(FeedHostUri.build(applicationContext.packageName, Process.myUid())))
         val services = if (Build.VERSION.SDK_INT >= 33) {
             packageManager.queryIntentServices(
                 intent,

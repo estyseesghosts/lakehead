@@ -9,6 +9,8 @@ import android.content.ServiceConnection
 import android.os.Build
 import android.os.IBinder
 import android.app.Activity
+import android.net.Uri
+import android.os.Process
 import android.view.WindowManager
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
@@ -1866,6 +1868,7 @@ private class AndroidFeedPreflight(private val context: Context) : FeedTargetPre
             val packageManager = context.packageManager
             val intent = Intent(FEED_OVERLAY_ACTION)
                 .setPackage(target.component.packageName)
+                .setData(Uri.parse(FeedHostUri.build(context.packageName, Process.myUid())))
             val services = if (android.os.Build.VERSION.SDK_INT >= 33) {
                 packageManager.queryIntentServices(
                     intent,

@@ -27,6 +27,7 @@
             required. -->
         <intent>
             <action android:name="com.android.launcher3.WINDOW_OVERLAY" />
+            <data android:scheme="app" />
         </intent>
         <package android:name="app.lawnchair.lawnfeed" />
         <package android:name="ch.deletescape.lawnchair.lawnfeed" />
