@@ -5,7 +5,7 @@ import me.foxtails.lakehead.core.grid.GridPosition
 import me.foxtails.lakehead.core.grid.GridRowGapNormalizer
 import me.foxtails.lakehead.core.grid.GridRules
 import me.foxtails.lakehead.core.grid.GridSpan
-import me.foxtails.lakehead.core.model.AppPlacement
+import me.foxtails.lakehead.core.model.HomePlacement
 import me.foxtails.lakehead.core.model.ItemId
 import me.foxtails.lakehead.core.model.LogicalPosition
 import me.foxtails.lakehead.core.model.LogicalSpan
@@ -26,11 +26,11 @@ import me.foxtails.lakehead.core.model.LogicalSpan
  * would be rejected; the projected state then stays as it was.
  */
 internal fun withRequestedMove(
-    placements: List<AppPlacement>,
+    placements: List<HomePlacement>,
     itemId: ItemId,
     position: LogicalPosition,
     columns: Int,
-): List<AppPlacement>? {
+): List<HomePlacement>? {
     if (placements.none { it.itemId == itemId }) return null
     val grid = placements.map {
         GridPlacement(
@@ -49,12 +49,12 @@ internal fun withRequestedMove(
 
 /** Optimistic apply of a requested resize; null when [itemId] is not placed. */
 internal fun withRequestedSpan(
-    placements: List<AppPlacement>,
+    placements: List<HomePlacement>,
     itemId: ItemId,
     span: LogicalSpan,
-): List<AppPlacement>? {
+): List<HomePlacement>? {
     if (placements.none { it.itemId == itemId }) return null
-    return placements.map { if (it.itemId == itemId) it.copy(span = span) else it }
+    return placements.map { if (it.itemId == itemId) it.withGeometry(it.position, span) else it }
 }
 
 /**
@@ -63,21 +63,21 @@ internal fun withRequestedSpan(
  * Order and identity of [placements] are kept; a placement the accepted grid no
  * longer contains is dropped. Returns null when the accepted grid names an item
  * this state has never seen (for example a placement added elsewhere), because
- * an [AppPlacement] cannot be built from grid data alone: the caller must
+ * a [HomePlacement] cannot be built from grid data alone: the caller must
  * reload instead.
  */
 internal fun withAcceptedGrid(
-    placements: List<AppPlacement>,
+    placements: List<HomePlacement>,
     accepted: GridRules.Result.Accepted<ItemId>,
-): List<AppPlacement>? {
+): List<HomePlacement>? {
     val finalById = accepted.placements.associateBy { it.id }
     val known = placements.mapTo(HashSet()) { it.itemId }
     if (finalById.keys.any { it !in known }) return null
     return placements.mapNotNull { placement ->
         val final = finalById[placement.itemId] ?: return@mapNotNull null
-        placement.copy(
-            position = LogicalPosition(final.position.column, final.position.row),
-            span = LogicalSpan(final.span.columns, final.span.rows),
+        placement.withGeometry(
+            LogicalPosition(final.position.column, final.position.row),
+            LogicalSpan(final.span.columns, final.span.rows),
         )
     }
 }

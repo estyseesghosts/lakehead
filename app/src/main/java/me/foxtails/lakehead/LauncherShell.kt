@@ -39,6 +39,10 @@ import me.foxtails.lakehead.core.model.AppIdentity
 import me.foxtails.lakehead.core.model.ItemId
 import me.foxtails.lakehead.core.model.LogicalPosition
 import me.foxtails.lakehead.core.model.LogicalSpan
+import me.foxtails.lakehead.core.model.WidgetProviderEntry
+import me.foxtails.lakehead.feature.home.HomeWidgetContent
+import me.foxtails.lakehead.feature.home.NoHomeWidgetContent
+import me.foxtails.lakehead.feature.home.WidgetPickerOverlay
 import me.foxtails.lakehead.feature.allapps.AllAppsScreen
 import me.foxtails.lakehead.feature.allapps.AllAppsViewState
 import me.foxtails.lakehead.feature.allapps.AlphabetPickerState
@@ -51,6 +55,7 @@ import me.foxtails.lakehead.feature.home.HomeCanvas
 import me.foxtails.lakehead.feature.home.HomeCanvasViewportStyle
 import me.foxtails.lakehead.feature.home.HomeRenderState
 import me.foxtails.lakehead.platform.feed.FeedAvailability
+import me.foxtails.lakehead.platform.feed.FeedDiagnostic
 import me.foxtails.lakehead.platform.feed.FeedProviderId
 
 /** Feed page index in the launcher pager. */
@@ -159,6 +164,8 @@ internal fun LauncherShell(
     // S1 settings menu: reports the feed provider picked in the transient
     // settings menu. The shell dismisses the menu; binding stays with the caller.
     onSelectFeedProvider: (FeedProviderId) -> Unit = {},
+    // Gateway diagnosis (status + cause) shown in the settings footer; null = none.
+    feedDiagnostic: FeedDiagnostic? = null,
     // S1 settings menu: export/import home layout as JSON. These fire without
     // dismissing the menu; SAF launchers and persistence stay with the caller.
     onExportHomeLayout: () -> Unit = {},
@@ -179,6 +186,11 @@ internal fun LauncherShell(
     // the prior behavior.
     onFeedWindowAttached: () -> Unit = {},
     onFeedWindowDetached: () -> Unit = {},
+    // Widgets: the hosted-view slot, the installed providers for the picker, and
+    // the provider the user picked (binding and placement stay with the caller).
+    widgetContent: HomeWidgetContent = NoHomeWidgetContent,
+    widgetProviders: List<WidgetProviderEntry> = emptyList(),
+    onAddWidget: (WidgetProviderEntry) -> Unit = {},
     modifier: Modifier = Modifier,
     initialPage: Int = LAUNCHER_PAGE_TILE,
     viewportStyle: HomeCanvasViewportStyle = HomeCanvasViewportStyle(),
@@ -271,6 +283,8 @@ internal fun LauncherShell(
     // userScrollEnabled below; the pill's programmatic animateScrollToPage is
     // unaffected by userScrollEnabled.
     var isSettingsOpen by remember { mutableStateOf(false) }
+    // Transient widget picker, opened by the (+) button; holds the pager like the settings menu.
+    var isWidgetPickerOpen by remember { mutableStateOf(false) }
     // F3 feed-start latch: true when the current gesture's first down found the
     // pager settled on the feed page. Plain remember transient gesture state,
     // never persisted. ORed with the A3 region latch below: the feed page hosts
@@ -353,7 +367,7 @@ internal fun LauncherShell(
             state = pagerState,
             modifier = Modifier.fillMaxSize(),
             beyondViewportPageCount = 1,
-            userScrollEnabled = isPagerSwipeEnabled(pickerBlocksPager, pagerWinner, homeHold, pagerHold, pagerRegionAllowed, isSettingsOpen, feedStartAllowed),
+            userScrollEnabled = isPagerSwipeEnabled(pickerBlocksPager, pagerWinner, homeHold, pagerHold, pagerRegionAllowed, isSettingsOpen || isWidgetPickerOpen, feedStartAllowed),
         ) { page ->
             when (page) {
                 LAUNCHER_PAGE_FEED -> FeedSurface(
@@ -412,6 +426,8 @@ internal fun LauncherShell(
                     onTransientHoldChange = { homeHold = it },
                     onPagerHoldChange = { pagerHold = it },
                     isVisible = homeVisible,
+                    widgetContent = widgetContent,
+                    onRequestAddWidget = { isWidgetPickerOpen = true },
                 )
             }
         }
@@ -424,12 +440,23 @@ internal fun LauncherShell(
             bottomSafetyInset = gestureBottom,
             onHomeLongPress = { isSettingsOpen = true },
         )
+        WidgetPickerOverlay(
+            isOpen = isWidgetPickerOpen,
+            providers = widgetProviders,
+            columns = homeColumns(homeState),
+            onPick = { entry ->
+                isWidgetPickerOpen = false
+                onAddWidget(entry)
+            },
+            onDismiss = { isWidgetPickerOpen = false },
+        )
         // S1 settings menu floats above the pager and the pill. A provider pick
         // reports through onSelectFeedProvider then dismisses; Back and the scrim
         // dismiss without reporting. Export/import fire without dismissing.
         SettingsMenuOverlay(
             isOpen = isSettingsOpen,
             availability = feedAvailability,
+            diagnostic = feedDiagnostic,
             onDismiss = { isSettingsOpen = false },
             onSelectProvider = { provider ->
                 onSelectFeedProvider(provider)
@@ -440,6 +467,9 @@ internal fun LauncherShell(
         )
     }
 }
+
+private fun homeColumns(state: HomeRenderState): Int =
+    (state as? HomeRenderState.Loaded)?.columns?.count ?: 5
 
 /**
  * A1 pager swipe gate: swipe is enabled only when the picker is not blocking,

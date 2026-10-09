@@ -14,6 +14,7 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.swipe
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import me.foxtails.lakehead.core.designsystem.LauncherTheme
 import me.foxtails.lakehead.core.designsystem.RESIZE_HANDLE_TAG
@@ -321,5 +322,73 @@ class HomeAbsoluteLayoutTest {
             0f
         }
         assertEquals(0f, maxValue, 0f)
+    }
+
+    @Test
+    fun scrolledDrag_byOneStride_commitsExactlyOneRow() {
+        // Regression for the scrolled-drag double-count: gesture Y arrives
+        // node-local (scroll included) and must convert once to viewport-local.
+        show(loaded(tile("a", 0), tile("b", 1), tile("mid", 5), tile("z", 16, rows = 2)))
+        val stride = contentTop("b") - contentTop("a")
+        val grid = composeRule.onNodeWithTag(HOME_CANVAS_GRID_TAG, useUnmergedTree = true)
+        val w = gridNode().size.width.toFloat()
+        val h = gridNode().size.height.toFloat()
+        grid.performTouchInput {
+            swipe(Offset(w / 2f, h * 0.7f), Offset(w / 2f, h * 0.7f - 3 * stride), 400)
+        }
+        composeRule.waitForIdle()
+        val scrolled = scrollValue()
+        assertTrue("precondition: grid scrolled, got $scrolled", scrolled > stride)
+        // Mid row stays on screen after a 3-row scroll of a ~13-row viewport.
+        val start = grabTileForMove("mid")
+        grid.performTouchInput { down(start) }
+        repeat(3) { grid.performTouchInput { moveBy(Offset(0f, 10f)) } }
+        composeRule.waitForIdle()
+        grid.performTouchInput { moveTo(start + Offset(0f, stride)) }
+        grid.performTouchInput { up() }
+        composeRule.waitForIdle()
+        composeRule.runOnIdle {
+            assertEquals(
+                "one stride down from row 5 while scrolled is exactly row 6, got $moves",
+                listOf(ItemId("mid") to LogicalPosition(0, 6)),
+                moves.toList(),
+            )
+        }
+    }
+
+    @Test
+    fun scrolledHoldAtTopEdge_scrollsUp() {
+        // Edge zones are viewport-local: a finger 4px below the viewport top
+        // while scrolled must scroll up. Content-space Y (4 + scroll) would miss
+        // the band and never scroll.
+        show(loaded(tile("a", 0), tile("mid", 5), tile("z", 16, rows = 2)))
+        val stride = contentTop("mid") - contentTop("a")
+        val perRow = stride / 5f
+        val grid = composeRule.onNodeWithTag(HOME_CANVAS_GRID_TAG, useUnmergedTree = true)
+        val w = gridNode().size.width.toFloat()
+        val h = gridNode().size.height.toFloat()
+        grid.performTouchInput {
+            swipe(Offset(w / 2f, h * 0.7f), Offset(w / 2f, h * 0.7f - 3 * perRow), 400)
+        }
+        composeRule.waitForIdle()
+        val scrolled = scrollValue()
+        assertTrue("precondition: grid scrolled, got $scrolled", scrolled > perRow)
+        val start = grabTileForMove("mid")
+        grid.performTouchInput { down(start) }
+        try {
+            repeat(3) { grid.performTouchInput { moveBy(Offset(0f, 10f)) } }
+            composeRule.mainClock.autoAdvance = false
+            grid.performTouchInput { moveTo(Offset(start.x, 4f)) }
+            composeRule.mainClock.advanceTimeBy(2_000)
+            val after = scrollValue()
+            grid.performTouchInput { moveTo(Offset(start.x, gridNode().size.height / 2f)) }
+            composeRule.mainClock.autoAdvance = true
+            composeRule.waitForIdle()
+            assertTrue("top edge while scrolled must scroll up: $scrolled -> $after", after < scrolled)
+        } finally {
+            composeRule.mainClock.autoAdvance = true
+            grid.performTouchInput { up() }
+        }
+        composeRule.waitForIdle()
     }
 }

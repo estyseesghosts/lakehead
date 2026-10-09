@@ -4,6 +4,7 @@ import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import me.foxtails.lakehead.core.model.AppIdentity
+import me.foxtails.lakehead.core.model.AppPlacement
 import me.foxtails.lakehead.core.model.ComponentIdentity
 import me.foxtails.lakehead.core.model.HomeId
 import me.foxtails.lakehead.core.model.ItemId
@@ -67,7 +68,9 @@ class HomeLayoutExportImport(
         for (placement in placements) {
             bindingsByTile[placement.itemId] = repository.loadBinding(placement.itemId)
         }
-        val json = HomeLayoutCodec.encodeLayout(homeId, columns, placements, bindingsByTile)
+        val json = HomeLayoutCodec.encodeLayout(
+            homeId, columns, placements.filterIsInstance<AppPlacement>(), bindingsByTile,
+        )
         val filename = "${homeId.value}-${System.currentTimeMillis() / 1000}.json"
         Pair(json, filename)
     }

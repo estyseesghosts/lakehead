@@ -102,6 +102,9 @@ internal fun HomeCanvasTile(
     onSelect: (ItemId) -> Unit = {},
     onEnterWiggle: (HomeRenderTile) -> Unit = {},
     lift: (() -> Offset)? = null,
+    // Replaces the app body (used by widget tiles); the wrapper, selection,
+    // recess, lift and glide stay shared.
+    content: (@Composable (isEditing: Boolean) -> Unit)? = null,
 ) {
     val rawLabel = tile.label
     val label = if (rawLabel.isNullOrBlank()) UNAVAILABLE_LABEL else rawLabel
@@ -202,7 +205,9 @@ internal fun HomeCanvasTile(
             }
             .zIndex(if (isEditing || liftProgress > 0f) 2f else if (isSelected) 1f else 0f),
     ) {
-    AppTile(
+    if (content != null) {
+        Box(modifier = tileModifier) { content(isInteractionEditing) }
+    } else AppTile(
         state = AppTileState(
             label = label,
             span = GridSpan(tile.span.columns, tile.span.rows),

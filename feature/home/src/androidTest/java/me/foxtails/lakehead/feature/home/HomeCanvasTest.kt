@@ -782,8 +782,7 @@ class HomeCanvasTest {
         )
         val stride = gridBounds.width / 6f
         // Drag right + down past the corner to grow the raw span from 1×1
-        // toward 2×2 (RenderableSpans.quantize maps the raw span to the nearest
-        // entry). The swipe keeps a dominant axis (1.5 : 1): a perfect 45°
+        // toward 2×2 (the raw span is used as-is, clamped to the grid width). The swipe keeps a dominant axis (1.5 : 1): a perfect 45°
         // diagonal never leaves slop by design (`classifyHomeAxis`
         // diagonal-never-steals contract), so the resize drag must too.
         val dragEnd = handleCenter + Offset(1.5f * stride, stride)

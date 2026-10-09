@@ -17,7 +17,7 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import me.foxtails.lakehead.core.grid.GridRules
 import me.foxtails.lakehead.core.model.AppIdentity
-import me.foxtails.lakehead.core.model.AppPlacement
+import me.foxtails.lakehead.core.model.HomePlacement
 import me.foxtails.lakehead.core.model.HomeId
 import me.foxtails.lakehead.core.model.ItemId
 import me.foxtails.lakehead.core.model.LauncherAppEntry
@@ -68,7 +68,7 @@ internal class HomeRouteLoader(
     // move/resize commits between their optimistic apply and reconciliation.
     private val writeMutex = Mutex()
     private var mutationsInFlight = 0
-    private var placements: List<AppPlacement>? = null
+    private var placements: List<HomePlacement>? = null
     private var notFound = false
     private var currentEntries: List<LauncherAppEntry> = emptyList()
 
@@ -202,7 +202,7 @@ internal class HomeRouteLoader(
      *    later result already reflects every earlier write.
      */
     private suspend fun commitMutation(
-        optimistic: (List<AppPlacement>) -> List<AppPlacement>?,
+        optimistic: (List<HomePlacement>) -> List<HomePlacement>?,
         write: () -> MutationResult,
     ): MutationResult {
         beginMutation(optimistic)
@@ -218,7 +218,7 @@ internal class HomeRouteLoader(
     }
 
     @Synchronized
-    private fun beginMutation(optimistic: (List<AppPlacement>) -> List<AppPlacement>?) {
+    private fun beginMutation(optimistic: (List<HomePlacement>) -> List<HomePlacement>?) {
         mutationsInFlight++
         val current = placements ?: return
         val requested = optimistic(current) ?: return

@@ -186,67 +186,19 @@ class ResizeDragMathTest {
         assertEquals(LogicalSpan(2, 2), span)
     }
 
-    // ---- RenderableSpans.quantize ----
+    // ---- clampSpan (free resize) ----
 
     @Test
-    fun quantize_exactMatch_returnsSame() {
-        // All 14 allowlist entries must round-trip exactly.
-        val expected = listOf(
-            LogicalSpan(1, 1), LogicalSpan(2, 1), LogicalSpan(1, 2), LogicalSpan(2, 2),
-            LogicalSpan(1, 3), LogicalSpan(2, 3), LogicalSpan(3, 2), LogicalSpan(4, 2),
-            LogicalSpan(5, 2), LogicalSpan(3, 3), LogicalSpan(4, 3), LogicalSpan(5, 3),
-            LogicalSpan(4, 4), LogicalSpan(5, 4),
-        )
-        for (entry in expected) {
-            assertEquals("exact match for ${entry.columns}x${entry.rows}", entry, RenderableSpans.quantize(entry))
+    fun clampSpan_previouslyUnreachableShapesPassThrough() {
+        for (span in listOf(LogicalSpan(3, 1), LogicalSpan(4, 1), LogicalSpan(5, 1), LogicalSpan(1, 4), LogicalSpan(5, 5), LogicalSpan(2, 7))) {
+            assertEquals(span, ResizeDragMath.clampSpan(span, columns = 5))
         }
     }
 
     @Test
-    fun quantize_3x1_nearestIs2x1() {
-        // distance to 2x1 = 1; distance to 4x2 = 1+1=2; nearest is 2x1
-        assertEquals(LogicalSpan(2, 1), RenderableSpans.quantize(LogicalSpan(3, 1)))
-    }
-
-    @Test
-    fun quantize_2x4_nearestIs2x3_smallerWins() {
-        // distance to 2x3 = |0|+|1| = 1; distance to 1x3 = |1|+|1| = 2
-        // But 2x3 is exact distance 1, so no tie — just the closest.
-        // Verify it does NOT round up to 3x3 (distance 1+1=2).
-        assertEquals(LogicalSpan(2, 3), RenderableSpans.quantize(LogicalSpan(2, 4)))
-    }
-
-    @Test
-    fun quantize_1x1_clampedFromBelow() {
-        // Anything below smallest → smallest (1x1 is the minimum)
-        assertEquals(LogicalSpan(1, 1), RenderableSpans.quantize(LogicalSpan(1, 1)))
-    }
-
-    @Test
-    fun quantize_6x5_nearestIs5x4() {
-        // distance to 5x4 = |1|+|1| = 2; distance to 4x4 = |2|+|1| = 3; nearest is 5x4
-        assertEquals(LogicalSpan(5, 4), RenderableSpans.quantize(LogicalSpan(6, 5)))
-    }
-
-    // ---- column-filtered quantize ----
-
-    @Test
-    fun quantize_columnsFiltersOutWiderEntries() {
-        // With columns=4, entries with columns > 4 (i.e. 5x2, 5x3, 5x4) are excluded.
-        // 5x3 → nearest fitting entry: 4x3 distance |1|+|0| = 1.
-        assertEquals(LogicalSpan(4, 3), RenderableSpans.quantize(LogicalSpan(5, 3), columns = 4))
-    }
-
-    @Test
-    fun quantize_columnsNarrowViewport_5x2FilteredTo4x2() {
-        // columns=4: 5x2 → nearest fitting: 4x2 distance 1, 3x2 distance 2. Picks 4x2.
-        assertEquals(LogicalSpan(4, 2), RenderableSpans.quantize(LogicalSpan(5, 2), columns = 4))
-    }
-
-    @Test
-    fun quantize_columns3_excludes4wideAnd5wide() {
-        // columns=3: max allowed width = 3. 4x3 → nearest fitting: 3x3 distance 1.
-        assertEquals(LogicalSpan(3, 3), RenderableSpans.quantize(LogicalSpan(4, 3), columns = 3))
+    fun clampSpan_widthClampsToGridColumns() {
+        assertEquals(LogicalSpan(5, 4), ResizeDragMath.clampSpan(LogicalSpan(6, 4), columns = 5))
+        assertEquals(LogicalSpan(3, 2), ResizeDragMath.clampSpan(LogicalSpan(5, 2), columns = 3))
     }
 
     // ---- W3 gate: 2x2 → 3x2 drag path in a 5-column grid ----
@@ -265,21 +217,20 @@ class ResizeDragMathTest {
     }
 
     @Test
-    fun quantize_3x2In5Columns_stays3x2() {
-        // The gate target survives quantization in the 5-column reference grid.
-        assertEquals(LogicalSpan(3, 2), RenderableSpans.quantize(LogicalSpan(3, 2), columns = 5))
+    fun clamp_3x2In5Columns_stays3x2() {
+        assertEquals(LogicalSpan(3, 2), ResizeDragMath.clampSpan(LogicalSpan(3, 2), columns = 5))
     }
 
     @Test
-    fun rawThenQuantize_gatePath_commits3x2() {
-        // End-to-end W3 gate math: raw drag span quantizes to the 3x2 target.
+    fun rawThenClamp_gatePath_commits3x2() {
+        // End-to-end W3 gate math: raw drag span clamps to the 3x2 target.
         val raw = ResizeDragMath.rawSpan(
             metrics = metrics(),
             originPosition = LogicalPosition(0, 0),
             pointerXPx = 2 * stride,
             pointerYPxViewport = stride,
         )
-        assertEquals(LogicalSpan(3, 2), RenderableSpans.quantize(raw, columns = 5))
+        assertEquals(LogicalSpan(3, 2), ResizeDragMath.clampSpan(raw, columns = 5))
     }
 
     // ---- B3 hardening: far-OOB raw, originX offset, rest-offset regression ----
@@ -288,7 +239,7 @@ class ResizeDragMathTest {
     fun rawSpan_farOutsideBottomRight_growsUnbounded() {
         // B3: the raw span is unclamped math — a pointer ten strides out yields
         // an 11x11 raw span. Clamping to the allowlist/columns and legality
-        // stays with RenderableSpans.quantize + core:grid; rawSpan never clips.
+        // stays with clampSpan + core:grid; rawSpan never clips.
         val span = ResizeDragMath.rawSpan(
             metrics = metrics(),
             originPosition = LogicalPosition(0, 0),

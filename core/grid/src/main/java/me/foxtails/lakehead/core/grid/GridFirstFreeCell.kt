@@ -46,7 +46,7 @@ fun firstFreeCell(
  * Two rects overlap if their column ranges intersect AND their row ranges intersect.
  * A rect at (col, row) with span (w, h) occupies columns [col, col+w) and rows [row, row+h).
  */
-private fun PlacementRect.overlaps(other: PlacementRect): Boolean {
+internal fun PlacementRect.overlaps(other: PlacementRect): Boolean {
     val thisRight = this.position.column.toLong() + this.span.columns
     val otherRight = other.position.column.toLong() + other.span.columns
     val thisBottom = this.position.row.toLong() + this.span.rows

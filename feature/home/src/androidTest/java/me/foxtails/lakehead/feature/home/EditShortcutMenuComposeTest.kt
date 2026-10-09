@@ -26,6 +26,8 @@ import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import me.foxtails.lakehead.core.designsystem.PIN_TOGGLE_TAG
 import me.foxtails.lakehead.core.designsystem.LauncherTheme
+import me.foxtails.lakehead.core.designsystem.REMOVE_BUTTON_TAG
+import me.foxtails.lakehead.core.designsystem.RESIZE_HANDLE_TAG
 import me.foxtails.lakehead.core.designsystem.ROW_LAUNCH_ZONE_TAG
 import me.foxtails.lakehead.core.designsystem.SHORTCUT_SURFACE_ROW_TAG
 import me.foxtails.lakehead.core.designsystem.ShortcutSurfaceEntry
@@ -487,6 +489,73 @@ class EditShortcutMenuComposeTest {
             assertEquals("Shortcut s19", labels[19])
         }
         zones[19].assertIsDisplayed()
+    }
+
+    @Test
+    fun manyEntries_menuNeverOverlapsTile_handlesStayHitTestableAndLastRowScrolls() {
+        val many = List(30) { index -> entry("s$index") }
+        setMenuCanvas(loaded(listOf(tile("a", personal, "Deep App"))), many)
+        composeRule.waitForIdle()
+        longPressBody("Deep App")
+
+        val menu = composeRule.onNodeWithTag(EDIT_SHORTCUT_MENU_TAG, useUnmergedTree = true)
+            .assertIsDisplayed()
+            .fetchSemanticsNode()
+        val body = composeRule.onAllNodesWithContentDescription("Deep App")[0]
+            .fetchSemanticsNode()
+        // Both corner controls render while the menu is open (selection, no drag).
+        val resize = composeRule.onNodeWithTag(RESIZE_HANDLE_TAG, useUnmergedTree = true)
+            .assertIsDisplayed()
+            .fetchSemanticsNode()
+        val remove = composeRule.onNodeWithTag(REMOVE_BUTTON_TAG, useUnmergedTree = true)
+            .assertIsDisplayed()
+            .fetchSemanticsNode()
+        val rowPx = with(composeRule.density) { 56.dp.roundToPx() }
+        val naturalHeight = 30 * rowPx
+        composeRule.runOnIdle {
+            assertTrue(
+                "30-row menu height ${menu.size.height} must pin below its natural $naturalHeight",
+                menu.size.height < naturalHeight,
+            )
+            val menuTop = menu.positionInRoot.y
+            val menuBottom = menuTop + menu.size.height
+            // The capped menu sits fully above or fully below the tile and each
+            // handle box (2px tolerance for pixel-snapped float positions).
+            for ((name, node) in listOf("tile" to body, "resize" to resize, "remove" to remove)) {
+                val nodeTop = node.positionInRoot.y
+                val nodeBottom = nodeTop + node.size.height
+                assertTrue(
+                    "menu [$menuTop, $menuBottom] must clear the $name [$nodeTop, $nodeBottom]",
+                    menuBottom <= nodeTop + 2f || menuTop >= nodeBottom - 2f,
+                )
+            }
+        }
+        composeRule.onAllNodesWithTag(SHORTCUT_SURFACE_ROW_TAG, useUnmergedTree = true)
+            .assertCountEquals(30)
+
+        // The last row scrolls into view inside the capped menu.
+        val zones = composeRule.onAllNodesWithTag(ROW_LAUNCH_ZONE_TAG, useUnmergedTree = true)
+        zones[29].performScrollTo()
+        composeRule.waitForIdle()
+        zones[29].assertIsDisplayed()
+        val labels = zones.fetchSemanticsNodes().map { node ->
+            node.config.getOrElse(SemanticsProperties.ContentDescription) { emptyList() }
+                .firstOrNull()
+        }
+        composeRule.runOnIdle {
+            assertEquals("Shortcut s29", labels[29])
+        }
+
+        // The resize handle still receives taps while the menu is open: a covering
+        // menu would swallow this click (the menu paints above the handles). Arming
+        // is not a drag, so the menu stays up afterwards.
+        composeRule.onNodeWithTag(RESIZE_HANDLE_TAG, useUnmergedTree = true)
+            .performClick()
+        composeRule.waitForIdle()
+        composeRule.onNode(hasStateDescription("Resize armed"))
+            .assertIsDisplayed()
+        composeRule.onNodeWithTag(EDIT_SHORTCUT_MENU_TAG, useUnmergedTree = true)
+            .assertIsDisplayed()
     }
 
     @Test

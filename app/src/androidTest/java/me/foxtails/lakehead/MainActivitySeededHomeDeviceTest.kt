@@ -80,7 +80,11 @@ class MainActivitySeededHomeDeviceTest {
         val scenario = launchMainActivity()
         try {
             awaitActivityCatalogue(scenario, setOf(catalogue.first().identity))
-            waitForText("Home is empty")
+            // The empty home composes the grid surface (long-press enters edit mode).
+            composeRule.waitUntil(5_000) {
+                composeRule.onAllNodesWithTag("home-canvas-grid", useUnmergedTree = true)
+                    .fetchSemanticsNodes().isNotEmpty()
+            }
             // HomeCanvas :33-35: no HOME-role overlay is rendered; onRequestDefaultHome is
             // retained for a future settings entry. No surface currently renders a
             // HOME-role control, so the overlay string must not appear.
@@ -308,7 +312,7 @@ class MainActivitySeededHomeDeviceTest {
 
     private inline fun <T> withDatabase(block: (PlacementDatabase) -> T): T {
         val database = Room.databaseBuilder(context, PlacementDatabase::class.java, "placements.db")
-            .addMigrations(PlacementDatabase.MIGRATION_1_2)
+            .addMigrations(PlacementDatabase.MIGRATION_1_2, PlacementDatabase.MIGRATION_2_3)
             .allowMainThreadQueries()
             .build()
         return try {

@@ -91,7 +91,7 @@ class HomePlacementReconciliationTest {
         assertEquals(listOf(LogicalPosition(1, 1), LogicalPosition(0, 4)), result.map { it.position })
         assertEquals(LogicalSpan(2, 2), result[0].span)
         assertEquals(ItemAvailability.UNAVAILABLE, result[1].availability)
-        assertEquals(identity, result[1].appIdentity)
+        assertEquals(identity, (result[1] as AppPlacement).appIdentity)
     }
 
     @Test

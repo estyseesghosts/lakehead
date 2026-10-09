@@ -34,8 +34,8 @@ class PlacementDatabaseTest {
     fun closeDatabase() = database.close()
 
     @Test
-    fun freshDatabaseCreatesVersionTwoSchemaWithAllTablesAndReferentialKeys() {
-        assertEquals(2, DatabaseSchema.VERSION)
+    fun freshDatabaseCreatesVersionThreeSchemaWithAllTablesAndReferentialKeys() {
+        assertEquals(3, DatabaseSchema.VERSION)
         assertEquals(DatabaseSchema.VERSION, database.openHelper.readableDatabase.version)
         assertEquals(
             setOf("homeId"),
@@ -65,15 +65,21 @@ class PlacementDatabaseTest {
             setOf("tileId->placements.itemId"),
             foreignKeyEdges("shortcut_bindings"),
         )
+        assertEquals(setOf("itemId", "appWidgetId"), columns("widget_bindings"))
+        assertEquals(
+            setOf("itemId->placements.itemId"),
+            foreignKeyEdges("widget_bindings"),
+        )
+        assertEquals(setOf("itemId"), primaryKeyColumns("widget_bindings"))
         assertEquals(setOf("profileId", "packageName", "className"), primaryKeyColumns("app_references"))
         assertEquals(setOf("itemId"), primaryKeyColumns("placements"))
         assertEquals(setOf("tileId"), primaryKeyColumns("shortcut_bindings"))
 
         val schema = java.io.File(
-            "schemas/me.foxtails.lakehead.data.database.PlacementDatabase/2.json",
+            "schemas/me.foxtails.lakehead.data.database.PlacementDatabase/3.json",
         ).readText()
-        assertEquals(true, schema.contains("\"version\": 2"))
-        listOf("homes", "app_references", "placements", "shortcut_bindings",
+        assertEquals(true, schema.contains("\"version\": 3"))
+        listOf("homes", "app_references", "placements", "shortcut_bindings", "widget_bindings",
             "profileId", "packageName", "className", "tileId", "pinnedShortcutIds")
             .forEach { assertEquals("missing exported schema token: $it", true, schema.contains(it)) }
     }
@@ -155,7 +161,7 @@ class PlacementDatabaseTest {
         assertEquals(ItemAvailability.UNAVAILABLE, unavailable.availability)
         assertEquals(available.homeId, unavailable.homeId)
         assertEquals(available.itemId, unavailable.itemId)
-        assertEquals(available.appIdentity, unavailable.appIdentity)
+        assertEquals(available.appIdentity, unavailable.referenceIdentity())
         assertEquals(available.position, unavailable.position)
         assertEquals(available.span, unavailable.span)
 

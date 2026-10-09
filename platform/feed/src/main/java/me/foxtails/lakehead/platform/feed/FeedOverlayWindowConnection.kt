@@ -1,5 +1,6 @@
 package me.foxtails.lakehead.platform.feed
 
+import android.content.res.Configuration
 import android.view.WindowManager
 
 /**
@@ -35,6 +36,12 @@ internal interface FeedOverlayWindowConnection {
      * unbound or after close.
      */
     fun windowAttached(params: WindowManager.LayoutParams, flags: Int)
+
+    /**
+     * Supplies the host configuration carried by the next `windowAttached2` bundle.
+     * Must precede [windowAttached]; the default ignores it (older fakes).
+     */
+    fun windowConfiguration(configuration: Configuration?) = Unit
 
     /**
      * Unregisters the host window from the bound overlay service.

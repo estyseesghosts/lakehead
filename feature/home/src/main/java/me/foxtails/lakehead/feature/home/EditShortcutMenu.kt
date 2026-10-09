@@ -22,6 +22,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import me.foxtails.lakehead.core.designsystem.CORNER_CONTROL_TOUCH_SIZE
 import me.foxtails.lakehead.core.designsystem.FloatingOverlayFrame
 import me.foxtails.lakehead.core.designsystem.FrameAnchor
 import me.foxtails.lakehead.core.designsystem.FrameSize
@@ -58,7 +59,7 @@ import me.foxtails.lakehead.core.model.ItemId
  * - None means no menu: a null/missing selection or an empty [entries] list
  *   renders nothing (no empty box, no honest-empty row).
  * - Geometry is overlay-only: [editShortcutMenuFrame] measures a sibling frame
- *   above the tile (try above, flip below, clamp) through
+ *   beside the tile (try above, flip below, roomier-side fallback) through
  *   [FloatingOverlayFrame.measure], so neighbours are overlaid and the grid
  *   never reflows, repacks or re-checks legality.
  * - One measured content size plus a safe viewport: the natural height is
@@ -79,11 +80,16 @@ import me.foxtails.lakehead.core.model.ItemId
  *   grid-content coordinates (`visibleTopPx..visibleBottomPx`, the grid's
  *   scroll offset plus its app-safe usable height, which already excludes
  *   the floating-pill/system-gesture reserve) — never against the whole
- *   content minimum. The overlay height is the natural height clamped to
- *   that viewport ([editShortcutMenuCappedHeightPx]); when the natural
- *   height fits, the box wraps it with no scrolling, and only when it
+ *   content minimum. The overlay height is the natural height capped to the
+ *   smaller of the visible-row cap (`rowPx * [EDIT_SHORTCUT_MENU_MAX_VISIBLE_ROWS]`
+ *   plus padding, so at most five-and-a-half rows show) and the free space on
+ *   the tile's roomier side ([editShortcutMenuSideSpacePx], gap-separated from
+ *   the tile expanded by the spilling halves of the resize/remove corner
+ *   controls), floored at one row ([editShortcutMenuCappedHeightPx]); when the
+ *   natural height fits, the box wraps it with no scrolling, and only when it
  *   exceeds the cap does the box pin to the cap with an internal
- *   `verticalScroll` (edge tiles and many-row menus stay reachable). This
+ *   `verticalScroll` (edge tiles and many-row menus stay reachable, and the
+ *   menu never covers the tile or its handles). This
  *   menu reads no `WindowInsets` and re-subtracts no pill reserve: the
  *   usable height it receives is already safe.
  */
@@ -111,12 +117,14 @@ internal fun EditShortcutMenu(
     // agree to the pixel). Both stay constraints for placement; the render
     // hugs content up to them.
     val halfPadPx = with(density) { EDIT_SHORTCUT_MENU_HALF_PADDING.roundToPx() }
+    val rowPx = with(density) { SHORTCUT_SURFACE_ROW_HEIGHT.dp.roundToPx() }
+    val paddingPx = halfPadPx * 2
     val menuSize = editShortcutMenuSizePx(
         availableWidthPx = availableWidthPx,
         edgeMarginPx = with(density) { 16.dp.roundToPx() },
         maxWidthPx = with(density) { 320.dp.roundToPx() },
-        rowPx = with(density) { SHORTCUT_SURFACE_ROW_HEIGHT.dp.roundToPx() },
-        paddingPx = halfPadPx * 2,
+        rowPx = rowPx,
+        paddingPx = paddingPx,
         entryCount = entries.size,
     )
     // Safe viewport in grid-content coordinates: the caller passes the
@@ -128,20 +136,45 @@ internal fun EditShortcutMenu(
         visibleTopPx = visibleTopPx,
         visibleBottomPx = visibleBottomPx,
     )
+    val gapPx = with(density) { 8.dp.roundToPx() }
+    // Corner-control overhangs (pure span policy above): the resize handle spills below
+    // the tile on every selected tile, the remove button above it only on small spans.
+    // Reserving the spilling halves keeps the menu off the handles as well as the tile.
+    val overhangs = editShortcutMenuOverhangs(
+        spanColumns = tile.span.columns,
+        spanRows = tile.span.rows,
+        controlPx = with(density) { CORNER_CONTROL_TOUCH_SIZE.dp.roundToPx() },
+    )
+    val topOverhangPx = overhangs.topPx
+    val bottomOverhangPx = overhangs.bottomPx
+    // Capped to the roomier side (and the visible-row cap), never to the whole
+    // viewport: a many-shortcut menu pins at the cap and scrolls instead of going
+    // viewport-tall and covering the tile and its handles.
+    val sideSpacePx = editShortcutMenuSideSpacePx(
+        viewport = viewport,
+        tileBounds = tileFrame,
+        gapPx = gapPx,
+        topOverhangPx = topOverhangPx,
+        bottomOverhangPx = bottomOverhangPx,
+    )
     val cappedHeightPx = editShortcutMenuCappedHeightPx(
         naturalHeightPx = menuSize.heightPx,
-        viewportHeightPx = viewport.height,
+        rowCapPx = editShortcutMenuRowCapPx(rowPx, paddingPx),
+        sideSpacePx = sideSpacePx,
+        oneRowPx = editShortcutMenuOneRowPx(rowPx, paddingPx),
     )
     val frame = editShortcutMenuFrame(
         viewport = viewport,
         tileBounds = tileFrame,
         overlaySize = FrameSize(menuSize.widthPx, cappedHeightPx),
-        gapPx = with(density) { 8.dp.roundToPx() },
+        gapPx = gapPx,
+        topOverhangPx = topOverhangPx,
+        bottomOverhangPx = bottomOverhangPx,
     )
-    // Internal scroll only when the natural height exceeds the safe cap:
+    // Internal scroll only when the natural height exceeds the roomier-side cap:
     // fitting menus wrap their rows exactly, overflowing menus pin to the
     // frame and scroll inside it. Rows keep their fixed height either way.
-    val needsScroll = menuSize.heightPx > viewport.height
+    val needsScroll = menuSize.heightPx > cappedHeightPx
     val menuScroll = remember(tile.itemId) { ScrollState(0) }
     val maxWidthDp = with(density) { frame.width.toDp() }
     // P2 narrow-viewport guard: the 96dp floor is a content-hug minimum, never a
@@ -330,72 +363,245 @@ internal fun editShortcutMenuVisibleViewport(
 }
 
 /**
- * Clamps the single measured menu height to the visible safe viewport.
+ * Maximum number of shortcut rows visibly shown before the menu pins and scrolls.
  *
- * Returns `min(naturalHeightPx, viewportHeightPx)` coerced to at least 1px:
- * fitting menus wrap their natural height with no internal scroll, while
- * taller menus pin to the viewport height and scroll inside the frame. Pure
- * math, framework-free.
+ * The fractional half row is deliberate: it hints that the list scrolls. The pixel cap
+ * derived from it ([editShortcutMenuRowCapPx]) bounds the menu even on tall viewports, so
+ * the capped menu keeps fitting on the tile's roomier side instead of going viewport-tall
+ * and covering the tile and its resize/remove handles.
  */
-internal fun editShortcutMenuCappedHeightPx(
-    naturalHeightPx: Int,
-    viewportHeightPx: Int,
-): Int {
-    require(naturalHeightPx > 0) { "naturalHeightPx must be positive, was $naturalHeightPx" }
-    require(viewportHeightPx > 0) { "viewportHeightPx must be positive, was $viewportHeightPx" }
-    return minOf(naturalHeightPx, viewportHeightPx).coerceAtLeast(1)
+internal const val EDIT_SHORTCUT_MENU_MAX_VISIBLE_ROWS: Double = 5.5
+
+/**
+ * Pixel height of the visible-row cap: `rowPx * [EDIT_SHORTCUT_MENU_MAX_VISIBLE_ROWS]`
+ * plus the exact rendered Column padding, coerced into `1..Int.MAX_VALUE`.
+ *
+ * The `Double` product is exact for every `Int` row height (5.5 halves exactly and the
+ * magnitude stays far below 2^53), so no checked arithmetic is needed. Pure math,
+ * framework-free.
+ */
+internal fun editShortcutMenuRowCapPx(rowPx: Int, paddingPx: Int): Int {
+    require(rowPx > 0) { "rowPx must be positive, was $rowPx" }
+    require(paddingPx >= 0) { "paddingPx must be non-negative, was $paddingPx" }
+    return (rowPx * EDIT_SHORTCUT_MENU_MAX_VISIBLE_ROWS + paddingPx)
+        .coerceIn(1.0, Int.MAX_VALUE.toDouble())
+        .toInt()
 }
 
 /**
- * Measures the edit-mode shortcut menu frame above a tile: try above, flip, clamp.
+ * Pixel height of a single menu row plus the exact rendered Column padding: the floor
+ * the capped height never drops below, so the menu always renders at least one (possibly
+ * scrolled) row instead of collapsing to zero. Pure math, framework-free.
+ */
+internal fun editShortcutMenuOneRowPx(rowPx: Int, paddingPx: Int): Int {
+    require(rowPx > 0) { "rowPx must be positive, was $rowPx" }
+    require(paddingPx >= 0) { "paddingPx must be non-negative, was $paddingPx" }
+    return try {
+        Math.addExact(rowPx.toLong(), paddingPx.toLong())
+            .coerceIn(1L, Int.MAX_VALUE.toLong())
+            .toInt()
+    } catch (e: ArithmeticException) {
+        Int.MAX_VALUE
+    }
+}
+
+/**
+ * Handle-overhang reserve for the edit-mode shortcut menu, in pixels.
+ *
+ * The 48dp resize handle stays center-pinned on the selected tile's bottom-right corner
+ * while the menu is open, so its outer half always spills below the tile; the 48dp
+ * remove button is center-pinned on the top-right corner only for 1×1/1×2/2×1 spans
+ * ([removeControlPlacement]) and centered inside larger spans. Reserving the spilling
+ * halves ([editShortcutMenuSideSpacePx]/[editShortcutMenuFrame]) keeps the menu off the
+ * handles as well as the tile. Pure math, framework-free.
+ */
+internal data class EditShortcutMenuOverhangs(val topPx: Int, val bottomPx: Int)
+
+/**
+ * Resolves the handle-overhang reserve for a tile span and corner-control size.
+ *
+ * Returns half the control on the bottom always, and half on the top only when
+ * [removeControlPlacement] puts the remove button on the top-right corner. Pure math,
+ * framework-free.
+ */
+internal fun editShortcutMenuOverhangs(
+    spanColumns: Int,
+    spanRows: Int,
+    controlPx: Int,
+): EditShortcutMenuOverhangs {
+    require(spanColumns > 0) { "spanColumns must be positive, was $spanColumns" }
+    require(spanRows > 0) { "spanRows must be positive, was $spanRows" }
+    require(controlPx > 0) { "controlPx must be positive, was $controlPx" }
+    val halfPx = controlPx / 2
+    val topPx =
+        if (removeControlPlacement(spanColumns, spanRows) == RemoveControlPlacement.TOP_RIGHT) {
+            halfPx
+        } else {
+            0
+        }
+    return EditShortcutMenuOverhangs(topPx = topPx, bottomPx = halfPx)
+}
+
+/**
+ * Free vertical space on the tile's roomier side, in pixels.
+ *
+ * Returns `max(spaceAbove, spaceBelow)` clamped to at least 0, where `spaceAbove` is the
+ * gap-separated room between [viewport].top and the tile's avoid-top
+ * (`tileBounds.top - topOverhangPx - gapPx`) and `spaceBelow` the mirror between the
+ * tile's avoid-bottom and [viewport].bottom. The overhangs reserve the half of the 48dp
+ * corner controls that spills outside the tile (resize handle below, remove button above
+ * on small spans), so a menu capped to this space never covers the handles either. Pure
+ * math, framework-free.
+ */
+internal fun editShortcutMenuSideSpacePx(
+    viewport: PixelRect,
+    tileBounds: SignedPixelFrame,
+    gapPx: Int,
+    topOverhangPx: Int = 0,
+    bottomOverhangPx: Int = 0,
+): Int {
+    require(gapPx >= 0) { "gapPx must be non-negative, was $gapPx" }
+    require(topOverhangPx >= 0) { "topOverhangPx must be non-negative, was $topOverhangPx" }
+    require(bottomOverhangPx >= 0) { "bottomOverhangPx must be non-negative, was $bottomOverhangPx" }
+    val avoidTop = tileBounds.top.toLong() - topOverhangPx
+    val avoidBottom = tileBounds.bottom.toLong() + bottomOverhangPx
+    val spaceAbove = avoidTop - gapPx - viewport.top
+    val spaceBelow = viewport.bottom.toLong() - (avoidBottom + gapPx)
+    return maxOf(spaceAbove, spaceBelow)
+        .coerceIn(0L, Int.MAX_VALUE.toLong())
+        .toInt()
+}
+
+/**
+ * [PixelRect] tile overload of [editShortcutMenuSideSpacePx] for callers without signed frames.
+ */
+internal fun editShortcutMenuSideSpacePx(
+    viewport: PixelRect,
+    tileBounds: PixelRect,
+    gapPx: Int,
+    topOverhangPx: Int = 0,
+    bottomOverhangPx: Int = 0,
+): Int = editShortcutMenuSideSpacePx(
+    viewport = viewport,
+    tileBounds = SignedPixelFrame(
+        left = tileBounds.left,
+        top = tileBounds.top,
+        widthPx = tileBounds.width,
+        heightPx = tileBounds.height,
+    ),
+    gapPx = gapPx,
+    topOverhangPx = topOverhangPx,
+    bottomOverhangPx = bottomOverhangPx,
+)
+
+/**
+ * Clamps the single measured menu height to the tile's roomier side and the row cap.
+ *
+ * Returns `min(naturalHeightPx, rowCapPx, sideSpacePx)` floored at [oneRowPx] so the menu
+ * always renders at least one (possibly scrolled) row instead of collapsing to zero when
+ * a tall tile leaves almost no free space. Short menus pass through unchanged; long menus
+ * stop at the row cap (or earlier when the roomier side is smaller), and the caller
+ * scrolls the remainder inside the frame. Pure math, framework-free; no overflow at the
+ * extremes (no arithmetic, only `min`/`max`).
+ */
+internal fun editShortcutMenuCappedHeightPx(
+    naturalHeightPx: Int,
+    rowCapPx: Int,
+    sideSpacePx: Int,
+    oneRowPx: Int,
+): Int {
+    require(naturalHeightPx > 0) { "naturalHeightPx must be positive, was $naturalHeightPx" }
+    require(rowCapPx > 0) { "rowCapPx must be positive, was $rowCapPx" }
+    require(sideSpacePx >= 0) { "sideSpacePx must be non-negative, was $sideSpacePx" }
+    require(oneRowPx > 0) { "oneRowPx must be positive, was $oneRowPx" }
+    return minOf(naturalHeightPx, rowCapPx, sideSpacePx).coerceAtLeast(oneRowPx)
+}
+
+/**
+ * Measures the edit-mode shortcut menu frame beside a tile: try above, flip, roomier-side fallback.
  *
  * Pure geometry; no composition, no reflow, no tile mutation. The caller renders
- * the returned frame as a sibling above the tiles so neighbouring tiles are
- * overlaid, never moved. This mirrors the retained [swipeSurfaceFrame]
- * try-beside/flip/clamp pattern transposed to the vertical axis, with every
- * attempt validated through [FloatingOverlayFrame.measure] against [viewport]:
+ * the returned frame as a sibling of the tiles so neighbouring tiles are
+ * overlaid, never moved. The caller caps the requested height to the roomier side
+ * ([editShortcutMenuSideSpacePx] + [editShortcutMenuCappedHeightPx]), so one side
+ * always fits; every attempt is validated through [FloatingOverlayFrame.measure]
+ * against [viewport]:
  *
- * 1. Above the tile (left-aligned with the tile, `tileBounds.top - gapPx -
- *    height`).
- * 2. Flipped below the tile (left-aligned, `tileBounds.bottom + gapPx`) when
+ * 1. Above the avoid-rect (left-aligned with the tile, `avoidTop - gapPx -
+ *    height`), where the avoid-rect is the tile expanded by the handle overhangs.
+ * 2. Flipped below the avoid-rect (left-aligned, `avoidBottom + gapPx`) when
  *    above would leave the viewport (first-row tiles).
- * 3. Clamped into the viewport (left/top edges coerced so the frame fits) when
- *    neither side fits unclamped (corners, tiles wider than the remaining space).
+ * 3. Roomier-side fallback with horizontal clamping when neither side fits
+ *    unclamped (corners, tiles wider than the remaining space): the menu stays on
+ *    the side with more room, so the frame never lands on the tile. When the
+ *    request itself exceeds the roomier side (only possible when the caller bypasses
+ *    the cap), the height shrinks to the roomier side's space — the menu scrolls
+ *    the remainder instead of overlapping the tile or its handles.
  *
  * [tileBounds] is the tile's content-local frame (may start above the content
  * top for rows above the signed origin; such candidates fail validation and
- * fall through to flipping/clamping). [viewport] is the visible safe window
+ * fall through to flipping/fallback). [viewport] is the visible safe window
  * in the same content-local coordinates (usually starting at the grid scroll
  * offset, not at 0,0 — see [editShortcutMenuVisibleViewport]). [gapPx]
- * separates tile and menu. The overlay must fit the viewport on its own;
- * oversized requests throw instead of silently overflowing.
+ * separates tile and menu; [topOverhangPx]/[bottomOverhangPx] reserve the half
+ * of the 48dp corner controls that spills outside the tile (resize handle below
+ * on every selected tile, remove button above on 1×1/1×2/2×1 spans), so the
+ * frame clears the handles as well as the tile. The overlay must fit the viewport
+ * on its own; oversized requests throw instead of silently overflowing.
  */
 internal fun editShortcutMenuFrame(
     viewport: PixelRect,
     tileBounds: SignedPixelFrame,
     overlaySize: FrameSize,
     gapPx: Int = 0,
+    topOverhangPx: Int = 0,
+    bottomOverhangPx: Int = 0,
 ): PixelRect {
     require(gapPx >= 0) { "gapPx must be non-negative, was $gapPx" }
+    require(topOverhangPx >= 0) { "topOverhangPx must be non-negative, was $topOverhangPx" }
+    require(bottomOverhangPx >= 0) { "bottomOverhangPx must be non-negative, was $bottomOverhangPx" }
     require(overlaySize.widthPx <= viewport.width && overlaySize.heightPx <= viewport.height) {
         "overlay $overlaySize does not fit viewport $viewport"
     }
+    val avoidTop = tileBounds.top.toLong() - topOverhangPx
+    val avoidBottom = tileBounds.bottom.toLong() + bottomOverhangPx
     val left = tileBounds.left.toLong()
-    val aboveTop = tileBounds.top.toLong() - gapPx - overlaySize.heightPx
-    val belowTop = tileBounds.bottom.toLong() + gapPx
+    val aboveTop = avoidTop - gapPx - overlaySize.heightPx
+    val belowTop = avoidBottom + gapPx
     tryMeasureMenuAt(viewport, overlaySize, left, aboveTop)?.let { return it }
     tryMeasureMenuAt(viewport, overlaySize, left, belowTop)?.let { return it }
+    // Neither side fits unclamped: stay on the roomier side with the left edge
+    // clamped into the viewport. A capped caller always fits the roomier side, so
+    // this keeps the valid side's top; an uncapped request shrinks to the roomier
+    // side's space rather than landing on the tile. Either way the frame clears
+    // the avoid-rect whenever the roomier side holds at least one pixel.
+    val spaceAbove = avoidTop - gapPx - viewport.top
+    val spaceBelow = viewport.bottom.toLong() - (avoidBottom + gapPx)
+    val aboveRoomier = spaceAbove >= spaceBelow
+    val roomierSpace = (if (aboveRoomier) spaceAbove else spaceBelow).coerceAtLeast(0L)
+    val heightPx = minOf(overlaySize.heightPx.toLong(), roomierSpace)
+        .coerceIn(1L, Int.MAX_VALUE.toLong())
+        .toInt()
+    val size = if (heightPx == overlaySize.heightPx) {
+        overlaySize
+    } else {
+        FrameSize(overlaySize.widthPx, heightPx)
+    }
+    val top = if (aboveRoomier) avoidTop - gapPx - heightPx else avoidBottom + gapPx
     val clampedLeft = left.coerceIn(
         viewport.left.toLong(),
-        viewport.right.toLong() - overlaySize.widthPx,
+        viewport.right.toLong() - size.widthPx,
     )
-    val clampedTop = aboveTop.coerceIn(
+    // No-op for every capped caller (the roomier-side top already fits); only the
+    // impossible tile-covers-viewport case coerces, preferring inside-viewport over
+    // tile avoidance exactly as the old clamp did.
+    val clampedTop = top.coerceIn(
         viewport.top.toLong(),
-        viewport.bottom.toLong() - overlaySize.heightPx,
+        viewport.bottom.toLong() - heightPx,
     )
     return FloatingOverlayFrame.measure(
         viewport = viewport,
-        size = overlaySize,
+        size = size,
         anchor = FrameAnchor(
             horizontal = HorizontalFrameAnchor.LEFT,
             vertical = VerticalFrameAnchor.TOP,
@@ -413,6 +619,8 @@ internal fun editShortcutMenuFrame(
     tileBounds: PixelRect,
     overlaySize: FrameSize,
     gapPx: Int = 0,
+    topOverhangPx: Int = 0,
+    bottomOverhangPx: Int = 0,
 ): PixelRect = editShortcutMenuFrame(
     viewport = viewport,
     tileBounds = SignedPixelFrame(
@@ -423,6 +631,8 @@ internal fun editShortcutMenuFrame(
     ),
     overlaySize = overlaySize,
     gapPx = gapPx,
+    topOverhangPx = topOverhangPx,
+    bottomOverhangPx = bottomOverhangPx,
 )
 
 private fun tryMeasureMenuAt(

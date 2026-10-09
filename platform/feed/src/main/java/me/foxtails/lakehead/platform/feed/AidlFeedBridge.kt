@@ -1,5 +1,7 @@
 package me.foxtails.lakehead.platform.feed
 
+import android.content.res.Configuration
+import android.os.Bundle
 import android.os.IBinder
 import android.view.WindowManager
 import com.google.android.libraries.launcherclient.ILauncherOverlay
@@ -86,11 +88,16 @@ import java.util.concurrent.TimeUnit
  * after [close]; carries the earliest broken stage so the gateway can diagnose it
  * instead of a generic disconnect. Must itself never suspend; defaults to a no-op so
  * callers that only track transport loss keep their behavior.
+ * @param onTraceChanged invoked with the new [FeedProtocolTrace] snapshot after every
+ * stage transition that actually changes it (idempotent re-confirmations are silent);
+ * may run on a binder thread, must never suspend, and its failures are swallowed.
  */
 internal class AidlFeedBridge(
     private val service: IBinder,
     private val onConnectionLost: () -> Unit,
     private val onProtocolFailure: (FeedDiagnosticStatus, FeedDiagnosticCause) -> Unit = { _, _ -> },
+    private val onTraceChanged: (FeedProtocolTrace) -> Unit = {},
+    private val apiVersion: Int = 1,
 ) : FeedOverlayConnection, FeedOverlayWindowConnection {
 
     private val mutex = Mutex()
@@ -128,6 +135,9 @@ internal class AidlFeedBridge(
     @Volatile
     private var trace = FeedProtocolTrace()
 
+    /** Serializes trace read-modify-writes in [publishTrace]. */
+    private val traceLock = Any()
+
     /** Whether [onProtocolFailure] has fired; first protocol failure wins, like loss. */
     @Volatile
     private var protocolFailureReported = false
@@ -155,6 +165,10 @@ internal class AidlFeedBridge(
      */
     @Volatile
     private var lastWindowParams: WindowManager.LayoutParams? = null
+
+    /** Host configuration sent in the `windowAttached2` bundle; null omits the key. */
+    @Volatile
+    private var lastWindowConfiguration: Configuration? = null
 
     /** Flags for the pending [lastWindowParams] registration. */
     @Volatile
@@ -205,7 +219,7 @@ internal class AidlFeedBridge(
             try {
                 // An observed provider callback is the only session proof: the
                 // oneway windowAttached transact below can never confirm it.
-                trace = trace.withSessionConfirmed()
+                publishTrace { it.withSessionConfirmed() }
                 _scrollEvents.tryEmit(coerceOverlayProgress(progress))
             } catch (_: Throwable) {
                 // Binder threads must never observe an exception from this callback.
@@ -214,7 +228,7 @@ internal class AidlFeedBridge(
 
         override fun overlayStatusChanged(status: Int) {
             try {
-                trace = trace.withSessionConfirmed()
+                publishTrace { it.withSessionConfirmed() }
                 _statusEvents.tryEmit(status)
             } catch (_: Throwable) {
                 // Binder threads must never observe an exception from this callback.
@@ -284,6 +298,10 @@ internal class AidlFeedBridge(
      * flag on teardown ([close]) without IPC: the gateway's unbind ends the
      * provider side. Silent when [close]d.
      */
+    override fun windowConfiguration(configuration: Configuration?) {
+        lastWindowConfiguration = configuration
+    }
+
     override fun windowDetached(isChangingConfigurations: Boolean) {
         try {
             pendingWindowDetachChanging = isChangingConfigurations
@@ -371,7 +389,7 @@ internal class AidlFeedBridge(
             if (closed) return null
             val hasContent = overlay.hasOverlayContent()
             if (hasContent) {
-                trace = trace.withContentConfirmed()
+                publishTrace { it.withContentConfirmed() }
             } else if (trace.sessionConfirmed) {
                 notifyProtocolFailureOnce(
                     FeedDiagnosticStatus.RENDERING_FAILED,
@@ -525,7 +543,14 @@ internal class AidlFeedBridge(
             val params = lastWindowParams
             if (params != null) {
                 try {
-                    overlay.windowAttached(params, callback, lastWindowFlags)
+                    if (apiVersion < WINDOW_ATTACHED2_MIN_API) {
+                        overlay.windowAttached(params, callback, lastWindowFlags)
+                    } else {
+                        overlay.windowAttached2(
+                            windowBundle(params, lastWindowFlags, lastWindowConfiguration),
+                            callback,
+                        )
+                    }
                 } catch (_: Exception) {
                     // The host window was never registered, so the provider holds
                     // no session: this is the first failure at the session stage,
@@ -537,14 +562,33 @@ internal class AidlFeedBridge(
                     notifyLossOnce()
                     return false
                 }
+                try {
+                    sendActivityStateLocked(overlay)
+                } catch (_: Exception) {
+                    notifyLossOnce()
+                    return false
+                }
                 // Oneway with no acknowledgement: the signal left the host, but only
                 // an observed provider callback (see [callback]) proves a session.
-                trace = trace.withWindowSignalSent()
+                publishTrace { it.withWindowSignalSent() }
                 windowAttachedLive = true
                 lastWindowParams = null
                 continue
             }
             return true
+        }
+    }
+
+    /**
+     * Tells the provider the host activity state right after attach, as the reference
+     * client's `exchangeConfig` does: `setActivityState` from API 4, else
+     * `onResume`/`onPause`. The default state is started and resumed.
+     */
+    private fun sendActivityStateLocked(overlay: ILauncherOverlay) {
+        if (apiVersion >= ACTIVITY_STATE_MIN_API) {
+            overlay.setActivityState(ACTIVITY_STARTED or ACTIVITY_RESUMED)
+        } else {
+            overlay.onResume()
         }
     }
 
@@ -556,6 +600,16 @@ internal class AidlFeedBridge(
      * caller's reference when the copy itself throws (best-effort: the transact still
      * runs, and teardown clears the reference). Never throws.
      */
+    private fun windowBundle(
+        params: WindowManager.LayoutParams,
+        flags: Int,
+        configuration: Configuration?,
+    ): Bundle = Bundle().apply {
+        putParcelable(BUNDLE_LAYOUT_PARAMS, params)
+        if (configuration != null) putParcelable(BUNDLE_CONFIGURATION, configuration)
+        putInt(BUNDLE_CLIENT_OPTIONS, flags)
+    }
+
     private fun copyWindowParams(params: WindowManager.LayoutParams): WindowManager.LayoutParams =
         try {
             WindowManager.LayoutParams().apply { copyFrom(params) }
@@ -564,6 +618,27 @@ internal class AidlFeedBridge(
         } catch (_: Throwable) {
             params
         }
+
+    /**
+     * Applies one monotonic trace [update], and reports the new snapshot to
+     * [onTraceChanged] only when it differs from the previous one.
+     *
+     * The read-modify-write is synchronized so concurrent binder-thread callbacks
+     * cannot lose a confirmation; the listener runs outside the lock and never throws.
+     */
+    private fun publishTrace(update: (FeedProtocolTrace) -> FeedProtocolTrace) {
+        val next = synchronized(traceLock) {
+            val updated = update(trace)
+            if (updated == trace) return
+            trace = updated
+            updated
+        }
+        try {
+            onTraceChanged(next)
+        } catch (_: Throwable) {
+            // Listener failures must not surface on binder threads.
+        }
+    }
 
     /**
      * Reports transport loss at most once, never after [close], and never throws —
@@ -626,7 +701,7 @@ internal class AidlFeedBridge(
                 }
             }
             if (!first) return
-            trace = trace.withFirstFailure(FeedDiagnostic(status = status, cause = cause))
+            publishTrace { it.withFirstFailure(FeedDiagnostic(status = status, cause = cause)) }
             try {
                 onProtocolFailure(status, cause)
             } catch (_: Throwable) {
@@ -649,10 +724,22 @@ internal class AidlFeedBridge(
         /**
          * Flags for `windowAttached`.
          *
-         * `0` requests the default overlay window behavior, mirroring the
-         * Launcher3 host handshake; tuned only with device evidence.
+         * Bit 0 is "overlay enabled" (reference `LauncherClient.setEnableFeed`); with 0 the
+         * provider is asked for no feed and never answers.
          */
-        internal const val WINDOW_ATTACH_FLAGS: Int = 0
+        internal const val WINDOW_ATTACH_FLAGS: Int = 1
+
+        /** Service API version (`service.api.version`) from which `windowAttached2` is used. */
+        internal const val WINDOW_ATTACHED2_MIN_API: Int = 3
+
+        /** Service API version from which `setActivityState` replaces `onResume`/`onPause`. */
+        internal const val ACTIVITY_STATE_MIN_API: Int = 4
+        internal const val ACTIVITY_STARTED: Int = 1
+        internal const val ACTIVITY_RESUMED: Int = 2
+
+        private const val BUNDLE_LAYOUT_PARAMS = "layout_params"
+        private const val BUNDLE_CONFIGURATION = "configuration"
+        private const val BUNDLE_CLIENT_OPTIONS = "client_options"
 
         /**
          * Bounded wait in [close] for an in-flight loss delivery committed before the

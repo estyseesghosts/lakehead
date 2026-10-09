@@ -102,6 +102,8 @@ fun HomeCanvas(
     // pager shows another page (the grid stays composed for adjacent pages),
     // discarding the transient edit with zero writes. Defaults to true.
     isVisible: Boolean = true,
+    widgetContent: HomeWidgetContent = NoHomeWidgetContent,
+    onRequestAddWidget: () -> Unit = {},
 ) {
     // P0 stale-hold guard: Loading/NotFound never compose HomeCanvasGrid, so
     // the grid's hold emission cannot run to reset shell `homeHold`. Hoist a
@@ -174,6 +176,8 @@ fun HomeCanvas(
                     onTransientHoldChange = onTransientHoldChange,
                     onPagerHoldChange = onPagerHoldChange,
                     isVisible = isVisible,
+                    widgetContent = widgetContent,
+                    onRequestAddWidget = onRequestAddWidget,
                 )
             }
         }

@@ -16,6 +16,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import me.foxtails.lakehead.core.model.AppIdentity
+import me.foxtails.lakehead.core.model.AppPlacement
 import me.foxtails.lakehead.core.model.HomeId
 import me.foxtails.lakehead.core.model.LauncherAppEntry
 import me.foxtails.lakehead.data.repository.HomePlacementRepository
@@ -105,7 +106,7 @@ internal class AllAppsRouteLoader(
                 if (requestGeneration != generation || scope !== routeScope) return@launch
                 when (result) {
                     is LoadResult.Loaded -> {
-                        homeIdentitySet = result.placements.mapTo(HashSet()) { it.appIdentity }
+                        homeIdentitySet = result.placements.filterIsInstance<AppPlacement>().mapTo(HashSet()) { it.appIdentity }
                         projectCurrent()
                     }
                     LoadResult.NotFound -> {
@@ -135,7 +136,7 @@ internal class AllAppsRouteLoader(
                 if (requestGeneration != generation || scope !== routeScope) return@launch
                 when (result) {
                     is LoadResult.Loaded -> {
-                        homeIdentitySet = result.placements.mapTo(HashSet()) { it.appIdentity }
+                        homeIdentitySet = result.placements.filterIsInstance<AppPlacement>().mapTo(HashSet()) { it.appIdentity }
                         projectCurrent()
                     }
                     LoadResult.NotFound -> {

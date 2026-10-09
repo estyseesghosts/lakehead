@@ -22,6 +22,9 @@ import me.foxtails.lakehead.core.model.HomeId
 import me.foxtails.lakehead.feature.allapps.AllAppsViewState
 import me.foxtails.lakehead.feature.home.HomeRenderState
 import me.foxtails.lakehead.platform.feed.FeedAvailability
+import me.foxtails.lakehead.platform.feed.FeedDiagnostic
+import me.foxtails.lakehead.platform.feed.FeedDiagnosticCause
+import me.foxtails.lakehead.platform.feed.FeedDiagnosticStatus
 import me.foxtails.lakehead.platform.feed.FeedProviderId
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -193,6 +196,41 @@ class SettingsMenuOverlayTest {
         composeRule.waitForIdle()
         assertEquals(FeedProviderId.Lawnfeed, picked)
         composeRule.onNodeWithTag(SETTINGS_MENU_TAG).assertDoesNotExist()
+    }
+
+    @Test
+    fun noProviderDiagnostic_footerReadsNoProvider() {
+        composeRule.setContent {
+            SettingsMenuOverlay(
+                isOpen = true,
+                availability = unavailable,
+                diagnostic = FeedDiagnostic(
+                    FeedDiagnosticStatus.NO_PROVIDER,
+                    FeedDiagnosticCause.ALL_ABSENT,
+                ),
+                onDismiss = {},
+                onSelectProvider = {},
+            )
+        }
+        composeRule.waitForIdle()
+
+        composeRule.onNodeWithTag(SETTINGS_MENU_FEED_DIAGNOSTIC_TAG).assertIsDisplayed()
+        composeRule.onNodeWithText("NO_PROVIDER · ALL_ABSENT").assertIsDisplayed()
+    }
+
+    @Test
+    fun noDiagnostic_footerLineAbsent() {
+        composeRule.setContent {
+            SettingsMenuOverlay(
+                isOpen = true,
+                availability = available,
+                onDismiss = {},
+                onSelectProvider = {},
+            )
+        }
+        composeRule.waitForIdle()
+
+        composeRule.onNodeWithTag(SETTINGS_MENU_FEED_DIAGNOSTIC_TAG).assertDoesNotExist()
     }
 
     @Test

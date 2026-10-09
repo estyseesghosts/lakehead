@@ -7,6 +7,7 @@ import kotlinx.coroutines.withContext
 import me.foxtails.lakehead.core.grid.PlacementRect
 import me.foxtails.lakehead.core.grid.firstFreeCell
 import me.foxtails.lakehead.core.model.AppIdentity
+import me.foxtails.lakehead.core.model.AppPlacement
 import me.foxtails.lakehead.core.model.HomeId
 import me.foxtails.lakehead.core.model.ItemId
 import me.foxtails.lakehead.core.model.LogicalPosition
@@ -50,7 +51,7 @@ internal class AddToHomeCoordinator(
             }
 
             val placements = loadResult.placements
-            if (placements.any { it.appIdentity == appIdentity }) {
+            if (placements.filterIsInstance<AppPlacement>().any { it.appIdentity == appIdentity }) {
                 return@withContext AddToHomeResult.AlreadyOnHome
             }
 

@@ -7,7 +7,7 @@ import androidx.room.migration.Migration;
 import androidx.sqlite.db.SupportSQLiteDatabase;
 
 @Database(entities = {HomeEntity.class, AppReferenceEntity.class, PlacementEntity.class,
-                ShortcutBindingEntity.class},
+                ShortcutBindingEntity.class, WidgetBindingEntity.class},
         version = DatabaseSchema.VERSION, exportSchema = true)
 public abstract class PlacementDatabase extends RoomDatabase {
     public abstract PlacementDao placementDao();
@@ -25,6 +25,22 @@ public abstract class PlacementDatabase extends RoomDatabase {
                     + ")");
             db.execSQL("CREATE INDEX IF NOT EXISTS `index_shortcut_bindings_tileId`"
                     + " ON `shortcut_bindings` (`tileId`)");
+        }
+    };
+
+    /** v2 → v3: adds widget_bindings (appWidgetId per widget placement); additive only. */
+    @NonNull
+    public static final Migration MIGRATION_2_3 = new Migration(2, 3) {
+        @Override
+        public void migrate(@NonNull SupportSQLiteDatabase db) {
+            db.execSQL("CREATE TABLE IF NOT EXISTS `widget_bindings` ("
+                    + "`itemId` TEXT NOT NULL, "
+                    + "`appWidgetId` INTEGER NOT NULL, "
+                    + "PRIMARY KEY(`itemId`), "
+                    + "FOREIGN KEY(`itemId`) REFERENCES `placements`(`itemId`) ON DELETE CASCADE"
+                    + ")");
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_widget_bindings_itemId`"
+                    + " ON `widget_bindings` (`itemId`)");
         }
     };
 }

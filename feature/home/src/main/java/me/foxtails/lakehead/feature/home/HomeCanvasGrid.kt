@@ -18,6 +18,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.pointer.PointerInputChange
@@ -27,6 +29,7 @@ import androidx.compose.ui.platform.testTag
 
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
+import me.foxtails.lakehead.core.designsystem.AddButton
 import me.foxtails.lakehead.core.designsystem.AppTileDefaults
 import me.foxtails.lakehead.core.designsystem.CORNER_CONTROL_TOUCH_SIZE
 import me.foxtails.lakehead.core.designsystem.GestureArbitration
@@ -116,7 +119,7 @@ data class HomeCanvasViewportStyle(
  *   span while clearing the arm. Routing is decided once at drag start from the
  *   down snapshot (selection + arrow-hit + armed) and never switches mid-gesture;
  *   the handle itself installs no drag detector (it would lose the slop race).
- *   drags update the preview span via [ResizeDragMath] and [RenderableSpans.quantize]
+ *   drags update the preview span via [ResizeDragMath] (free span, clamped to the grid width)
  *   with last-valid hold (blocked proposals keep the preview, overlay flips to
  *   error), and drag end commits the held last-valid span via [onResizeTile]
  *   when it differs from the origin span, staying in edit mode either way.
@@ -214,6 +217,10 @@ internal fun HomeCanvasGrid(
     // Defaults to true so callers that do not track pager visibility keep the
     // exact prior behavior. Supplied by the shell; owned here.
     isVisible: Boolean = true,
+    // Widget tiles render through this slot; `:app` fills it with the hosted view.
+    widgetContent: HomeWidgetContent = NoHomeWidgetContent,
+    // The (+) button shown while editing reports here; the caller opens the picker.
+    onRequestAddWidget: () -> Unit = {},
 ) {
     require(usableHeightPx >= 0) { "usableHeightPx must be non-negative" }
     require(fullHeightPx >= 0) { "fullHeightPx must be non-negative" }
@@ -227,25 +234,11 @@ internal fun HomeCanvasGrid(
     // a populated→empty transition or grid disposal.
     val latestHoldCallback = rememberUpdatedState(onTransientHoldChange)
     val latestPagerHoldCallback = rememberUpdatedState(onPagerHoldChange)
-    val tilesEmpty = loaded.tiles.isEmpty()
-    LaunchedEffect(tilesEmpty, loaded.requestedHomeId) {
-        if (tilesEmpty) {
-            latestHoldCallback.value(false)
-            latestPagerHoldCallback.value(false)
-        }
-    }
     DisposableEffect(loaded.requestedHomeId) {
         onDispose {
             latestHoldCallback.value(false)
             latestPagerHoldCallback.value(false)
         }
-    }
-    if (tilesEmpty) {
-        BasicText(
-            text = "Home is empty",
-            modifier = modifier,
-        )
-        return
     }
     BoxWithConstraints(modifier = modifier) {
         val density = LocalDensity.current
@@ -300,10 +293,7 @@ internal fun HomeCanvasGrid(
             // of the lambda never restart the emission. Tiles are non-empty here
             // (empty returned above), so this delegates to the same predicate
             // the empty guard forces false.
-            val isHold = gridHoldSignal(
-                tilesEmpty = false,
-                editState = editState,
-            )
+            val isHold = isHomeHold(editState)
             LaunchedEffect(isHold) {
                 latestHoldCallback.value(isHold)
             }
@@ -479,12 +469,27 @@ internal fun HomeCanvasGrid(
             // session and exits W1 wiggle-editing via the pure exitOnEmptyTap
             // transition. Tiles use combinedClickable which consumes their own
             // taps; this handler only fires for taps on empty grid area.
+            // Outside edit mode the same detector turns a long-press on empty
+            // background into `Editing(selected = null)`; a press that lands on a
+            // tile is the tile's own long-press and is ignored here.
             val tapCancelModifier = Modifier.pointerInput(editState.isEditing) {
-                if (!editState.isEditing) return@pointerInput
                 detectTapGestures(
                     onTap = {
-                        editState = editState.exit()
-                        moveEdgePointer.clear()
+                        if (editState.isEditing) {
+                            editState = editState.exit()
+                            moveEdgePointer.clear()
+                        }
+                    },
+                    onLongPress = { press ->
+                        if (editState.isEditing) return@detectTapGestures
+                        val snapshot = idleHitInputs.value
+                        val viewportY = nodeLocalToViewportY(press.y, snapshot.scrollYPx)
+                        val onTile = snapshot.metrics.tileAt(
+                            snapshot.tiles,
+                            press.x,
+                            snapshot.metrics.contentY(viewportY, snapshot.scrollYPx),
+                        ) != null
+                        if (!onTile) editState = editState.enterOnBackgroundLongPress()
                     },
                 )
             }
@@ -596,6 +601,19 @@ internal fun HomeCanvasGrid(
                         onEnterWiggle = { entered ->
                             editState = editState.enterOnLongPress(entered.itemId)
                         },
+                        content = if (tile.isWidget) {
+                            { editing ->
+                                WidgetTileBody(
+                                    tile = tile,
+                                    isEditing = editing,
+                                    widgetContent = widgetContent,
+                                    onSelect = { editState = editState.selectOnTap(tile.itemId) },
+                                    onLongPress = { editState = editState.enterOnLongPress(tile.itemId) },
+                                )
+                            }
+                        } else {
+                            null
+                        },
                         lift = if (moveDrag != null && moveDrag.itemId == tile.itemId) {
                             {
                                 val held = moveEdgePointer.position
@@ -647,6 +665,19 @@ internal fun HomeCanvasGrid(
                     },
                     onSurfaceExecute = onSurfaceExecute,
                     onSurfaceTogglePin = onSurfaceTogglePin,
+                )
+            }
+            // Viewport-fixed, outside the scrolling content: bottom-end above the nav pill.
+            if (editState.isEditing && !dragging) {
+                AddButton(
+                    description = "Add widget",
+                    onClick = onRequestAddWidget,
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(
+                            end = 16.dp,
+                            bottom = with(density) { viewportStyle.bottomClearancePx.toDp() } + 16.dp,
+                        ),
                 )
             }
         }

@@ -118,4 +118,56 @@ class HomeGridGeometryTest {
         assertNull(m.tileAt(emptyList(), 10f, 10f))
         assertNull(m.tileAt(emptyList(), -10f, -10f))
     }
+
+    @Test
+    fun nodeLocalToViewportY_subtractsScrollOnce() {
+        assertEquals(100f, nodeLocalToViewportY(100f, 0f), 0f)
+        assertEquals(100f, nodeLocalToViewportY(300f, 200f), 0f)
+        assertEquals(0f, nodeLocalToViewportY(52f, 52f), 0f)
+    }
+
+    @Test
+    fun scrolledNodeLocalDownRecoversTileCellWithoutDoubleCount() {
+        // Regression for the scrolled-drag double-count: gesture positions arrive
+        // node-local (content space, scroll included). Converting once to viewport
+        // and re-applying scroll recovers the tile; adding scroll to node-local
+        // directly lands scrollY px below the finger.
+        val m = HomeGridMetrics(6, 48f, 48f, 4f, 4f, originXPx = 0f, restOffsetYPx = 0f)
+        val tiles = listOf(
+            fakeTile("a", 2, 4),
+            fakeTile("b", 0, 0),
+        )
+        val target = tiles.first()
+        val rect = m.rect(target.position, target.span)
+        val grabY = m.cellHeightPx / 2
+        val nodeY = rect.top + grabY
+        for (scroll in listOf(0f, 52f, 250.5f, 3 * 52f)) {
+            val viewportY = nodeLocalToViewportY(nodeY, scroll)
+            val contentY = m.contentY(viewportY, scroll)
+            assertEquals(nodeY, contentY, 0.001f)
+            val hit = m.tileAt(tiles, rect.left + 10f, contentY)
+            assertEquals(target.itemId, hit?.itemId)
+            // The old double-count (nodeY + scroll) drifts below the tile once scrolled.
+            if (scroll > 0f) {
+                val drifted = m.tileAt(tiles, rect.left + 10f, nodeY + scroll)
+                assert(hit?.itemId != drifted?.itemId || drifted?.position != target.position) {
+                    "double-count should miss at scroll=$scroll"
+                }
+            }
+        }
+    }
+
+    private fun fakeTile(id: String, column: Int, row: Int) = HomeRenderTile(
+        itemId = me.foxtails.lakehead.core.model.ItemId(id),
+        appIdentity = me.foxtails.lakehead.core.model.AppIdentity(
+            me.foxtails.lakehead.core.model.ProfileId("p"),
+            me.foxtails.lakehead.core.model.ComponentIdentity("pkg", "cls"),
+        ),
+        position = LogicalPosition(column, row),
+        span = LogicalSpan(1, 1),
+        availability = me.foxtails.lakehead.core.model.ItemAvailability.AVAILABLE,
+        label = id,
+        icon = null,
+        isLaunchable = true,
+    )
 }

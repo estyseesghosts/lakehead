@@ -8,10 +8,15 @@ import me.foxtails.lakehead.core.model.LogicalSpan
  *
  * The tile's top-left stays fixed at [originPosition]; the pointer (viewport
  * position plus current scroll, applied once) determines only the requested
- * span. The position is never an output. Quantizing to product spans remains
- * the caller's job via [RenderableSpans]. Pure math over [HomeGridMetrics].
+ * span. The position is never an output. Any span is reachable; [clampSpan]
+ * only bounds it to the grid width and legality stays with core:grid. Pure
+ * math over [HomeGridMetrics].
  */
 object ResizeDragMath {
+
+    /** Bounds [raw] columns to at most [columns]; rows and shape are untouched. */
+    fun clampSpan(raw: LogicalSpan, columns: Int): LogicalSpan =
+        if (raw.columns <= columns) raw else LogicalSpan(maxOf(1, columns), raw.rows)
 
     /** Raw logical span, minimum 1×1; may exceed what the product renders. */
     fun rawSpan(

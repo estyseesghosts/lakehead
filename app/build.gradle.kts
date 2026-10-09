@@ -69,6 +69,7 @@ dependencies {
     implementation(project(":platform:launcherapps"))
     implementation(project(":platform:shortcuts"))
     implementation(project(":platform:feed"))
+    implementation(project(":platform:widgets"))
     implementation(project(":data:repository"))
     implementation(project(":data:database"))
     implementation(project(":core:model"))

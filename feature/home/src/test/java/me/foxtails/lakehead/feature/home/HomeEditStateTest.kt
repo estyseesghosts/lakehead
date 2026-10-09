@@ -104,6 +104,28 @@ class HomeEditStateTest {
     }
 
     @Test
+    fun enterOnBackgroundLongPress_entersEditingWithNoSelection() {
+        val s = HomeEditState.Normal.enterOnBackgroundLongPress()
+        assertTrue(s.isEditing)
+        assertNull(s.selectedTileId)
+        assertTrue(!s.resizeArmed)
+        assertEquals(DragState.None, s.drag)
+    }
+
+    @Test
+    fun enterOnBackgroundLongPress_whileEditingOrDragging_keepsState() {
+        val sel = editing()
+        assertEquals(sel, sel.enterOnBackgroundLongPress())
+        val drag = moving()
+        assertEquals(drag, drag.enterOnBackgroundLongPress())
+    }
+
+    @Test
+    fun backgroundEdit_exitsOnEmptyTapTransition() {
+        assertEquals(HomeEditState.Normal, HomeEditState.Normal.enterOnBackgroundLongPress().exit())
+    }
+
+    @Test
     fun selectOnTap_outsideEditMode_isIgnored() {
         assertEquals(HomeEditState.Normal, HomeEditState.Normal.selectOnTap(ItemId("a")))
     }
@@ -249,7 +271,7 @@ class HomeEditStateTest {
     }
 
     @Test
-    fun resizeTo_quantizesPointerToRenderableSpan() {
+    fun resizeTo_usesFreeSpanFromPointer() {
         val s = resizing().resizeTo(150f, 10f, 0f)
         assertEquals(1, s.resize().requestedSpan.rows)
         assertTrue(s.resize().requestedSpan.columns >= 1)

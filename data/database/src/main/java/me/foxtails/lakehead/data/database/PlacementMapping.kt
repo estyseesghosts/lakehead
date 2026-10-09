@@ -5,6 +5,8 @@ import me.foxtails.lakehead.core.model.AppPlacement
 import me.foxtails.lakehead.core.model.ComponentIdentity
 import me.foxtails.lakehead.core.model.HomeId
 import me.foxtails.lakehead.core.model.HomeItemType
+import me.foxtails.lakehead.core.model.HomePlacement
+import me.foxtails.lakehead.core.model.WidgetPlacement
 import me.foxtails.lakehead.core.model.ItemAvailability
 import me.foxtails.lakehead.core.model.ItemId
 import me.foxtails.lakehead.core.model.LogicalPosition
@@ -26,33 +28,61 @@ fun AppReferenceEntity.toDomain() = AppIdentity(
     component = ComponentIdentity(packageName, className),
 )
 
-fun AppPlacement.toEntity() = PlacementEntity(
-    itemId.value,
-    homeId.value,
-    type.name,
-    appIdentity.profileId.value,
-    appIdentity.component.packageName,
-    appIdentity.component.className,
-    position.column,
-    position.row,
-    span.columns,
-    span.rows,
-    availability.name,
-)
+/** The app or widget-provider reference a placement row points at. */
+fun HomePlacement.referenceIdentity(): AppIdentity = when (this) {
+    is AppPlacement -> appIdentity
+    is WidgetPlacement -> provider
+}
 
-/** Reject schema/domain boundary values unknown to this slice rather than reinterpret them. */
-fun PlacementEntity.toDomain() = AppPlacement(
-    homeId = HomeId(homeId),
-    itemId = ItemId(itemId),
-    appIdentity = AppIdentity(
+fun HomePlacement.toEntity(): PlacementEntity {
+    val reference = referenceIdentity()
+    return PlacementEntity(
+        itemId.value,
+        homeId.value,
+        type.name,
+        reference.profileId.value,
+        reference.component.packageName,
+        reference.component.className,
+        position.column,
+        position.row,
+        span.columns,
+        span.rows,
+        availability.name,
+    )
+}
+
+fun WidgetPlacement.toBindingEntity() = WidgetBindingEntity(itemId.value, appWidgetId)
+
+/**
+ * Reject schema/domain boundary values unknown to this slice rather than reinterpret them.
+ * A widget row needs its [widgetBinding]; a missing binding is a corrupt row, not an app.
+ */
+fun PlacementEntity.toDomain(widgetBinding: WidgetBindingEntity? = null): HomePlacement {
+    val reference = AppIdentity(
         profileId = ProfileId(profileId),
         component = ComponentIdentity(packageName, className),
-    ),
-    position = LogicalPosition(column, row),
-    span = LogicalSpan(columnSpan, rowSpan),
-    availability = ItemAvailability.valueOf(availability),
-).also {
-    require(itemType == HomeItemType.APP.name) { "Unsupported placement type: $itemType" }
+    )
+    return when (itemType) {
+        HomeItemType.APP.name -> AppPlacement(
+            homeId = HomeId(homeId),
+            itemId = ItemId(itemId),
+            appIdentity = reference,
+            position = LogicalPosition(column, row),
+            span = LogicalSpan(columnSpan, rowSpan),
+            availability = ItemAvailability.valueOf(availability),
+        )
+        HomeItemType.WIDGET.name -> WidgetPlacement(
+            homeId = HomeId(homeId),
+            itemId = ItemId(itemId),
+            provider = reference,
+            appWidgetId = requireNotNull(widgetBinding) { "Widget placement $itemId has no binding" }
+                .appWidgetId,
+            position = LogicalPosition(column, row),
+            span = LogicalSpan(columnSpan, rowSpan),
+            availability = ItemAvailability.valueOf(availability),
+        )
+        else -> throw IllegalArgumentException("Unsupported placement type: $itemType")
+    }
 }
 
 // --- ShortcutBinding ↔ ShortcutBindingEntity ---

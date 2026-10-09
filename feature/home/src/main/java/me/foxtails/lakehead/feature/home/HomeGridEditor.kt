@@ -48,6 +48,12 @@ data class HomeEditState(
         return HomeEditState(isEditing = true, selectedTileId = tileId)
     }
 
+    /** Enters edit mode with nothing selected (long-press on empty background). */
+    fun enterOnBackgroundLongPress(): HomeEditState {
+        if (isEditing || drag != DragState.None) return this
+        return HomeEditState(isEditing = true)
+    }
+
     fun selectOnTap(tileId: ItemId): HomeEditState {
         if (!isEditing || drag != DragState.None) return this
         return copy(selectedTileId = tileId, resizeArmed = false)
@@ -192,7 +198,7 @@ data class HomeEditState(
             pointerYPxViewport = pointerYPxViewport,
             currentScrollYPx = scrollYPx,
         )
-        return updateResize(RenderableSpans.quantize(raw, resize.metrics.columns))
+        return updateResize(ResizeDragMath.clampSpan(raw, resize.metrics.columns))
     }
 
     /**
@@ -376,17 +382,3 @@ internal fun releaseCommit(
  * `userScrollEnabled`; the pill's programmatic `animateScrollToPage` is unaffected.
  */
 internal fun isHomeHold(editState: HomeEditState): Boolean = editState.isEditing
-
-/**
- * P0 empty-guard hold signal for [HomeCanvasGrid].
- *
- * The grid early-returns on empty tiles before transient edit state
- * exists, so an empty grid must never hold regardless of stale inputs: empty
- * forces false, non-empty delegates to [isHomeHold]. The composable emits false
- * via `LaunchedEffect` on the empty path and on dispose, so shell `homeHold`
- * resets on populated→empty transitions and on grid removal.
- */
-internal fun gridHoldSignal(
-    tilesEmpty: Boolean,
-    editState: HomeEditState,
-): Boolean = if (tilesEmpty) false else isHomeHold(editState)

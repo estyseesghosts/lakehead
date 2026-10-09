@@ -67,6 +67,7 @@ class AppPlacementTest {
     fun placementContractHasNoPlatformOrPresentationTypes() {
         val domainTypes = listOf(
             AppPlacement::class.java,
+            WidgetPlacement::class.java,
             HomeId::class.java,
             ItemId::class.java,
             LogicalPosition::class.java,

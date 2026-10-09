@@ -30,6 +30,7 @@ import me.foxtails.lakehead.core.designsystem.HorizontalFrameAnchor
 import me.foxtails.lakehead.core.designsystem.OverlayLayer
 import me.foxtails.lakehead.core.designsystem.VerticalFrameAnchor
 import me.foxtails.lakehead.platform.feed.FeedAvailability
+import me.foxtails.lakehead.platform.feed.FeedDiagnostic
 import me.foxtails.lakehead.platform.feed.FeedProviderId
 
 /** Test tag on the open settings menu overlay root (testing hook only; no behavior change). */
@@ -97,6 +98,16 @@ internal fun feedUnavailableReasonText(reason: FeedAvailability.Unavailable.Reas
 }
 
 /**
+ * Diagnostic footer line (`STATUS · CAUSE`, e.g. `NO_PROVIDER · ALL_ABSENT`), or null
+ * when the gateway reports no diagnosis. Enum names only, so no failure detail leaks.
+ */
+internal fun feedDiagnosticFooterText(diagnostic: FeedDiagnostic?): String? =
+    diagnostic?.let { "${it.status} · ${it.cause}" }
+
+/** Test tag on the diagnostic footer line. */
+const val SETTINGS_MENU_FEED_DIAGNOSTIC_TAG: String = "settings-menu-feed-diagnostic"
+
+/**
  * Transient settings menu opened by long-holding Home.
  *
  * Presentation only: [isOpen] is caller-hoisted transient gesture state (never persisted),
@@ -132,6 +143,7 @@ internal fun SettingsMenuOverlay(
     availability: FeedAvailability,
     onDismiss: () -> Unit,
     onSelectProvider: (FeedProviderId) -> Unit,
+    diagnostic: FeedDiagnostic? = null,
     onExportHomeLayout: () -> Unit = {},
     onImportHomeLayout: () -> Unit = {},
     modifier: Modifier = Modifier,
@@ -242,6 +254,16 @@ internal fun SettingsMenuOverlay(
                                         style = LocalTextStyle.current.merge(
                                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         ),
+                                    )
+                                }
+                                val diagnosticText = feedDiagnosticFooterText(diagnostic)
+                                if (diagnosticText != null) {
+                                    BasicText(
+                                        text = diagnosticText,
+                                        style = LocalTextStyle.current.merge(
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        ),
+                                        modifier = Modifier.testTag(SETTINGS_MENU_FEED_DIAGNOSTIC_TAG),
                                     )
                                 }
                                 // Layout debug section: export / import rows.

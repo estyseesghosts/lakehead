@@ -32,6 +32,7 @@ import me.foxtails.lakehead.platform.feed.FeedOverlayGateway
 import me.foxtails.lakehead.platform.feed.FeedOverlayGatewayImpl
 import me.foxtails.lakehead.platform.feed.FeedProviderResolver
 import me.foxtails.lakehead.platform.feed.FeedServiceQuery
+import me.foxtails.lakehead.platform.feed.startFeedDiagnosticsLogging
 import me.foxtails.lakehead.platform.launcherapps.AppLauncher
 import me.foxtails.lakehead.platform.launcherapps.AppIconSnapshotCache
 import me.foxtails.lakehead.platform.launcherapps.BoundedLauncherAppIconPngEncoder
@@ -41,8 +42,20 @@ import me.foxtails.lakehead.platform.launcherapps.LauncherAppsActivityLauncher
 import me.foxtails.lakehead.platform.launcherapps.LauncherAppsAppCatalogue
 import me.foxtails.lakehead.platform.shortcuts.LauncherAppsShortcutGateway
 import me.foxtails.lakehead.platform.shortcuts.ShortcutGateway
+import me.foxtails.lakehead.platform.widgets.AppWidgetHosting
+import me.foxtails.lakehead.platform.widgets.AppWidgetProviderCatalogue
+import me.foxtails.lakehead.core.model.AppIdentity
+import me.foxtails.lakehead.core.model.ComponentIdentity
+import me.foxtails.lakehead.core.model.ProfileId
+import me.foxtails.lakehead.core.model.WidgetProviderEntry
+import android.content.Intent
 
 internal val PRODUCTION_HOME_ID = HomeId("home-main")
+
+private const val NO_PENDING_WIDGET = -1
+private const val CONFIGURE_REQUEST_CODE = 0x57
+private const val STATE_WIDGET_ID = "pendingWidgetId"
+private const val STATE_WIDGET_PROVIDER = "pendingWidgetProvider"
 
 class MainActivity : ComponentActivity() {
     internal val appCatalogue: LauncherAppsAppCatalogue by lazy(LazyThreadSafetyMode.NONE) {
@@ -77,7 +90,7 @@ class MainActivity : ComponentActivity() {
 
     private val placementDatabase: PlacementDatabase by lazy(LazyThreadSafetyMode.NONE) {
         Room.databaseBuilder(applicationContext, PlacementDatabase::class.java, "placements.db")
-            .addMigrations(PlacementDatabase.MIGRATION_1_2)
+            .addMigrations(PlacementDatabase.MIGRATION_1_2, PlacementDatabase.MIGRATION_2_3)
             .build()
     }
 
@@ -225,14 +238,60 @@ class MainActivity : ComponentActivity() {
         )
     }
 
+    private val widgetHosting by lazy(LazyThreadSafetyMode.NONE) { AppWidgetHosting(applicationContext) }
+    private val widgetCatalogue by lazy(LazyThreadSafetyMode.NONE) {
+        AppWidgetProviderCatalogue(applicationContext)
+    }
+    private val addWidgetCoordinator: AddWidgetCoordinator by lazy(LazyThreadSafetyMode.NONE) {
+        AddWidgetCoordinator(
+            homeId = PRODUCTION_HOME_ID,
+            repository = placementRepository,
+            host = object : WidgetHostPort {
+                override fun allocateId() = widgetHosting.allocateId()
+                override fun deleteId(appWidgetId: Int) = widgetHosting.deleteId(appWidgetId)
+                override fun bindIfAllowed(appWidgetId: Int, provider: WidgetProviderEntry) =
+                    widgetHosting.bindIfAllowed(appWidgetId, provider.provider)
+                override fun needsConfigure(appWidgetId: Int) = widgetHosting.needsConfigure(appWidgetId)
+            },
+            columns = 5,
+            ioDispatcher = Dispatchers.IO,
+        )
+    }
+
+    // The add flow spans activity results and may span process death, so the pending
+    // id and provider are saved in instance state; nothing else about it persists.
+    private var pendingWidgetId: Int = NO_PENDING_WIDGET
+    private var pendingWidgetProvider: AppIdentity? = null
+
+    private val bindConsentLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) { result -> finishPendingWidget { id, provider -> addWidgetCoordinator.onBindResult(id, provider, result.resultCode == RESULT_OK) } }
+
+
     internal var appLauncherForTest: AppLauncher? = null
 
     private val requestHomeRole = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult(),
     ) { }
 
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        val provider = pendingWidgetProvider
+        if (pendingWidgetId != NO_PENDING_WIDGET && provider != null) {
+            outState.putInt(STATE_WIDGET_ID, pendingWidgetId)
+            outState.putStringArray(
+                STATE_WIDGET_PROVIDER,
+                arrayOf(provider.profileId.value, provider.component.packageName, provider.component.className),
+            )
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        savedInstanceState?.getStringArray(STATE_WIDGET_PROVIDER)?.let { (profile, pkg, cls) ->
+            pendingWidgetId = savedInstanceState.getInt(STATE_WIDGET_ID, NO_PENDING_WIDGET)
+            pendingWidgetProvider = AppIdentity(ProfileId(profile), ComponentIdentity(pkg, cls))
+        }
         enterImmersiveMode()
         // Resolve all lazy app-side dependencies before composition starts. In particular, the
         // loader constructs the Room repository/database and platform icon wiring here, while its
@@ -243,6 +302,8 @@ class MainActivity : ComponentActivity() {
         val routeViewportStyle = homeViewportStyle
         val productionAppLauncher = appLauncher
         val feed = feedGateway
+        // Setprop-gated (debug.protolaunch.feed_diag); a no-op unless enabled.
+        startFeedDiagnosticsLogging(feed, lifecycleScope)
         setContent {
             LauncherTheme {
             val homeState by routeLoader.state.collectAsState()
@@ -250,6 +311,9 @@ class MainActivity : ComponentActivity() {
             val allAppsState by allAppsLoader.state.collectAsState()
             val allAppsIconsMap by allAppsLoader.icons.collectAsState()
             val feedAvailability by feed.state.collectAsState()
+            val feedDiagnostic by feed.diagnostic.collectAsState()
+            val widgetProviders by widgetCatalogue.providers.collectAsState()
+            val widgetContent = androidx.compose.runtime.remember { hostedWidgetContent(widgetHosting) }
             val shortcutMenu by shortcutMenuCoordinator.menu.collectAsState()
             val pinnedByTile by shortcutMenuCoordinator.pinnedByTile.collectAsState()
             // B1: forward loaded tiles so the coordinator can project the
@@ -278,6 +342,7 @@ class MainActivity : ComponentActivity() {
                 },
                 onRequestDefaultHome = ::requestDefaultHome,
                 feedAvailability = feedAvailability,
+                feedDiagnostic = feedDiagnostic,
                 // S1: menu picks attach directly (non-suspend tryLock path); the
                 // shell dismisses the menu around this call.
                 onSelectFeedProvider = { feedGateway.attach(it) },
@@ -319,9 +384,12 @@ class MainActivity : ComponentActivity() {
                     }
                 },
                 onRemoveTile = { itemId ->
+                    val widgetId = (homeState as? HomeRenderState.Loaded)?.tiles
+                        ?.firstOrNull { it.itemId == itemId }?.appWidgetId
                     lifecycleScope.launch {
                         val result = routeLoader.commitRemove(itemId)
                         if (result is RemoveResult.Removed) {
+                            widgetId?.let(widgetHosting::deleteId)
                             allAppsLoader.refreshHomeMembership()
                         }
                     }
@@ -347,6 +415,13 @@ class MainActivity : ComponentActivity() {
                     }
                 },
                 viewportStyle = routeViewportStyle,
+                widgetContent = widgetContent,
+                widgetProviders = widgetProviders,
+                onAddWidget = { entry ->
+                    lifecycleScope.launch {
+                        handleAddWidgetStep(addWidgetCoordinator.begin(entry), entry)
+                    }
+                },
             )
             }
         }
@@ -360,9 +435,13 @@ class MainActivity : ComponentActivity() {
         homeRouteLoader.start(lifecycleScope)
         allAppsRouteLoader.start(lifecycleScope)
         feedGateway.start(lifecycleScope)
+        widgetHosting.startListening()
+        widgetCatalogue.start(lifecycleScope)
     }
 
     override fun onStop() {
+        widgetCatalogue.stop()
+        widgetHosting.stopListening()
         feedGateway.stop()
         allAppsRouteLoader.stop()
         homeRouteLoader.stop()
@@ -381,6 +460,59 @@ class MainActivity : ComponentActivity() {
         super.onWindowFocusChanged(hasFocus)
         if (hasFocus) {
             enterImmersiveMode()
+        }
+    }
+
+    /** Launches whatever UI the step needs, or reloads Home when the widget was placed. */
+    private suspend fun handleAddWidgetStep(step: AddWidgetStep, provider: WidgetProviderEntry) {
+        when (step) {
+            is AddWidgetStep.NeedsBindConsent -> {
+                pendingWidgetId = step.appWidgetId
+                pendingWidgetProvider = provider.provider
+                bindConsentLauncher.launch(widgetHosting.bindConsentIntent(step.appWidgetId, provider.provider))
+            }
+            is AddWidgetStep.NeedsConfigure -> {
+                pendingWidgetId = step.appWidgetId
+                pendingWidgetProvider = provider.provider
+                widgetHosting.startConfigure(this, step.appWidgetId, CONFIGURE_REQUEST_CODE)
+            }
+            AddWidgetStep.Placed -> {
+                clearPendingWidget()
+                homeRouteLoader.reload()
+            }
+            is AddWidgetStep.Failed -> clearPendingWidget()
+        }
+    }
+
+    private fun clearPendingWidget() {
+        pendingWidgetId = NO_PENDING_WIDGET
+        pendingWidgetProvider = null
+    }
+
+    /** Resumes the pending add flow with an activity result, re-resolving the provider by identity. */
+    private fun finishPendingWidget(step: suspend (Int, WidgetProviderEntry) -> AddWidgetStep) {
+        val id = pendingWidgetId
+        val identity = pendingWidgetProvider
+        if (id == NO_PENDING_WIDGET || identity == null) return
+        lifecycleScope.launch {
+            widgetCatalogue.refresh()
+            val provider = widgetCatalogue.providers.value.firstOrNull { it.provider == identity }
+            if (provider == null) {
+                addWidgetCoordinator.cancel(id)
+                clearPendingWidget()
+            } else {
+                handleAddWidgetStep(step(id, provider), provider)
+            }
+        }
+    }
+
+    @Deprecated("Configure activities return through the host request code")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == CONFIGURE_REQUEST_CODE) {
+            finishPendingWidget { id, provider ->
+                addWidgetCoordinator.onConfigureResult(id, provider, resultCode == RESULT_OK)
+            }
         }
     }
 

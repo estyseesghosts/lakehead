@@ -197,14 +197,151 @@ class EditShortcutMenuTest {
 
     // ---- visible safe viewport + capped height ----
 
+    // ---- row cap + side space + capped height (Slice 1: never viewport-tall) ----
+
     @Test
-    fun capped_fittingNaturalWrapsUnchanged() {
-        assertEquals(120, editShortcutMenuCappedHeightPx(120, 800))
+    fun rowCap_isFiveAndAHalfRowsPlusPadding() {
+        assertEquals(5.5, EDIT_SHORTCUT_MENU_MAX_VISIBLE_ROWS, 0.0)
+        assertEquals((56 * 5.5 + 8).toInt(), editShortcutMenuRowCapPx(56, 8))
+        assertEquals(56 + 8, editShortcutMenuOneRowPx(56, 8))
     }
 
     @Test
-    fun capped_manyRowClampsToViewportMax() {
-        assertEquals(800, editShortcutMenuCappedHeightPx(56 * 20 + 8, 800))
+    fun capped_threeShortcutsPassThroughUnchanged() {
+        val rowPx = 56
+        val paddingPx = 8
+        val natural = editShortcutMenuSizePx(800, 16, 320, rowPx, paddingPx, 3).heightPx
+        assertEquals(
+            natural,
+            editShortcutMenuCappedHeightPx(
+                naturalHeightPx = natural,
+                rowCapPx = editShortcutMenuRowCapPx(rowPx, paddingPx),
+                sideSpacePx = 800,
+                oneRowPx = editShortcutMenuOneRowPx(rowPx, paddingPx),
+            ),
+        )
+    }
+
+    @Test
+    fun capped_fortyShortcutsStopAtRowCap() {
+        val rowPx = 56
+        val paddingPx = 8
+        val natural = editShortcutMenuSizePx(800, 16, 320, rowPx, paddingPx, 40).heightPx
+        val rowCap = editShortcutMenuRowCapPx(rowPx, paddingPx)
+        assertTrue("40-row natural $natural must exceed the row cap $rowCap", natural > rowCap)
+        assertEquals(
+            rowCap,
+            editShortcutMenuCappedHeightPx(
+                naturalHeightPx = natural,
+                rowCapPx = rowCap,
+                sideSpacePx = 10_000,
+                oneRowPx = editShortcutMenuOneRowPx(rowPx, paddingPx),
+            ),
+        )
+    }
+
+    @Test
+    fun overhangs_smallSpanReservesBothHandles() {
+        // 1x1: remove top-right + resize bottom-right both spill half the 48dp control.
+        assertEquals(EditShortcutMenuOverhangs(topPx = 24, bottomPx = 24), editShortcutMenuOverhangs(1, 1, 48))
+        assertEquals(EditShortcutMenuOverhangs(topPx = 24, bottomPx = 24), editShortcutMenuOverhangs(1, 2, 48))
+    }
+
+    @Test
+    fun overhangs_largeSpanReservesOnlyResizeBelow() {
+        // 2x2+: remove centers inside the tile (no top spill); resize still spills below.
+        assertEquals(EditShortcutMenuOverhangs(topPx = 0, bottomPx = 24), editShortcutMenuOverhangs(2, 2, 48))
+        assertEquals(EditShortcutMenuOverhangs(topPx = 0, bottomPx = 24), editShortcutMenuOverhangs(4, 2, 48))
+    }
+
+    @Test
+    fun sideSpace_tileNearTopGivesBelowSide() {
+        val viewport = PixelRect(left = 0, top = 0, right = 400, bottom = 800)
+        val tile = SignedPixelFrame(left = 40, top = 100, widthPx = 80, heightPx = 80)
+        // Above: 100 - 8 - 0 = 92; below: 800 - (180 + 8) = 612.
+        assertEquals(612, editShortcutMenuSideSpacePx(viewport, tile, gapPx = 8))
+    }
+
+    @Test
+    fun sideSpace_tileNearBottomGivesAboveSide() {
+        val viewport = PixelRect(left = 0, top = 0, right = 400, bottom = 800)
+        val tile = SignedPixelFrame(left = 40, top = 700, widthPx = 80, heightPx = 80)
+        // Above: 700 - 8 - 0 = 692; below: 800 - (780 + 8) = 12.
+        assertEquals(692, editShortcutMenuSideSpacePx(viewport, tile, gapPx = 8))
+    }
+
+    @Test
+    fun sideSpace_overhangsReserveHandleRoom() {
+        val viewport = PixelRect(left = 0, top = 0, right = 400, bottom = 800)
+        val tile = SignedPixelFrame(left = 40, top = 100, widthPx = 80, heightPx = 80)
+        // Top overhang (remove button spill) eats the above side: 100 - 24 - 8 = 68.
+        assertEquals(
+            612,
+            editShortcutMenuSideSpacePx(viewport, tile, gapPx = 8, topOverhangPx = 24),
+        )
+        val bottomTile = SignedPixelFrame(left = 40, top = 700, widthPx = 80, heightPx = 80)
+        // Bottom overhang (resize handle spill) eats the below side: 800 - (780 + 24 + 8) < 0,
+        // so the above side (700 - 8 = 692) still wins.
+        assertEquals(
+            692,
+            editShortcutMenuSideSpacePx(viewport, bottomTile, gapPx = 8, bottomOverhangPx = 24),
+        )
+    }
+
+    @Test
+    fun sideSpace_tileCoveringViewportClampsToZero() {
+        val viewport = PixelRect(left = 0, top = 0, right = 400, bottom = 800)
+        val tile = SignedPixelFrame(left = 0, top = -100, widthPx = 400, heightPx = 1000)
+        assertEquals(0, editShortcutMenuSideSpacePx(viewport, tile, gapPx = 8))
+    }
+
+    @Test
+    fun sideSpace_pixelRectOverloadMatchesSignedFrame() {
+        val viewport = PixelRect(left = 0, top = 0, right = 400, bottom = 800)
+        val rectTile = PixelRect(left = 40, top = 100, right = 120, bottom = 180)
+        val signedTile = SignedPixelFrame(left = 40, top = 100, widthPx = 80, heightPx = 80)
+        assertEquals(
+            editShortcutMenuSideSpacePx(viewport, signedTile, gapPx = 8),
+            editShortcutMenuSideSpacePx(viewport, rectTile, gapPx = 8),
+        )
+    }
+
+    @Test
+    fun capped_tallTileWithUnderOneRowSpaceGivesOneRowFloor() {
+        // A tall tile leaving 2px free: min() would collapse to 2, the floor keeps one row.
+        assertEquals(
+            64,
+            editShortcutMenuCappedHeightPx(
+                naturalHeightPx = 56 * 40 + 8,
+                rowCapPx = 316,
+                sideSpacePx = 2,
+                oneRowPx = 64,
+            ),
+        )
+    }
+
+    @Test
+    fun capped_noOverflowAtExtremes() {
+        assertEquals(
+            Int.MAX_VALUE,
+            editShortcutMenuCappedHeightPx(Int.MAX_VALUE, Int.MAX_VALUE, Int.MAX_VALUE, Int.MAX_VALUE),
+        )
+        assertEquals(
+            316,
+            editShortcutMenuCappedHeightPx(Int.MAX_VALUE, 316, 800, 64),
+        )
+        assertEquals(Int.MAX_VALUE, editShortcutMenuRowCapPx(Int.MAX_VALUE, Int.MAX_VALUE))
+        assertEquals(Int.MAX_VALUE, editShortcutMenuOneRowPx(Int.MAX_VALUE, Int.MAX_VALUE))
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun capped_negativeSideSpaceIsRejected() {
+        editShortcutMenuCappedHeightPx(120, 316, -1, 64)
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun rowCap_nonPositiveRowIsRejected() {
+        editShortcutMenuRowCapPx(0, 8)
     }
 
     @Test
@@ -257,8 +394,8 @@ class EditShortcutMenuTest {
     }
 
     @Test(expected = IllegalArgumentException::class)
-    fun capped_nonPositiveViewportIsRejected() {
-        editShortcutMenuCappedHeightPx(120, 0)
+    fun capped_nonPositiveNaturalIsRejected() {
+        editShortcutMenuCappedHeightPx(0, 316, 800, 64)
     }
 
     // ---- above-anchor frame ----
@@ -359,5 +496,119 @@ class EditShortcutMenuTest {
     @Test(expected = IllegalArgumentException::class)
     fun negativeGap_isRejected() {
         editShortcutMenuFrame(viewport, SignedPixelFrame(40, 400, 80, 80), overlay, gapPx = -1)
+    }
+
+    // ---- Slice 2: the frame never overlaps the tile ----
+
+    private fun frameOverlapsTile(frame: PixelRect, tile: SignedPixelFrame): Boolean =
+        frame.left < tile.right && tile.left < frame.right &&
+            frame.top < tile.bottom && tile.top < frame.bottom
+
+    private fun frameStaysInsideViewport(frame: PixelRect, viewport: PixelRect): Boolean =
+        frame.left >= viewport.left && frame.top >= viewport.top &&
+            frame.right <= viewport.right && frame.bottom <= viewport.bottom
+
+    @Test
+    fun frame_cappedMenuNeverOverlapsTile_firstRowLastRowAndMiddle() {
+        val rowPx = 56
+        val paddingPx = 8
+        val gapPx = 8
+        val rowCapPx = editShortcutMenuRowCapPx(rowPx, paddingPx)
+        val oneRowPx = editShortcutMenuOneRowPx(rowPx, paddingPx)
+        val natural = rowPx * 40 + paddingPx
+        val tiles = listOf(
+            SignedPixelFrame(left = 0, top = 0, widthPx = 100, heightPx = 100),
+            SignedPixelFrame(left = 300, top = 0, widthPx = 100, heightPx = 100),
+            SignedPixelFrame(left = 0, top = 700, widthPx = 100, heightPx = 100),
+            SignedPixelFrame(left = 300, top = 700, widthPx = 100, heightPx = 100),
+            SignedPixelFrame(left = 150, top = 350, widthPx = 100, heightPx = 100),
+        )
+        for (tile in tiles) {
+            val sideSpace = editShortcutMenuSideSpacePx(viewport, tile, gapPx)
+            assertTrue("tile $tile must leave a row of room, was $sideSpace", sideSpace >= oneRowPx)
+            val capped = editShortcutMenuCappedHeightPx(natural, rowCapPx, sideSpace, oneRowPx)
+            val frame = editShortcutMenuFrame(viewport, tile, FrameSize(120, capped), gapPx)
+            assertFalse("menu $frame must not overlap tile $tile", frameOverlapsTile(frame, tile))
+            assertTrue(
+                "menu $frame for tile $tile must stay inside $viewport",
+                frameStaysInsideViewport(frame, viewport),
+            )
+        }
+    }
+
+    @Test
+    fun frame_cappedMenuNeverOverlapsTile_wideSpansAndScrolledViewport() {
+        // 2×2 = 208px and 4×2 = 424px footprints on 100px cells with 8px gaps.
+        val scrolled = PixelRect(left = 0, top = 500, right = 600, bottom = 1500)
+        val rowPx = 56
+        val paddingPx = 8
+        val gapPx = 8
+        val rowCapPx = editShortcutMenuRowCapPx(rowPx, paddingPx)
+        val oneRowPx = editShortcutMenuOneRowPx(rowPx, paddingPx)
+        val natural = rowPx * 40 + paddingPx
+        val tiles = listOf(
+            SignedPixelFrame(left = 0, top = 500, widthPx = 208, heightPx = 208),
+            SignedPixelFrame(left = 88, top = 1292, widthPx = 424, heightPx = 208),
+            SignedPixelFrame(left = 250, top = 950, widthPx = 100, heightPx = 100),
+        )
+        for (tile in tiles) {
+            val sideSpace = editShortcutMenuSideSpacePx(scrolled, tile, gapPx)
+            assertTrue("tile $tile must leave a row of room, was $sideSpace", sideSpace >= oneRowPx)
+            val capped = editShortcutMenuCappedHeightPx(natural, rowCapPx, sideSpace, oneRowPx)
+            val frame = editShortcutMenuFrame(scrolled, tile, FrameSize(120, capped), gapPx)
+            assertFalse("menu $frame must not overlap tile $tile", frameOverlapsTile(frame, tile))
+            assertTrue(
+                "menu $frame for tile $tile must stay inside $scrolled",
+                frameStaysInsideViewport(frame, scrolled),
+            )
+        }
+    }
+
+    @Test
+    fun frame_withHandleOverhangs_clearsAvoidRect() {
+        val rowPx = 56
+        val paddingPx = 8
+        val gapPx = 8
+        val rowCapPx = editShortcutMenuRowCapPx(rowPx, paddingPx)
+        val oneRowPx = editShortcutMenuOneRowPx(rowPx, paddingPx)
+        val natural = rowPx * 40 + paddingPx
+        val tiles = listOf(
+            SignedPixelFrame(left = 40, top = 100, widthPx = 80, heightPx = 80),
+            SignedPixelFrame(left = 40, top = 700, widthPx = 80, heightPx = 80),
+        )
+        for (tile in tiles) {
+            val topOverhangPx = 24
+            val bottomOverhangPx = 24
+            val sideSpace = editShortcutMenuSideSpacePx(
+                viewport, tile, gapPx, topOverhangPx, bottomOverhangPx,
+            )
+            assertTrue("tile $tile must leave a row of room, was $sideSpace", sideSpace >= oneRowPx)
+            val capped = editShortcutMenuCappedHeightPx(natural, rowCapPx, sideSpace, oneRowPx)
+            val frame = editShortcutMenuFrame(
+                viewport, tile, FrameSize(120, capped), gapPx, topOverhangPx, bottomOverhangPx,
+            )
+            val avoid = SignedPixelFrame(
+                left = tile.left,
+                top = tile.top - topOverhangPx,
+                widthPx = tile.widthPx,
+                heightPx = tile.heightPx + topOverhangPx + bottomOverhangPx,
+            )
+            assertFalse("menu $frame must not overlap avoid-rect $avoid", frameOverlapsTile(frame, avoid))
+            assertTrue(
+                "menu $frame for tile $tile must stay inside $viewport",
+                frameStaysInsideViewport(frame, viewport),
+            )
+        }
+    }
+
+    @Test
+    fun frame_uncappedTallRequestShrinksToRoomierSide() {
+        // Defensive path only: capped callers never send this (Slice 1 guarantees fit).
+        // The 700px request fits the viewport but exceeds both sides (above 392, below 312),
+        // so the fallback keeps the roomier above side at exactly that height.
+        val tile = SignedPixelFrame(left = 40, top = 400, widthPx = 80, heightPx = 80)
+        val frame = editShortcutMenuFrame(viewport, tile, FrameSize(120, 700), gapPx = 8)
+        assertEquals(PixelRect(left = 40, top = 0, right = 160, bottom = 392), frame)
+        assertFalse(frameOverlapsTile(frame, tile))
     }
 }

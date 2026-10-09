@@ -84,6 +84,18 @@ internal fun exceedsTouchSlop(dxPx: Float, dyPx: Float, slopPx: Float): Boolean 
     dxPx * dxPx + dyPx * dyPx > slopPx * slopPx
 
 /**
+ * Converts a pointer Y read inside the scrolled content node to viewport-local Y.
+ *
+ * The drag/idle modifiers are chained after `verticalScroll`, so `change.position`
+ * is already in content space (it includes the scroll offset). Downstream math
+ * ([HomeGridMetrics.contentY], [MoveDragMath], [HomeEditState.moveTo]/`resizeTo`,
+ * [MoveEdgePointer], `HomeAutoScroll`) expects viewport-local Y and applies scroll
+ * itself exactly once. Subtract here so the boundary holds: viewport + scroll =
+ * the node-local content Y.
+ */
+internal fun nodeLocalToViewportY(nodeYPx: Float, scrollYPx: Float): Float = nodeYPx - scrollYPx
+
+/**
  * The edit-drag gesture, read top to bottom:
  * down → hit test → (long-press pickup | wait for slop) → choose MOVE or
  * RESIZE once → update that operation until up/cancel → emit one [HomeDragEnd].
@@ -124,15 +136,20 @@ private suspend fun AwaitPointerEventScope.awaitDownTile(
 ): DragDown? {
     val first = awaitPointerEvent().changes.firstOrNull { it.pressed } ?: return null
     val start = first.position
-    // Pointer Y is viewport-local; adding the scroll read at down converts it to content space.
+    // Gesture modifiers sit after `verticalScroll`, so `start.y` is node-local
+    // content space (scroll already included). Convert once to viewport-local;
+    // `contentY(viewport, scroll)` below then recovers the same content Y without
+    // double-counting scroll.
     val scrollYPx = host.scrollYPx.toFloat()
+    val viewportY = nodeLocalToViewportY(start.y, scrollYPx)
     val edit = host.editState
     val snapshot = host.hit
     val metrics = snapshot.metrics
-    val downTile = metrics.tileAt(snapshot.tiles, start.x, metrics.contentY(start.y, scrollYPx))
+    val contentY = metrics.contentY(viewportY, scrollYPx)
+    val downTile = metrics.tileAt(snapshot.tiles, start.x, contentY)
     val selectedTile = edit.selectedTileId?.let { id -> snapshot.tiles.firstOrNull { it.itemId == id } }
     val selectedInHandle = selectedTile?.let {
-        isInHandle(start.x, start.y + scrollYPx, metrics.pixelFrame(it.position, it.span), handleSizePx)
+        isInHandle(start.x, contentY, metrics.pixelFrame(it.position, it.span), handleSizePx)
     } == true
     if (!edit.isEditing && downTile?.isLaunchable != true) return null
     if (edit.isEditing && downTile == null && !selectedInHandle) return null
@@ -145,9 +162,9 @@ private suspend fun AwaitPointerEventScope.awaitDownTile(
         tile = tile,
         isTransfer = isEditTransferDrag(edit, downTile?.itemId),
         armedAtDown = edit.isResizeArmedFor(tile.itemId),
-        inHandle = isInHandle(start.x, start.y + scrollYPx, bounds, handleSizePx),
+        inHandle = isInHandle(start.x, contentY, bounds, handleSizePx),
         grabOffsetXPx = start.x - bounds.left.toFloat(),
-        grabOffsetYPx = start.y + scrollYPx - bounds.top.toFloat(),
+        grabOffsetYPx = contentY - bounds.top.toFloat(),
     )
 }
 
@@ -289,10 +306,14 @@ internal suspend fun AwaitPointerEventScope.homePagerGesture(
     val start = down.position
     val slopPx = viewConfiguration.touchSlop.toFloat()
     val snapshot = hit()
+    // Same node-local → viewport conversion as the drag down path: `start.y`
+    // already includes scroll, so `contentY(viewport, scroll)` recovers content
+    // without double-counting.
+    val startViewportY = nodeLocalToViewportY(start.y, snapshot.scrollYPx)
     val downTile = snapshot.metrics.tileAt(
         snapshot.tiles,
         start.x,
-        snapshot.metrics.contentY(start.y, snapshot.scrollYPx),
+        snapshot.metrics.contentY(startViewportY, snapshot.scrollYPx),
     )
     if (isEditing() && downTile != null) return
     pager.claim(
@@ -323,12 +344,18 @@ private fun ownsDrag(state: HomeEditState, route: DownDragRoute): Boolean =
     if (route == DownDragRoute.MOVE) state.moveDrag != null else state.resizeDrag != null
 
 private fun updateDrag(host: HomeDragHost, route: DownDragRoute, pointer: Offset) {
+    // `pointer` is node-local (scrolled content space). Convert once to
+    // viewport-local so `onMovePointer` holds a true viewport Y for the edge
+    // ticker and `moveTo`/`resizeTo` apply scroll exactly once. Read scroll once
+    // so the conversion and the mapping use the same value.
+    val scrollYPx = host.scrollYPx.toFloat()
+    val viewportY = nodeLocalToViewportY(pointer.y, scrollYPx)
     val state = host.editState
-    if (route == DownDragRoute.MOVE) host.onMovePointer(pointer.x, pointer.y)
+    if (route == DownDragRoute.MOVE) host.onMovePointer(pointer.x, viewportY)
     host.editState = if (route == DownDragRoute.MOVE) {
-        state.moveTo(pointer.x, pointer.y, host.scrollYPx.toFloat())
+        state.moveTo(pointer.x, viewportY, scrollYPx)
     } else {
-        state.resizeTo(pointer.x, pointer.y, host.scrollYPx.toFloat())
+        state.resizeTo(pointer.x, viewportY, scrollYPx)
     }
 }
 

@@ -1507,7 +1507,7 @@ class FeedOverlayGatewayTest {
         assertEquals(1, channel.attaches.size)
         // Flags ride the JVM-safe primitive path (params field copies are framework
         // code and stay device-verified: stubbed unit-test copies carry no fields).
-        assertEquals(0, channel.attaches.single().flags)
+        assertEquals(AidlFeedBridge.WINDOW_ATTACH_FLAGS, channel.attaches.single().flags)
         assertEquals(
             FeedAvailability.Available(FeedProviderId.Lawnfeed),
             harness.gateway.state.value,
@@ -1527,7 +1527,7 @@ class FeedOverlayGatewayTest {
         harness.gateway.notifyWindowAttachedParams(params)
 
         assertEquals(1, channel.attaches.size)
-        assertEquals(0, channel.attaches.single().flags)
+        assertEquals(AidlFeedBridge.WINDOW_ATTACH_FLAGS, channel.attaches.single().flags)
         // The gateway caches its own copy, never the caller's instance.
         assertTrue(channel.attaches.single().source !== params)
     }
@@ -1544,7 +1544,7 @@ class FeedOverlayGatewayTest {
         harness.gateway.notifyWindowAttachedParams(windowParams(width = 200, height = 200), 5)
 
         assertEquals(2, channel.attaches.size)
-        assertEquals(listOf(0, 5), channel.attaches.map { it.flags })
+        assertEquals(listOf(AidlFeedBridge.WINDOW_ATTACH_FLAGS, 5), channel.attaches.map { it.flags })
     }
 
     @Test
@@ -1596,7 +1596,7 @@ class FeedOverlayGatewayTest {
         harness.gateway.onOverlayConnected(second)
 
         assertEquals(1, second.attaches.size)
-        assertEquals(0, second.attaches.single().flags)
+        assertEquals(AidlFeedBridge.WINDOW_ATTACH_FLAGS, second.attaches.single().flags)
         assertEquals(
             FeedAvailability.Available(FeedProviderId.NeoFeed),
             harness.gateway.state.value,

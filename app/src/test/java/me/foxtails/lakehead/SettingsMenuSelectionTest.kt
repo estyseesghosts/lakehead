@@ -1,6 +1,9 @@
 package me.foxtails.lakehead
 
 import me.foxtails.lakehead.platform.feed.FeedAvailability
+import me.foxtails.lakehead.platform.feed.FeedDiagnostic
+import me.foxtails.lakehead.platform.feed.FeedDiagnosticCause
+import me.foxtails.lakehead.platform.feed.FeedDiagnosticStatus
 import me.foxtails.lakehead.platform.feed.FeedProviderId
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -56,6 +59,23 @@ class SettingsMenuSelectionTest {
         assertEquals(
             "feed-provider-row-neofeed",
             feedProviderRowTag(FeedProviderId.NeoFeed),
+        )
+    }
+
+    @Test
+    fun diagnosticFooter_readsStatusAndCause() {
+        assertNull(feedDiagnosticFooterText(null))
+        assertEquals(
+            "NO_PROVIDER · ALL_ABSENT",
+            feedDiagnosticFooterText(
+                FeedDiagnostic(FeedDiagnosticStatus.NO_PROVIDER, FeedDiagnosticCause.ALL_ABSENT),
+            ),
+        )
+        assertEquals(
+            "BIND_FAILED · NULL_BINDING",
+            feedDiagnosticFooterText(
+                FeedDiagnostic(FeedDiagnosticStatus.BIND_FAILED, FeedDiagnosticCause.NULL_BINDING),
+            ),
         )
     }
 

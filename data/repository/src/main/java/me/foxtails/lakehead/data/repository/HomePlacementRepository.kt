@@ -7,6 +7,8 @@ import me.foxtails.lakehead.core.grid.GridRules
 import me.foxtails.lakehead.core.grid.GridSpan
 import me.foxtails.lakehead.core.model.AppIdentity
 import me.foxtails.lakehead.core.model.AppPlacement
+import me.foxtails.lakehead.core.model.HomePlacement
+import me.foxtails.lakehead.core.model.WidgetPlacement
 import me.foxtails.lakehead.core.model.HomeId
 import me.foxtails.lakehead.core.model.ItemAvailability
 import me.foxtails.lakehead.core.model.ItemId
@@ -14,6 +16,9 @@ import me.foxtails.lakehead.core.model.LogicalPosition
 import me.foxtails.lakehead.core.model.LogicalSpan
 import me.foxtails.lakehead.core.model.TileBinding
 import me.foxtails.lakehead.data.database.HomeEntity
+import me.foxtails.lakehead.data.database.PlacementEntity
+import me.foxtails.lakehead.data.database.referenceIdentity
+import me.foxtails.lakehead.data.database.toBindingEntity
 import me.foxtails.lakehead.data.database.toDomain
 import me.foxtails.lakehead.data.database.toEntity
 
@@ -32,6 +37,20 @@ interface HomePlacementRepository {
         columns: Int,
         replacingId: ItemId? = null,
     ): MutationResult
+
+    /** Places a bound widget; [appWidgetId] is persisted beside the provider reference. */
+    fun placeWidget(
+        homeId: HomeId,
+        itemId: ItemId,
+        provider: AppIdentity,
+        appWidgetId: Int,
+        position: LogicalPosition,
+        span: LogicalSpan,
+        columns: Int,
+    ): MutationResult
+
+    /** Every `appWidgetId` that has a persisted placement, for the startup host sweep. */
+    fun persistedAppWidgetIds(): Set<Int>
 
     fun move(homeId: HomeId, itemId: ItemId, position: LogicalPosition, columns: Int): MutationResult
 
@@ -53,7 +72,7 @@ interface HomePlacementRepository {
 }
 
 sealed interface LoadResult {
-    data class Loaded(val placements: List<AppPlacement>) : LoadResult
+    data class Loaded(val placements: List<HomePlacement>) : LoadResult
     data object NotFound : LoadResult
 }
 
@@ -84,9 +103,13 @@ class RoomHomePlacementRepository(
             val entities = dao.placementsForHome(homeId.value)
             val normalized = normalize(entities.map { it.toGridPlacement() })
             persistShifted(entities, normalized)
+            val bindings = dao.widgetBindingsForHome(homeId.value).associateBy { it.itemId }
             LoadResult.Loaded(entities.map { entity ->
-                entity.toDomain().let { placement ->
-                    placement.copy(position = normalized.first { it.id == placement.itemId }.position.toDomain())
+                entity.toDomain(bindings[entity.itemId]).let { placement ->
+                    placement.withGeometry(
+                        normalized.first { it.id == placement.itemId }.position.toDomain(),
+                        placement.span,
+                    )
                 }
             })
         }
@@ -100,6 +123,33 @@ class RoomHomePlacementRepository(
         span: LogicalSpan,
         columns: Int,
         replacingId: ItemId?,
+    ): MutationResult = placeItem(homeId, itemId, appIdentity, position, span, columns, replacingId) { at, size ->
+        AppPlacement(homeId, itemId, appIdentity, at, size, ItemAvailability.AVAILABLE)
+    }
+
+    override fun placeWidget(
+        homeId: HomeId,
+        itemId: ItemId,
+        provider: AppIdentity,
+        appWidgetId: Int,
+        position: LogicalPosition,
+        span: LogicalSpan,
+        columns: Int,
+    ): MutationResult = placeItem(homeId, itemId, provider, position, span, columns, null) { at, size ->
+        WidgetPlacement(homeId, itemId, provider, appWidgetId, at, size, ItemAvailability.AVAILABLE)
+    }
+
+    override fun persistedAppWidgetIds(): Set<Int> = dao.allAppWidgetIds().toSet()
+
+    private fun placeItem(
+        homeId: HomeId,
+        itemId: ItemId,
+        reference: AppIdentity,
+        position: LogicalPosition,
+        span: LogicalSpan,
+        columns: Int,
+        replacingId: ItemId?,
+        build: (LogicalPosition, LogicalSpan) -> HomePlacement,
     ): MutationResult = database.runInTransaction<MutationResult> {
         if (dao.home(homeId.value) == null) return@runInTransaction MutationResult.NotFound
         val existingItem = dao.placement(itemId.value)
@@ -119,26 +169,23 @@ class RoomHomePlacementRepository(
         when (val result = GridRules.place(current, candidate, columns, replacingId)) {
             is GridRules.Result.Rejected -> MutationResult.Rejected(result)
             is GridRules.Result.Accepted -> {
-                ensureAppReference(appIdentity)
+                ensureAppReference(reference)
                 val normalized = normalize(result.placements)
                 val acceptedPlacement = normalized.first { it.id == itemId }
-                val placement = AppPlacement(
-                    homeId,
-                    itemId,
-                    appIdentity,
+                val placement = build(
                     acceptedPlacement.position.toDomain(),
                     acceptedPlacement.span.toDomain(),
-                    ItemAvailability.AVAILABLE,
                 )
+                val identity = placement.referenceIdentity()
                 if (replacingId != null && replacingId != itemId) {
                     dao.replacePlacement(
                         replacingId.value,
                         itemId.value,
                         placement.homeId.value,
                         placement.type.name,
-                        placement.appIdentity.profileId.value,
-                        placement.appIdentity.component.packageName,
-                        placement.appIdentity.component.className,
+                        identity.profileId.value,
+                        identity.component.packageName,
+                        identity.component.className,
                         placement.position.column,
                         placement.position.row,
                         placement.span.columns,
@@ -150,6 +197,7 @@ class RoomHomePlacementRepository(
                 } else {
                     dao.insertPlacement(placement.toEntity())
                 }
+                if (placement is WidgetPlacement) dao.upsertWidgetBinding(placement.toBindingEntity())
                 persistShifted(dao.placementsForHome(homeId.value), normalized)
                 MutationResult.Accepted(GridRules.Result.Accepted(normalized))
             }
@@ -191,6 +239,7 @@ class RoomHomePlacementRepository(
         // repository contract remains correct with foreign-key enforcement
         // disabled in test/in-memory configurations.
         dao.deleteShortcutBinding(itemId.value)
+        dao.deleteWidgetBinding(itemId.value)
         val remaining = dao.placementsForHome(homeId.value)
         persistShifted(remaining, normalize(remaining.map { it.toGridPlacement() }))
         RemoveResult.Removed
@@ -237,31 +286,36 @@ class RoomHomePlacementRepository(
     }
 
     private fun homeGrid(homeId: HomeId): List<GridPlacement<ItemId>> =
-        dao.placementsForHome(homeId.value).map { entity ->
-            entity.toDomain().let { GridPlacement(it.itemId, it.position.toGrid(), it.span.toGrid()) }
-        }
+        dao.placementsForHome(homeId.value).map { it.toGridPlacement() }
 
     private fun <T : Any> normalize(placements: List<GridPlacement<T>>): List<GridPlacement<T>> =
         GridRowGapNormalizer.normalize(placements)
 
     /** Updates only rows changed by normalization; Room transaction rollback covers the trigger too. */
     private fun persistShifted(
-        entities: List<me.foxtails.lakehead.data.database.PlacementEntity>,
+        entities: List<PlacementEntity>,
         normalized: List<GridPlacement<ItemId>>,
     ) {
         val byId = normalized.associateBy { it.id }
         entities.forEach { entity ->
             val placement = byId[ItemId(entity.itemId)] ?: return@forEach
-            val current = entity.toDomain()
             val position = placement.position.toDomain()
             val span = placement.span.toDomain()
-            if (position != current.position || span != current.span) {
-                dao.updatePlacement(current.copy(position = position, span = span).toEntity())
+            if (position != LogicalPosition(entity.column, entity.row) ||
+                span != LogicalSpan(entity.columnSpan, entity.rowSpan)
+            ) {
+                dao.updatePlacement(
+                    PlacementEntity(
+                        entity.itemId, entity.homeId, entity.itemType, entity.profileId,
+                        entity.packageName, entity.className, position.column, position.row,
+                        span.columns, span.rows, entity.availability,
+                    ),
+                )
             }
         }
     }
 
-    private fun me.foxtails.lakehead.data.database.PlacementEntity.toGridPlacement() =
+    private fun PlacementEntity.toGridPlacement() =
         GridPlacement(ItemId(itemId), GridPosition(column, row), GridSpan(columnSpan, rowSpan))
 
     private fun ensureAppReference(identity: AppIdentity) {

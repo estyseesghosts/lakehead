@@ -73,4 +73,22 @@ public interface PlacementDao {
 
     @Query("SELECT COUNT(*) FROM shortcut_bindings")
     int shortcutBindingCount();
+
+    // --- Widget binding operations ---
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    void upsertWidgetBinding(WidgetBindingEntity binding);
+
+    @Query("SELECT * FROM widget_bindings WHERE itemId = :itemId")
+    WidgetBindingEntity widgetBinding(String itemId);
+
+    @Query("SELECT wb.* FROM widget_bindings wb INNER JOIN placements p ON p.itemId = wb.itemId "
+            + "WHERE p.homeId = :homeId")
+    List<WidgetBindingEntity> widgetBindingsForHome(String homeId);
+
+    @Query("SELECT appWidgetId FROM widget_bindings")
+    List<Integer> allAppWidgetIds();
+
+    @Query("DELETE FROM widget_bindings WHERE itemId = :itemId")
+    int deleteWidgetBinding(String itemId);
 }

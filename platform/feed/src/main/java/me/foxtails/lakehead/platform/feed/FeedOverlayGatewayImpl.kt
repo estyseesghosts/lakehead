@@ -6,12 +6,15 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.ServiceConnection
+import android.content.res.Configuration
 import android.os.Build
 import android.os.IBinder
 import android.app.Activity
 import android.net.Uri
 import android.os.Process
 import android.view.WindowManager
+import amirz.aidlbridge.IBridge
+import amirz.aidlbridge.IBridgeCallback
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -40,6 +43,12 @@ internal interface FeedServiceConnector {
 
     /** Releases [connection]; a no-op when it is not bound. Never throws. */
     fun unbind(connection: ServiceConnection)
+
+    /**
+     * The target's advertised `service.api.version` metadata (1 when absent or unreadable);
+     * selects `windowAttached` vs `windowAttached2`. Never throws.
+     */
+    fun overlayApiVersion(target: FeedProviderTarget): Int = 1
 }
 
 /**
@@ -146,6 +155,9 @@ class FeedOverlayGatewayImpl internal constructor(
     private val _bindingEvidence = MutableStateFlow(FeedBindingEvidence())
     override val bindingEvidence: StateFlow<FeedBindingEvidence> = _bindingEvidence
 
+    private val _protocolTrace = MutableStateFlow(FeedProtocolTrace())
+    override val protocolTrace: StateFlow<FeedProtocolTrace> = _protocolTrace
+
     @Volatile
     private var scope: CoroutineScope? = null
     private var resolveJob: Job? = null
@@ -200,6 +212,10 @@ class FeedOverlayGatewayImpl internal constructor(
      */
     @Volatile
     private var windowParams: WindowManager.LayoutParams? = null
+
+    /** Host configuration copy sent with the cached [windowParams] (`windowAttached2`). */
+    @Volatile
+    private var windowConfiguration: Configuration? = null
 
     /** Flags for the cached [windowParams] registration. */
     @Volatile
@@ -474,6 +490,11 @@ class FeedOverlayGatewayImpl internal constructor(
         } catch (_: Throwable) {
             null
         } ?: return
+        windowConfiguration = try {
+            Configuration(activity.resources.configuration)
+        } catch (_: Throwable) {
+            null
+        }
         notifyWindowAttachedParams(params, AidlFeedBridge.WINDOW_ATTACH_FLAGS)
     }
 
@@ -1285,6 +1306,7 @@ class FeedOverlayGatewayImpl internal constructor(
         val params = windowParams ?: return
         val bridge = overlayBridge as? FeedOverlayWindowConnection ?: return
         try {
+            bridge.windowConfiguration(windowConfiguration)
             bridge.windowAttached(params, windowFlags)
         } catch (_: Exception) {
             // Transport loss is reported through onConnectionLost, never as an exception.
@@ -1378,6 +1400,7 @@ class FeedOverlayGatewayImpl internal constructor(
         boundConnection = null
         if (hadBind || bridge != null) {
             bindEpoch += 1
+            _protocolTrace.tryEmit(FeedProtocolTrace())
         }
         // Teardown already handled any deferred loss for the torn-down generation; drop
         // stale marks so a delayed contended writer cannot resurrect them. Marks for the
@@ -1780,6 +1803,51 @@ class FeedOverlayGatewayImpl internal constructor(
                 onUnexpectedComponent(epoch)
                 return
             }
+            if (isForwardingBridge(service)) {
+                // A forwarder (aidlbridge) answers the bind with its own IBridge and hands
+                // out the real overlay binder only through bindService's callback.
+                requestForwardedOverlay(service, servicePackage, serviceClass)
+                return
+            }
+            installOverlay(service, servicePackage, serviceClass)
+        }
+
+        private fun isForwardingBridge(service: IBinder): Boolean = try {
+            service.interfaceDescriptor == IBridge.DESCRIPTOR
+        } catch (_: Exception) {
+            false
+        }
+
+        private fun requestForwardedOverlay(
+            service: IBinder,
+            servicePackage: String?,
+            serviceClass: String?,
+        ) {
+            val callback = object : IBridgeCallback.Stub() {
+                override fun onServiceConnected(name: ComponentName?, overlay: IBinder?) {
+                    if (overlay == null) {
+                        onNullBindingReceived(epoch)
+                    } else {
+                        installOverlay(overlay, servicePackage, serviceClass)
+                    }
+                }
+
+                override fun onServiceDisconnected(name: ComponentName?) {
+                    onServiceDisconnectedForEpoch(epoch)
+                }
+            }
+            try {
+                IBridge.Stub.asInterface(service).bindService(callback, Context.BIND_AUTO_CREATE)
+            } catch (_: Exception) {
+                onBindingDiedForEpoch(epoch)
+            }
+        }
+
+        private fun installOverlay(
+            service: IBinder,
+            servicePackage: String?,
+            serviceClass: String?,
+        ) {
             // Built outside the gateway lock: construction links the death recipient, and
             // an already-dead binder reports loss synchronously during construction — with
             // a free lock that loss path clears the stale bind first, so the install below
@@ -1794,6 +1862,12 @@ class FeedOverlayGatewayImpl internal constructor(
                     onProtocolFailure = { status, cause ->
                         onProtocolFailureForEpoch(epoch, status, cause)
                     },
+                    onTraceChanged = { trace ->
+                        // Epoch-fenced like every other callback: a stale generation's
+                        // late transition never overwrites the current trace.
+                        if (epoch == bindEpoch) _protocolTrace.tryEmit(trace)
+                    },
+                    apiVersion = connector.overlayApiVersion(target),
                 )
             } catch (_: Exception) {
                 onBindingDiedForEpoch(epoch)
@@ -1832,13 +1906,45 @@ class FeedOverlayGatewayImpl internal constructor(
  */
 private class AndroidFeedConnector(private val context: Context) : FeedServiceConnector {
 
+    private companion object {
+        const val SERVICE_API_VERSION_KEY = "service.api.version"
+    }
+
     override fun bind(connection: ServiceConnection, target: FeedProviderTarget): Boolean {
         val component = ComponentName(
             target.component.packageName,
             target.component.className,
         )
-        val intent = Intent(FEED_OVERLAY_ACTION).setComponent(component)
+        val intent = Intent(FEED_OVERLAY_ACTION)
+            .setComponent(component)
+            .setData(Uri.parse(FeedHostUri.build(context.packageName, Process.myUid())))
         return context.bindService(intent, connection, Context.BIND_AUTO_CREATE)
+    }
+
+    override fun overlayApiVersion(target: FeedProviderTarget): Int {
+        return try {
+            val component = ComponentName(
+                target.component.packageName,
+                target.component.className,
+            )
+            val info = if (Build.VERSION.SDK_INT >= 33) {
+                context.packageManager.getServiceInfo(
+                    component,
+                    android.content.pm.PackageManager.ComponentInfoFlags.of(
+                        android.content.pm.PackageManager.GET_META_DATA.toLong(),
+                    ),
+                )
+            } else {
+                @Suppress("DEPRECATION")
+                context.packageManager.getServiceInfo(
+                    component,
+                    android.content.pm.PackageManager.GET_META_DATA,
+                )
+            }
+            info.metaData?.getInt(SERVICE_API_VERSION_KEY, 1) ?: 1
+        } catch (_: Exception) {
+            1
+        }
     }
 
     override fun unbind(connection: ServiceConnection) {

@@ -57,6 +57,16 @@ interface FeedOverlayGateway {
     val bindingEvidence: StateFlow<FeedBindingEvidence>
 
     /**
+     * Protocol-stage trace of the live connection (window signal, session, content,
+     * first failure), published as the bridge observes each transition.
+     *
+     * Resets to an empty [FeedProtocolTrace] when the connection is torn down, and a
+     * stale generation's late transition never overwrites the current value. Read-only
+     * diagnostics; unobserved stages stay `false`, never invented.
+     */
+    val protocolTrace: StateFlow<FeedProtocolTrace>
+
+    /**
      * Begins off-main resolution and package-change invalidation in [scope].
      *
      * Idempotent: a second call while started keeps the existing stream and registers nothing

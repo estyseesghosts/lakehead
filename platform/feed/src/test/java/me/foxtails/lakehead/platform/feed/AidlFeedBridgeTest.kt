@@ -561,6 +561,33 @@ class AidlFeedBridgeTest {
     }
 
     @Test
+    fun attachFlagsEnableTheOverlayBit() {
+        assertEquals(1, AidlFeedBridge.WINDOW_ATTACH_FLAGS and 1)
+    }
+
+    @Test
+    fun apiVersionBelowThreeUsesLegacyWindowAttached() {
+        val harness = Harness(apiVersion = 2)
+
+        harness.bridge.windowAttached(WindowManager.LayoutParams(), AidlFeedBridge.WINDOW_ATTACH_FLAGS)
+
+        assertEquals(listOf("attached"), harness.overlay.events.toList())
+        assertTrue(harness.overlay.attaches2.isEmpty())
+    }
+
+    @Test
+    fun apiVersionThreeOrAboveUsesWindowAttached2WithCallback() {
+        val harness = Harness(apiVersion = 7)
+
+        harness.bridge.windowAttached(WindowManager.LayoutParams(), AidlFeedBridge.WINDOW_ATTACH_FLAGS)
+
+        assertEquals(listOf("attached2"), harness.overlay.events.toList())
+        assertEquals(listOf(true), harness.overlay.attaches2.toList())
+        assertTrue(harness.overlay.attaches.isEmpty())
+        assertTrue(harness.bridge.protocolTrace().windowSignalSent)
+    }
+
+    @Test
     fun windowDetachUnregistersWithChangingFlag() {
         val harness = Harness()
         harness.bridge.windowAttached(WindowManager.LayoutParams(), 0)
@@ -969,11 +996,52 @@ class AidlFeedBridgeTest {
         assertTrue(harness.bridge.protocolTrace().firstFailure == null)
     }
 
+    @Test
+    fun traceListenerSeesEachStageTransitionOnceInOrder() {
+        val overlay = FakeOverlay()
+        val service = FakeService(overlay)
+        val traces = Collections.synchronizedList(mutableListOf<FeedProtocolTrace>())
+        val bridge = AidlFeedBridge(
+            service.binder,
+            onConnectionLost = {},
+            onTraceChanged = { traces += it },
+        )
+
+        bridge.windowAttached(WindowManager.LayoutParams(), 0)
+        bridge.callback.overlayScrollChanged(0.5f)
+        bridge.callback.overlayStatusChanged(1)
+
+        assertEquals(
+            listOf(
+                FeedProtocolTrace(windowSignalSent = true),
+                FeedProtocolTrace(windowSignalSent = true, sessionConfirmed = true),
+            ),
+            traces.toList(),
+        )
+        assertEquals(traces.last(), bridge.protocolTrace())
+    }
+
+    @Test
+    fun throwingTraceListenerNeverBreaksTheBridge() {
+        val overlay = FakeOverlay()
+        val service = FakeService(overlay)
+        val bridge = AidlFeedBridge(
+            service.binder,
+            onConnectionLost = {},
+            onTraceChanged = { throw IllegalStateException("listener") },
+        )
+
+        bridge.callback.overlayScrollChanged(0.5f)
+
+        assertTrue(bridge.protocolTrace().sessionConfirmed)
+    }
+
     private class Harness(
         linkThrows: Exception? = null,
         failQuery: Boolean = false,
         listenerThrows: Exception? = null,
         beforeLoss: (() -> Unit)? = null,
+        apiVersion: Int = 1,
     ) {
         val overlay = FakeOverlay()
         val service = FakeService(overlay, linkThrows = linkThrows, failQuery = failQuery)
@@ -991,6 +1059,7 @@ class AidlFeedBridgeTest {
             onProtocolFailure = { status, cause ->
                 protocolFailures += status to cause
             },
+            apiVersion = apiVersion,
         )
     }
 
@@ -1002,6 +1071,8 @@ class AidlFeedBridgeTest {
         val events = Collections.synchronizedList(mutableListOf<String>())
         /** Window registrations in call order. */
         val attaches = Collections.synchronizedList(mutableListOf<AttachRecord>())
+        /** `windowAttached2` calls in order; the value is whether a callback was passed. */
+        val attaches2 = Collections.synchronizedList(mutableListOf<Boolean>())
         /** `isChangingConfigurations` values of windowDetached calls in order. */
         val detaches = Collections.synchronizedList(mutableListOf<Boolean>())
 
@@ -1112,7 +1183,11 @@ class AidlFeedBridgeTest {
             return hasContent
         }
 
-        override fun windowAttached2(bundle: Bundle?, cb: ILauncherOverlayCallback?) = Unit
+        override fun windowAttached2(bundle: Bundle?, cb: ILauncherOverlayCallback?) {
+            failWith?.let { throw it }
+            attaches2.add(cb != null)
+            events.add("attached2")
+        }
 
         override fun unusedMethod() = Unit
 

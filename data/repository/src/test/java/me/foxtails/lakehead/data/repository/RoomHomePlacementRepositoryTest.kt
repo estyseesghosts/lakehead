@@ -16,6 +16,7 @@ import me.foxtails.lakehead.core.model.LogicalSpan
 import me.foxtails.lakehead.core.model.ProfileId
 import me.foxtails.lakehead.data.database.HomeEntity
 import me.foxtails.lakehead.data.database.PlacementDatabase
+import me.foxtails.lakehead.data.database.referenceIdentity
 import me.foxtails.lakehead.data.database.toEntity
 import me.foxtails.lakehead.data.database.toDomain
 import org.junit.After
@@ -75,7 +76,7 @@ class RoomHomePlacementRepositoryTest {
         val result = repository.place(home, candidateId, identity, LogicalPosition(2, 0), LogicalSpan(1, 1), 6)
         assertTrue(result is MutationResult.Accepted)
         val persisted = dao.placement(candidateId.value)!!.toDomain()
-        assertEquals(identity, persisted.appIdentity)
+        assertEquals(identity, persisted.referenceIdentity())
         assertEquals(LogicalPosition(2, 0), persisted.position)
         assertEquals(ItemAvailability.AVAILABLE, persisted.availability)
     }
@@ -272,7 +273,7 @@ class RoomHomePlacementRepositoryTest {
         val loaded = (repository.load(home, 6) as LoadResult.Loaded).placements
         assertEquals(listOf(before.itemId, replacementId, after.itemId), loaded.map { it.itemId })
         assertEquals(null, dao.placement(replaced.itemId.value))
-        assertEquals(identity, loaded[1].appIdentity)
+        assertEquals(identity, loaded[1].referenceIdentity())
 
         val fresh = placement(home.value, "rollback-target", 3)
         seed(fresh)
@@ -331,8 +332,8 @@ class RoomHomePlacementRepositoryTest {
         val same = identity("profile", "org.same")
         assertTrue(repository.place(one, ItemId("one-item"), same, LogicalPosition(0, 0), LogicalSpan(1, 1), 6) is MutationResult.Accepted)
         assertTrue(repository.place(two, ItemId("two-item"), same, LogicalPosition(0, 0), LogicalSpan(1, 1), 6) is MutationResult.Accepted)
-        assertEquals(same, (repository.load(one, 6) as LoadResult.Loaded).placements.single().appIdentity)
-        assertEquals(same, (repository.load(two, 6) as LoadResult.Loaded).placements.single().appIdentity)
+        assertEquals(same, (repository.load(one, 6) as LoadResult.Loaded).placements.single().referenceIdentity())
+        assertEquals(same, (repository.load(two, 6) as LoadResult.Loaded).placements.single().referenceIdentity())
         val before = snapshot()
         assertEquals(MutationResult.WrongHome, repository.place(two, ItemId("one-item"), identity(), LogicalPosition(1, 0), LogicalSpan(1, 1), 6))
         assertEquals(before, snapshot())

@@ -118,29 +118,20 @@ class HomeHoldTest {
             cancelFraction = 0.08f,
         )
         assertEquals(GestureArbitration.Settle.COMPLETE, settle)
-        assertFalse(gridHoldSignal(tilesEmpty = false, editState = HomeEditState.Normal))
-    }
-
-    // P0: empty grid never holds, even with stale transient inputs that would
-    // otherwise hold. Covers the populated→empty transition where the grid
-    // early-returns before transient state exists and must emit false.
-    @Test
-    fun gridHoldSignal_emptyWithDrag_holdsFalse() {
-        assertFalse(gridHoldSignal(tilesEmpty = true, editState = moving()))
-        assertFalse(gridHoldSignal(tilesEmpty = true, editState = resizing()))
+        assertFalse(isHomeHold(HomeEditState.Normal))
     }
 
     @Test
-    fun gridHoldSignal_emptyWithEditing_holdsFalse() {
-        assertFalse(gridHoldSignal(tilesEmpty = true, editState = selected))
+    fun isHomeHold_emptyBackgroundEdit_holds() {
+        assertTrue(isHomeHold(HomeEditState.Normal.enterOnBackgroundLongPress()))
     }
 
     @Test
-    fun gridHoldSignal_nonEmptyDelegatesToPredicate() {
-        assertFalse(gridHoldSignal(tilesEmpty = false, editState = HomeEditState.Normal))
-        assertTrue(gridHoldSignal(tilesEmpty = false, editState = selected))
-        assertTrue(gridHoldSignal(tilesEmpty = false, editState = moving()))
-        assertTrue(gridHoldSignal(tilesEmpty = false, editState = resizing()))
+    fun isHomeHold_delegatesToEditMode() {
+        assertFalse(isHomeHold(HomeEditState.Normal))
+        assertTrue(isHomeHold(selected))
+        assertTrue(isHomeHold(moving()))
+        assertTrue(isHomeHold(resizing()))
     }
 
     // P0: Loading/NotFound never compose the grid, so the canvas must reset

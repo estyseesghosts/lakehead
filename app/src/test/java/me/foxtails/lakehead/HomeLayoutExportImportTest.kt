@@ -85,6 +85,18 @@ class FakeHomePlacementRepository(
         )
     }
 
+    override fun placeWidget(
+        homeId: me.foxtails.lakehead.core.model.HomeId,
+        itemId: me.foxtails.lakehead.core.model.ItemId,
+        provider: me.foxtails.lakehead.core.model.AppIdentity,
+        appWidgetId: Int,
+        position: me.foxtails.lakehead.core.model.LogicalPosition,
+        span: me.foxtails.lakehead.core.model.LogicalSpan,
+        columns: Int,
+    ): MutationResult = error("unused")
+
+    override fun persistedAppWidgetIds(): Set<Int> = emptySet()
+
     override fun move(homeId: HomeId, itemId: ItemId, position: LogicalPosition, columns: Int): MutationResult =
         MutationResult.NotFound
 

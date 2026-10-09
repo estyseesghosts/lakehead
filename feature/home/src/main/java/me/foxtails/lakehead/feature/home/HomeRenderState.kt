@@ -104,7 +104,11 @@ data class HomeRenderTile(
     val label: String?,
     val icon: HomeIconBytes?,
     val isLaunchable: Boolean,
+    /** Non-null for a hosted widget tile; [appIdentity] is then the widget provider. */
+    val appWidgetId: Int? = null,
 ) {
+    val isWidget: Boolean get() = appWidgetId != null
+
     init {
         require(isLaunchable == (availability == ItemAvailability.AVAILABLE && label != null)) {
             "isLaunchable must be true only when AVAILABLE with metadata label present"

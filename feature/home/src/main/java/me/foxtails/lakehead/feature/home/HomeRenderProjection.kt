@@ -9,8 +9,10 @@ import me.foxtails.lakehead.core.grid.GridVerticalLayout
 import me.foxtails.lakehead.core.grid.GridViewportAdaptation
 import me.foxtails.lakehead.core.model.AppIdentity
 import me.foxtails.lakehead.core.model.AppPlacement
+import me.foxtails.lakehead.core.model.HomePlacement
 import me.foxtails.lakehead.core.model.HomeId
 import me.foxtails.lakehead.core.model.ItemAvailability
+import me.foxtails.lakehead.core.model.WidgetPlacement
 
 /**
  * Pure projection from persisted placements plus caller-resolved metadata to render state.
@@ -20,6 +22,9 @@ import me.foxtails.lakehead.core.model.ItemAvailability
  * [GridViewportAdaptation.columnsFor] count unchanged; five is only the normal-phone reference
  * result, never a minimum or clamp.
  */
+/** Accessible label of a widget tile; the provider label is not persisted. */
+internal const val WIDGET_LABEL: String = "Widget"
+
 object HomeRenderProjection {
     /**
      * Delegates directly to [GridViewportAdaptation.columnsFor] and returns its positive count
@@ -39,7 +44,7 @@ object HomeRenderProjection {
      * [GridVerticalLayout.measure]. No second extent policy is computed here.
      */
     fun measureExtent(
-        placements: List<AppPlacement>,
+        placements: List<HomePlacement>,
         viewportRows: Long,
         workingMarginRows: Long,
     ): GridVerticalExtent {
@@ -73,10 +78,24 @@ object HomeRenderProjection {
      * joined label-only metadata remain launchable; an icon is optional.
      */
     fun resolveTiles(
-        placements: List<AppPlacement>,
+        placements: List<HomePlacement>,
         metadataByIdentity: Map<AppIdentity, HomeAppMetadata>,
     ): List<HomeRenderTile> =
         placements.map { placement ->
+            if (placement is WidgetPlacement) {
+                return@map HomeRenderTile(
+                    itemId = placement.itemId,
+                    appIdentity = placement.provider,
+                    position = placement.position,
+                    span = placement.span,
+                    availability = placement.availability,
+                    label = WIDGET_LABEL,
+                    icon = null,
+                    isLaunchable = placement.availability == ItemAvailability.AVAILABLE,
+                    appWidgetId = placement.appWidgetId,
+                )
+            }
+            placement as AppPlacement
             val metadata = metadataByIdentity[placement.appIdentity]
             val launchable =
                 placement.availability == ItemAvailability.AVAILABLE && metadata != null
@@ -99,7 +118,7 @@ object HomeRenderProjection {
      */
     fun project(
         requestedHomeId: HomeId,
-        placements: List<AppPlacement>,
+        placements: List<HomePlacement>,
         metadataByIdentity: Map<AppIdentity, HomeAppMetadata>,
         inputs: HomeViewportInputs,
     ): HomeRenderState.Loaded {
