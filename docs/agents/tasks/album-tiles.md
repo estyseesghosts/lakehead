@@ -1,6 +1,8 @@
 # Album tiles — photo slideshow on gallery app tiles
 
-**Status:** In progress.
+**Status:** Complete.
+
+> Verified 2026-10-09 on R5CN70E2SGV (API 33): resize→offer→accept→grant→pick, photo render, tap advance (+launch), Change/Remove from the edit menu, denied re-request from the edit menu, package add/remove without restart. 15-minute rotation timing is unit-proven (fake clock); partial access (API 34+) deferred to the user's PLG110 pass. Handoffs: [slices 0–6](../../../state-logs/handoffs/2026-10-09-album-tiles.md), [slice 7](../../../state-logs/handoffs/2026-10-09-album-tiles-slice7.md), [slice 8](../../../state-logs/handoffs/2026-10-09-album-tiles-slice8.md).
 
 > **Roadmap note:** Media access is not part of the `AGENTS.md` §2 first-milestone order (0B → 1A → 1B → 1C → 1D). Like widgets and tile notifications, this is done ahead of the documented roadmap by explicit user decision (2026-10-09). It does not change that order. The ordering and ownership below are authoritative.
 
