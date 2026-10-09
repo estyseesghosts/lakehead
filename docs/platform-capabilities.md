@@ -8,6 +8,7 @@
 | Launch and shortcuts | `LauncherApps.startMainActivity`, launcher shortcut host access, shortcut query/launch | `:platform:launcherapps` / planned `:platform:shortcuts` |
 | Widgets | `AppWidgetHost`, widget ID binding/configuration, hosted `AppWidgetHostView` | `:platform:widgets` (being introduced per `docs/agents/tasks/widgets.md`) |
 | Notifications | User-enabled `NotificationListenerService`; capture normalized arrivals/removals, not an imagined complete history | planned `:platform:notifications` |
+| Photo albums | `MediaStore.Images` bucket queries; `READ_MEDIA_IMAGES` (API 33+), `READ_EXTERNAL_STORAGE` below, `READ_MEDIA_VISUAL_USER_SELECTED` for Android 14+ partial access; requested only when the user accepts the album prompt on a gallery tile (`docs/agents/tasks/album-tiles.md`) | `:platform:media` |
 | Usage history | Optional user-granted usage access for `UsageStatsManager`; own launch history works without it | planned `:platform:usage` |
 | Contacts | Runtime `READ_CONTACTS` only when contact search enabled | planned `:platform:contacts` |
 | Documents | `ACTION_OPEN_DOCUMENT`/Storage Access Framework user-selected grants; no unrestricted filesystem scan | planned `:platform:documents` |
