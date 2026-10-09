@@ -63,6 +63,7 @@ const val SETTINGS_MENU_EXPORT_ROW_TAG: String = "home-layout-export-row"
 
 /** Test tag for the import layout row. */
 const val SETTINGS_MENU_IMPORT_ROW_TAG: String = "home-layout-import-row"
+const val SETTINGS_MENU_NOTIFICATION_ACCESS_ROW_TAG: String = "notification-access-row"
 
 /**
  * Test tag for one feed provider row.
@@ -146,6 +147,7 @@ internal fun SettingsMenuOverlay(
     diagnostic: FeedDiagnostic? = null,
     onExportHomeLayout: () -> Unit = {},
     onImportHomeLayout: () -> Unit = {},
+    onOpenNotificationAccess: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     if (!isOpen) return
@@ -166,7 +168,7 @@ internal fun SettingsMenuOverlay(
         val menuWidthPx = (viewportWidthPx - horizontalMarginPx)
             .coerceAtLeast(1)
             .coerceAtMost(viewportWidthPx)
-        val desiredHeightPx = with(density) { 280.dp.roundToPx() }.coerceAtLeast(1)
+        val desiredHeightPx = with(density) { 336.dp.roundToPx() }.coerceAtLeast(1)
         val maxMenuHeightPx = (viewportHeightPx - verticalMarginPx)
             .coerceAtLeast(1)
             .coerceAtMost(viewportHeightPx)
@@ -304,6 +306,24 @@ internal fun SettingsMenuOverlay(
                                 ) {
                                     BasicText(
                                         text = "Import layout\u2026",
+                                        style = LocalTextStyle.current.merge(
+                                            color = MaterialTheme.colorScheme.onSurface,
+                                        ),
+                                    )
+                                }
+                                Box(
+                                    contentAlignment = Alignment.CenterStart,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .sizeIn(minWidth = 48.dp, minHeight = 48.dp)
+                                        .clickable(
+                                            role = Role.Button,
+                                            onClick = onOpenNotificationAccess,
+                                        )
+                                        .testTag(SETTINGS_MENU_NOTIFICATION_ACCESS_ROW_TAG),
+                                ) {
+                                    BasicText(
+                                        text = "Notification access…",
                                         style = LocalTextStyle.current.merge(
                                             color = MaterialTheme.colorScheme.onSurface,
                                         ),

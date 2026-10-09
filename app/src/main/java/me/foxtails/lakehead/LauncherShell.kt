@@ -35,6 +35,7 @@ import me.foxtails.lakehead.core.designsystem.GestureArbitration.ArbWinner
 import me.foxtails.lakehead.core.designsystem.GestureArbitration.LockedAxis
 import me.foxtails.lakehead.core.designsystem.ShortcutSurfaceEntry
 import me.foxtails.lakehead.core.designsystem.PinnedTileShortcut
+import me.foxtails.lakehead.core.designsystem.TileNotifications
 import me.foxtails.lakehead.core.model.AppIdentity
 import me.foxtails.lakehead.core.model.ItemId
 import me.foxtails.lakehead.core.model.LogicalPosition
@@ -159,6 +160,7 @@ internal fun LauncherShell(
     onSurfaceExecute: (ItemId, String) -> Unit = { _, _ -> },
     onSurfaceTogglePin: (ItemId, String) -> Unit = { _, _ -> },
     pinnedByTile: Map<ItemId, List<PinnedTileShortcut>> = emptyMap(),
+    notificationsByTile: Map<ItemId, TileNotifications> = emptyMap(),
     onPinnedShortcutClick: (ItemId, String) -> Unit = { _, _ -> },
     onHeaderTap: (String) -> Unit = {},
     // S1 settings menu: reports the feed provider picked in the transient
@@ -170,6 +172,8 @@ internal fun LauncherShell(
     // dismissing the menu; SAF launchers and persistence stay with the caller.
     onExportHomeLayout: () -> Unit = {},
     onImportHomeLayout: () -> Unit = {},
+    // Opens the system notification-listener access screen; the grant happens there.
+    onOpenNotificationAccess: () -> Unit = {},
     // F3 feed driving: [onFeedProgress] receives the left-most page scroll
     // progress (1 when the feed page is fully shown, 0 on home and beyond) on
     // every pager offset change; [onFeedVisible] receives true only while
@@ -422,6 +426,7 @@ internal fun LauncherShell(
                     onSurfaceExecute = onSurfaceExecute,
                     onSurfaceTogglePin = onSurfaceTogglePin,
                     pinnedByTile = pinnedByTile,
+                    notificationsByTile = notificationsByTile,
                     onPinnedShortcutClick = onPinnedShortcutClick,
                     onTransientHoldChange = { homeHold = it },
                     onPagerHoldChange = { pagerHold = it },
@@ -464,6 +469,7 @@ internal fun LauncherShell(
             },
             onExportHomeLayout = onExportHomeLayout,
             onImportHomeLayout = onImportHomeLayout,
+            onOpenNotificationAccess = onOpenNotificationAccess,
         )
     }
 }

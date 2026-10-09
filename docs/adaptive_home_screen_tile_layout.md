@@ -200,7 +200,9 @@ Notifications must adapt to the space left after the main icon and pinned shortc
 
 For a small square tile, show a short message above the icon row. For a taller tile with a bottom icon row, use the upper space for a longer preview. For a wide tile, use the available horizontal space to display more text. For a tall tile with a vertical shortcut column, put notifications beside that column.
 
-When several notifications are available, display them in a vertically scrollable area. The notification area must scroll independently of the tile and must not move the app icon or pinned shortcuts.
+When several notifications are available, display as many newest-first rows as fit. The notification area does not scroll in the current version, so it cannot fight Home scrolling and dragging; it must not move pinned shortcuts.
+
+> **Amended 2026-10-09** (`docs/agents/tasks/tile-notifications.md`): single-column and single-row tiles (`columns == 1 || rows == 1`), including 1×1, show an unread **count** immediately left of the app icon, sharing the icon's colour and visible size, instead of text previews. On large tiles with no pinned shortcuts the icon drops to its compact bottom-right anchor while notifications exist. The "never shrink the icon" rule below applies to large tiles; count-bearing column tiles may shrink the icon to fit the count.
 
 Notification previews should have clear separation between messages. Show identifying information and as much message text as the available area permits.
 

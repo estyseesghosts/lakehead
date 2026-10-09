@@ -40,6 +40,7 @@ import me.foxtails.lakehead.platform.launcherapps.LauncherAppsIconActivityLookup
 import me.foxtails.lakehead.platform.launcherapps.LauncherAppsIconSnapshotRefresher
 import me.foxtails.lakehead.platform.launcherapps.LauncherAppsActivityLauncher
 import me.foxtails.lakehead.platform.launcherapps.LauncherAppsAppCatalogue
+import me.foxtails.lakehead.platform.notifications.NotificationAccess
 import me.foxtails.lakehead.platform.shortcuts.LauncherAppsShortcutGateway
 import me.foxtails.lakehead.platform.shortcuts.ShortcutGateway
 import me.foxtails.lakehead.platform.widgets.AppWidgetHosting
@@ -323,8 +324,13 @@ class MainActivity : ComponentActivity() {
                     (homeState as? HomeRenderState.Loaded)?.tiles.orEmpty(),
                 )
             }
+            val notificationsByTile = rememberNotificationsByTile(homeState)
             LauncherShell(
                 homeState = homeState,
+                notificationsByTile = notificationsByTile,
+                onOpenNotificationAccess = {
+                    startActivity(NotificationAccess.settingsIntent())
+                },
                 homeIcons = homeIcons,
                 allAppsState = allAppsState,
                 allAppsIcons = allAppsIconsMap,

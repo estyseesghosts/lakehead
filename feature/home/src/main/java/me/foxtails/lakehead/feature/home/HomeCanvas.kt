@@ -14,6 +14,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import me.foxtails.lakehead.core.designsystem.ShortcutSurfaceEntry
 import me.foxtails.lakehead.core.designsystem.PinnedTileShortcut
+import me.foxtails.lakehead.core.designsystem.TileNotifications
 import me.foxtails.lakehead.core.model.AppIdentity
 import me.foxtails.lakehead.core.model.ItemId
 import me.foxtails.lakehead.core.model.LogicalPosition
@@ -95,6 +96,7 @@ fun HomeCanvas(
     // C1 tile strip: joined pinned shortcuts per tile, forwarded to
     // [HomeCanvasGrid] (see its docs).  Defaults keep the canvas pin-free.
     pinnedByTile: Map<ItemId, List<PinnedTileShortcut>> = emptyMap(),
+    notificationsByTile: Map<ItemId, TileNotifications> = emptyMap(),
     onPinnedShortcutClick: (ItemId, String) -> Unit = { _, _ -> },
     onTransientHoldChange: (Boolean) -> Unit = {},
     onPagerHoldChange: (Boolean) -> Unit = {},
@@ -172,6 +174,7 @@ fun HomeCanvas(
                     onSurfaceExecute = onSurfaceExecute,
                     onSurfaceTogglePin = onSurfaceTogglePin,
                     pinnedByTile = pinnedByTile,
+                    notificationsByTile = notificationsByTile,
                     onPinnedShortcutClick = onPinnedShortcutClick,
                     onTransientHoldChange = onTransientHoldChange,
                     onPagerHoldChange = onPagerHoldChange,

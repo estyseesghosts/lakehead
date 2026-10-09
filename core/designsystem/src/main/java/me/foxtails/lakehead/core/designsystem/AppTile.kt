@@ -270,7 +270,10 @@ fun AppTile(
     onShortcutClick: (String) -> Unit = {},
     isInteractionEnabled: Boolean = true,
     isEditSelected: Boolean = false,
+    notificationCount: Int = 0,
+    notificationPreviews: List<TileNotificationPreview> = emptyList(),
 ) {
+    require(notificationCount >= 0) { "notificationCount must be >= 0" }
     require(contentDescription == null || contentDescription.isNotBlank()) {
         "contentDescription must be null or non-blank"
     }
@@ -310,6 +313,45 @@ fun AppTile(
                 },
             ),
     ) {
+        // Count-and-icon pair on single-column / single-row tiles: sized from
+        // the measured width so the digits match the icon's visible glyph.
+        val countText = if (isCountTileSpan(state.span)) {
+            notificationCountText(notificationCount, state.span)
+        } else {
+            ""
+        }
+        // Large tiles show the newest-first preview instead; the icon drops to
+        // its compact anchor while previews exist (stable through edit select).
+        val hasPreview = !isCountTileSpan(state.span) && notificationPreviews.isNotEmpty()
+        val countLayout = if (countText.isNotEmpty()) {
+            countedSymbolLayout(
+                availableWidth = maxWidth - dimensions.tilePadding * 2,
+                symbolSize = dimensions.symbolSize,
+                gap = CountedSymbolGap,
+                characterCount = countText.length,
+            )
+        } else {
+            null
+        }
+        val countedIcon: (@Composable (Dp) -> Unit)? = if (countLayout != null) {
+            { _ -> CountedSymbol(countText, countLayout, CountedSymbolGap, icon) }
+        } else {
+            icon
+        }
+        val countedPairWidth = if (countLayout != null) {
+            countLayout.textWidth + CountedSymbolGap + countLayout.iconExtent
+        } else {
+            dimensions.unitIconSize
+        }
+        // A row strip gives the pair extra slots; displaced shortcuts spill into +N.
+        val countExtraSlots = if (countLayout != null && !ShortcutStripGeometry.isNarrow(state.span)) {
+            val pitch = stripPitch(maxWidth, dimensions.gridGap, state.span.columns)
+            kotlin.math.ceil(
+                ((countedPairWidth - dimensions.unitIconSize) / pitch).toDouble(),
+            ).toInt().coerceAtLeast(1)
+        } else {
+            0
+        }
         // Measured-bounds strip fit: what the tile can show without leaving
         // its bounds or overlapping the floating edit controls. Withheld
         // shortcuts spill into hiddenCount (rendered as +N only when the node
@@ -329,6 +371,7 @@ fun AppTile(
                 padding = dimensions.tilePadding,
                 gap = dimensions.gridGap,
                 extent = dimensions.unitIconSize,
+                extraSlots = countExtraSlots,
             )
         } else {
             null
@@ -360,6 +403,8 @@ fun AppTile(
                     this.selected = state.isSelected
                     val markers = listOfNotNull(
                         if (state.isPressed) AppTileDefaults.PressedStateDescription else null,
+                        if (notificationCount > 0) notificationCountDescription(notificationCount) else null,
+                        if (hasPreview) "latest from ${notificationPreviews.first().name}" else null,
                         hiddenOverflowDescription,
                     )
                     if (markers.isNotEmpty()) {
@@ -381,6 +426,26 @@ fun AppTile(
                     },
                 ),
         )
+        if (hasPreview && !isEditSelected) {
+            val region = notificationPreviewRegion(
+                tileWidth = maxWidth,
+                tileHeight = maxHeight,
+                padding = dimensions.tilePadding,
+                gap = dimensions.gridGap,
+                extent = dimensions.unitIconSize,
+            )
+            if (region != null) {
+                NotificationPreviewList(
+                    previews = notificationPreviews,
+                    layout = notificationPreviewLayout(region.height, notificationPreviews.size),
+                    color = tileColors.content,
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .padding(dimensions.tilePadding)
+                        .size(region.width, region.height),
+                )
+            }
+        }
         if (!hasPinned) {
             // Unpinned presentation: no strip is reserved until the first pin.
             if (isFullBleed) {
@@ -389,11 +454,16 @@ fun AppTile(
                     isInteractionEnabled = isInteractionEnabled,
                     onSymbolClick = onSymbolClick,
                     onLongClick = onLongClick,
-                    boxModifier = Modifier.align(Alignment.Center)
-                        .size(dimensions.symbolSize.coerceAtLeast(48.dp))
-                        .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp),
-                ) { icon?.invoke(dimensions.symbolSize) }
-            } else if (isLargeTileSpan(state.span)) {
+                    boxModifier = if (countLayout != null) {
+                        Modifier.align(Alignment.Center)
+                            .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+                    } else {
+                        Modifier.align(Alignment.Center)
+                            .size(dimensions.symbolSize.coerceAtLeast(48.dp))
+                            .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+                    },
+                ) { countedIcon?.invoke(dimensions.symbolSize) }
+            } else if (isLargeTileSpan(state.span) && countLayout == null && !hasPreview) {
                 // Large tile, zero pins: icon scales to min(availW, availH)
                 // after padding, measured live so every resize recomputes it.
                 BoxWithConstraints(
@@ -425,7 +495,7 @@ fun AppTile(
                         onLongClick = onLongClick,
                         boxModifier = Modifier
                             .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp),
-                    ) { icon?.invoke(dimensions.symbolSize) }
+                    ) { countedIcon?.invoke(dimensions.symbolSize) }
                 }
             }
         } else if (ShortcutStripGeometry.isNarrow(state.span)) {
@@ -470,7 +540,8 @@ fun AppTile(
                             isInteractionEnabled = isInteractionEnabled,
                             onSymbolClick = onSymbolClick,
                             onLongClick = onLongClick,
-                            icon = icon,
+                            icon = countedIcon,
+                            width = countedPairWidth,
                         )
                     }
                 }
@@ -517,7 +588,12 @@ fun AppTile(
                             isInteractionEnabled = isInteractionEnabled,
                             onSymbolClick = onSymbolClick,
                             onLongClick = onLongClick,
-                            icon = icon,
+                            icon = countedIcon,
+                            width = if (countLayout != null) {
+                                dimensions.unitIconSize + fit.pitch * countExtraSlots
+                            } else {
+                                dimensions.unitIconSize
+                            },
                         )
                     }
                 }
@@ -525,6 +601,9 @@ fun AppTile(
         }
     }
 }
+
+/** Gap between the count text and the app icon. */
+private val CountedSymbolGap = 4.dp
 
 /**
  * App symbol hit region: a sibling of TileBody (never nested inside it) with
@@ -582,11 +661,12 @@ private fun AppStripGlyph(
     onSymbolClick: () -> Unit,
     onLongClick: (() -> Unit)?,
     icon: (@Composable (symbolExtent: Dp) -> Unit)?,
+    width: Dp,
 ) {
     val dimensions = LocalLauncherDimensions.current
     Box(
         modifier = Modifier
-            .size(dimensions.unitIconSize)
+            .size(width = width, height = dimensions.unitIconSize)
             .testTag(APP_STRIP_GLYPH_TAG)
             .semantics(mergeDescendants = true) {
                 this.contentDescription = resolvedSymbolDescription
@@ -603,7 +683,7 @@ private fun AppStripGlyph(
                     Modifier
                 },
             ),
-        contentAlignment = Alignment.Center,
+        contentAlignment = if (width > dimensions.unitIconSize) Alignment.CenterEnd else Alignment.Center,
     ) {
         icon?.invoke(dimensions.unitIconSize)
     }

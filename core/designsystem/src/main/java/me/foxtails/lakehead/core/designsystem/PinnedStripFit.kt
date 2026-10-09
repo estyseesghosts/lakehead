@@ -102,6 +102,8 @@ fun stripPitch(
  * @param isEditSelected whether remove/resize controls float above the tile.
  * @param padding shared tile padding; [gap] shared grid gap; [extent] shared
  * glyph extent; [editTouch] control touch size whose in-tile half is reserved.
+ * @param extraSlots slots occupied by a notification count beside the app
+ * glyph; the displaced shortcuts spill into the hidden count.
  */
 fun fitPinnedStrip(
     tileWidth: Dp,
@@ -115,7 +117,9 @@ fun fitPinnedStrip(
     gap: Dp = DefaultLauncherDimensions.gridGap,
     extent: Dp = DefaultLauncherDimensions.unitIconSize,
     editTouch: Dp = CORNER_CONTROL_TOUCH_SIZE.dp,
+    extraSlots: Int = 0,
 ): PinnedStripFit {
+    require(extraSlots >= 0) { "extraSlots must be non-negative" }
     require(pinnedCount >= 0) { "pinnedCount must be non-negative" }
     require(overflowCount >= 0) { "overflowCount must be non-negative" }
     require(padding >= 0.dp) { "padding must be non-negative" }
@@ -182,7 +186,7 @@ fun fitPinnedStrip(
     }
 
     fun groupFits(slots: Int): Boolean {
-        val rect = groupRect(slots)
+        val rect = groupRect(slots + extraSlots)
         if (rect.left < padding || rect.top < topLimit) return false
         return controls.all { rect.disjointFrom(it) }
     }

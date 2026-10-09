@@ -28,6 +28,7 @@ import me.foxtails.lakehead.core.designsystem.AppTile
 import me.foxtails.lakehead.core.designsystem.AppTileDefaults
 import me.foxtails.lakehead.core.designsystem.AppTileState
 import me.foxtails.lakehead.core.designsystem.PinnedTileShortcut
+import me.foxtails.lakehead.core.designsystem.TileNotifications
 import me.foxtails.lakehead.core.grid.GridSpan
 import me.foxtails.lakehead.core.model.AppIdentity
 import me.foxtails.lakehead.core.model.ItemId
@@ -98,6 +99,7 @@ internal fun HomeCanvasTile(
     modifier: Modifier = Modifier,
     editState: HomeEditState = HomeEditState.Normal,
     pinnedShortcuts: List<PinnedTileShortcut> = emptyList(),
+    notifications: TileNotifications? = null,
     onShortcutClick: (String) -> Unit = {},
     onSelect: (ItemId) -> Unit = {},
     onEnterWiggle: (HomeRenderTile) -> Unit = {},
@@ -275,6 +277,8 @@ internal fun HomeCanvasTile(
         // held, so no child region exposes click/long-click actions mid-drag.
         isInteractionEnabled = !isEditActive,
         isEditSelected = editSelected,
+        notificationCount = notifications?.count ?: 0,
+        notificationPreviews = notifications?.previews.orEmpty(),
     )
     }
 }

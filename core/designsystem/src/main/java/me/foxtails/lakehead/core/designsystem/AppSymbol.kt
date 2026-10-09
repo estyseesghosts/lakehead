@@ -6,6 +6,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.layout.ContentScale
@@ -50,10 +51,14 @@ fun AppSymbol(
         bitmap = bitmap,
         contentDescription = null,
         contentScale = ContentScale.Fit,
-        colorFilter = ColorFilter.tint(MaterialTheme.colorScheme.onSurface),
+        colorFilter = ColorFilter.tint(symbolTint()),
         modifier = modifier.then(Modifier.size(extent)),
     )
 }
+
+/** Single source of the colour shared by the app symbol and the tile's notification count. */
+@Composable
+internal fun symbolTint(): Color = MaterialTheme.colorScheme.onSurface
 
 /**
  * Pure alignment rule for an app symbol inside its tile.

@@ -38,6 +38,7 @@ import me.foxtails.lakehead.core.designsystem.PinnedTileShortcut
 import me.foxtails.lakehead.core.designsystem.ShortcutSurfaceEntry
 import me.foxtails.lakehead.core.designsystem.SquareCellGeometry
 import me.foxtails.lakehead.core.designsystem.TileBounds
+import me.foxtails.lakehead.core.designsystem.TileNotifications
 import me.foxtails.lakehead.core.grid.GridVerticalExtent
 import me.foxtails.lakehead.core.model.AppIdentity
 import me.foxtails.lakehead.core.model.ItemId
@@ -195,6 +196,7 @@ internal fun HomeCanvasGrid(
     // execution stays with the caller.  Defaults keep previews/tests
     // pin-free; :app joins the B2 sources when it wires this through.
     pinnedByTile: Map<ItemId, List<PinnedTileShortcut>> = emptyMap(),
+    notificationsByTile: Map<ItemId, TileNotifications> = emptyMap(),
     onPinnedShortcutClick: (ItemId, String) -> Unit = { _, _ -> },
     // W3 reduced-motion: when true the resize preview snaps to the validated
     // span immediately instead of animating rapidly toward it. Both branches
@@ -589,6 +591,7 @@ internal fun HomeCanvasGrid(
                         // C1: per-tile joined pins (empty = centered icon);
                         // arranged on the live preview span inside the tile.
                         pinnedShortcuts = pinnedByTile[tile.itemId].orEmpty(),
+                        notifications = notificationsByTile[tile.itemId],
                         onShortcutClick = { shortcutId ->
                             onPinnedShortcutClick(tile.itemId, shortcutId)
                         },
