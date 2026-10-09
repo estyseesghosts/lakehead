@@ -34,8 +34,8 @@ class PlacementDatabaseTest {
     fun closeDatabase() = database.close()
 
     @Test
-    fun freshDatabaseCreatesVersionThreeSchemaWithAllTablesAndReferentialKeys() {
-        assertEquals(3, DatabaseSchema.VERSION)
+    fun freshDatabaseCreatesVersionFourSchemaWithAllTablesAndReferentialKeys() {
+        assertEquals(4, DatabaseSchema.VERSION)
         assertEquals(DatabaseSchema.VERSION, database.openHelper.readableDatabase.version)
         assertEquals(
             setOf("homeId"),
@@ -74,13 +74,20 @@ class PlacementDatabaseTest {
         assertEquals(setOf("profileId", "packageName", "className"), primaryKeyColumns("app_references"))
         assertEquals(setOf("itemId"), primaryKeyColumns("placements"))
         assertEquals(setOf("tileId"), primaryKeyColumns("shortcut_bindings"))
+        assertEquals(setOf("tileId", "bucketId", "albumName"), columns("tile_album_bindings"))
+        assertEquals(
+            setOf("tileId->placements.itemId"),
+            foreignKeyEdges("tile_album_bindings"),
+        )
+        assertEquals(setOf("tileId"), primaryKeyColumns("tile_album_bindings"))
 
         val schema = java.io.File(
-            "schemas/me.foxtails.lakehead.data.database.PlacementDatabase/3.json",
+            "schemas/me.foxtails.lakehead.data.database.PlacementDatabase/4.json",
         ).readText()
-        assertEquals(true, schema.contains("\"version\": 3"))
+        assertEquals(true, schema.contains("\"version\": 4"))
         listOf("homes", "app_references", "placements", "shortcut_bindings", "widget_bindings",
-            "profileId", "packageName", "className", "tileId", "pinnedShortcutIds")
+            "tile_album_bindings", "profileId", "packageName", "className", "tileId",
+            "pinnedShortcutIds", "bucketId", "albumName")
             .forEach { assertEquals("missing exported schema token: $it", true, schema.contains(it)) }
     }
 

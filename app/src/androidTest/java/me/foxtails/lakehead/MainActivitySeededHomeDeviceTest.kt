@@ -312,7 +312,8 @@ class MainActivitySeededHomeDeviceTest {
 
     private inline fun <T> withDatabase(block: (PlacementDatabase) -> T): T {
         val database = Room.databaseBuilder(context, PlacementDatabase::class.java, "placements.db")
-            .addMigrations(PlacementDatabase.MIGRATION_1_2, PlacementDatabase.MIGRATION_2_3)
+            .addMigrations(PlacementDatabase.MIGRATION_1_2, PlacementDatabase.MIGRATION_2_3,
+                PlacementDatabase.MIGRATION_3_4)
             .allowMainThreadQueries()
             .build()
         return try {

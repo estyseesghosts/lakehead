@@ -91,7 +91,8 @@ class MainActivity : ComponentActivity() {
 
     private val placementDatabase: PlacementDatabase by lazy(LazyThreadSafetyMode.NONE) {
         Room.databaseBuilder(applicationContext, PlacementDatabase::class.java, "placements.db")
-            .addMigrations(PlacementDatabase.MIGRATION_1_2, PlacementDatabase.MIGRATION_2_3)
+            .addMigrations(PlacementDatabase.MIGRATION_1_2, PlacementDatabase.MIGRATION_2_3,
+                PlacementDatabase.MIGRATION_3_4)
             .build()
     }
 

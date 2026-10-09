@@ -91,4 +91,18 @@ public interface PlacementDao {
 
     @Query("DELETE FROM widget_bindings WHERE itemId = :itemId")
     int deleteWidgetBinding(String itemId);
+
+    // --- Album binding operations ---
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    void upsertAlbumBinding(AlbumBindingEntity binding);
+
+    @Query("SELECT * FROM tile_album_bindings WHERE tileId = :tileId")
+    AlbumBindingEntity albumBinding(String tileId);
+
+    @Query("DELETE FROM tile_album_bindings WHERE tileId = :tileId")
+    int deleteAlbumBinding(String tileId);
+
+    @Query("SELECT COUNT(*) FROM tile_album_bindings")
+    int albumBindingCount();
 }

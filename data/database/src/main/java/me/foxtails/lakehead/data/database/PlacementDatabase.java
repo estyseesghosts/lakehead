@@ -7,7 +7,7 @@ import androidx.room.migration.Migration;
 import androidx.sqlite.db.SupportSQLiteDatabase;
 
 @Database(entities = {HomeEntity.class, AppReferenceEntity.class, PlacementEntity.class,
-                ShortcutBindingEntity.class, WidgetBindingEntity.class},
+                ShortcutBindingEntity.class, WidgetBindingEntity.class, AlbumBindingEntity.class},
         version = DatabaseSchema.VERSION, exportSchema = true)
 public abstract class PlacementDatabase extends RoomDatabase {
     public abstract PlacementDao placementDao();
@@ -41,6 +41,23 @@ public abstract class PlacementDatabase extends RoomDatabase {
                     + ")");
             db.execSQL("CREATE INDEX IF NOT EXISTS `index_widget_bindings_itemId`"
                     + " ON `widget_bindings` (`itemId`)");
+        }
+    };
+
+    /** v3 → v4: adds tile_album_bindings (bucket id and name per gallery tile); additive only. */
+    @NonNull
+    public static final Migration MIGRATION_3_4 = new Migration(3, 4) {
+        @Override
+        public void migrate(@NonNull SupportSQLiteDatabase db) {
+            db.execSQL("CREATE TABLE IF NOT EXISTS `tile_album_bindings` ("
+                    + "`tileId` TEXT NOT NULL, "
+                    + "`bucketId` TEXT NOT NULL, "
+                    + "`albumName` TEXT NOT NULL, "
+                    + "PRIMARY KEY(`tileId`), "
+                    + "FOREIGN KEY(`tileId`) REFERENCES `placements`(`itemId`) ON DELETE CASCADE"
+                    + ")");
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_tile_album_bindings_tileId`"
+                    + " ON `tile_album_bindings` (`tileId`)");
         }
     };
 }

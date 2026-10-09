@@ -1,5 +1,6 @@
 package me.foxtails.lakehead.data.database
 
+import me.foxtails.lakehead.core.model.AlbumRef
 import me.foxtails.lakehead.core.model.AppIdentity
 import me.foxtails.lakehead.core.model.AppPlacement
 import me.foxtails.lakehead.core.model.ComponentIdentity
@@ -13,6 +14,7 @@ import me.foxtails.lakehead.core.model.LogicalPosition
 import me.foxtails.lakehead.core.model.LogicalSpan
 import me.foxtails.lakehead.core.model.ProfileId
 import me.foxtails.lakehead.core.model.ShortcutRef
+import me.foxtails.lakehead.core.model.TileAlbumBinding
 import me.foxtails.lakehead.core.model.TileBinding
 import org.json.JSONArray
 import org.json.JSONObject
@@ -113,4 +115,17 @@ fun ShortcutBindingEntity.toDomain() = TileBinding(
             )
         }
     },
+)
+
+// --- TileAlbumBinding ↔ AlbumBindingEntity ---
+
+fun TileAlbumBinding.toEntity() = AlbumBindingEntity(
+    tileId.value,
+    album.bucketId,
+    album.name,
+)
+
+fun AlbumBindingEntity.toDomain() = TileAlbumBinding(
+    tileId = ItemId(tileId),
+    album = AlbumRef(bucketId = bucketId, name = albumName),
 )

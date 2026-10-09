@@ -14,6 +14,7 @@ import me.foxtails.lakehead.core.model.ItemAvailability
 import me.foxtails.lakehead.core.model.ItemId
 import me.foxtails.lakehead.core.model.LogicalPosition
 import me.foxtails.lakehead.core.model.LogicalSpan
+import me.foxtails.lakehead.core.model.TileAlbumBinding
 import me.foxtails.lakehead.core.model.TileBinding
 import me.foxtails.lakehead.data.database.HomeEntity
 import me.foxtails.lakehead.data.database.PlacementEntity
@@ -69,6 +70,15 @@ interface HomePlacementRepository {
 
     /** Deletes the shortcut binding for [tileId]. No-op if none exists. */
     fun deleteBinding(tileId: ItemId)
+
+    /** Loads the album binding for [tileId], or null if none exists. */
+    fun loadAlbumBinding(tileId: ItemId): TileAlbumBinding?
+
+    /** Persists (upserts) an album binding. The referenced tile must exist. */
+    fun saveAlbumBinding(binding: TileAlbumBinding)
+
+    /** Deletes the album binding for [tileId]. No-op if none exists. */
+    fun deleteAlbumBinding(tileId: ItemId)
 }
 
 sealed interface LoadResult {
@@ -240,6 +250,7 @@ class RoomHomePlacementRepository(
         // disabled in test/in-memory configurations.
         dao.deleteShortcutBinding(itemId.value)
         dao.deleteWidgetBinding(itemId.value)
+        dao.deleteAlbumBinding(itemId.value)
         val remaining = dao.placementsForHome(homeId.value)
         persistShifted(remaining, normalize(remaining.map { it.toGridPlacement() }))
         RemoveResult.Removed
@@ -266,6 +277,17 @@ class RoomHomePlacementRepository(
 
     override fun deleteBinding(tileId: ItemId) {
         dao.deleteShortcutBinding(tileId.value)
+    }
+
+    override fun loadAlbumBinding(tileId: ItemId): TileAlbumBinding? =
+        dao.albumBinding(tileId.value)?.toDomain()
+
+    override fun saveAlbumBinding(binding: TileAlbumBinding): Unit = database.runInTransaction {
+        dao.upsertAlbumBinding(binding.toEntity())
+    }
+
+    override fun deleteAlbumBinding(tileId: ItemId) {
+        dao.deleteAlbumBinding(tileId.value)
     }
 
     private fun edit(
