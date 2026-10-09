@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Album slideshows only: requested when the user accepts the album prompt
+        on a gallery tile, never pre-granted. Scoped to API 32 and below; on 33+
+        READ_MEDIA_IMAGES applies instead. -->
+    <uses-permission
+        android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32" />
+    <!-- API 33+ full photo-library access for the album list. -->
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+    <!-- API 34+ selected-photos access: declared so partial grants are detectable. -->
+    <uses-permission android:name="android.permission.READ_MEDIA_VISUAL_USER_SELECTED" />
+
+</manifest>
