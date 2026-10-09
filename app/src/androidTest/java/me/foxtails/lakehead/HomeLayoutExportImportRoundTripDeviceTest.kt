@@ -6,6 +6,7 @@ import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import kotlinx.coroutines.runBlocking
 import me.foxtails.lakehead.core.model.AppIdentity
+import me.foxtails.lakehead.core.model.AppPlacement
 import me.foxtails.lakehead.core.model.ComponentIdentity
 import me.foxtails.lakehead.core.model.HomeId
 import me.foxtails.lakehead.core.model.ItemId
@@ -163,7 +164,8 @@ class HomeLayoutExportImportRoundTripDeviceTest {
         val byId = loaded.placements.associateBy { it.itemId }
         for (i in seedItemIds.indices) {
             val id = seedItemIds[i]
-            val placement = byId.getValue(id)
+            // Seeds are app placements only (see seedPackages above).
+            val placement = byId.getValue(id) as AppPlacement
             assertEquals("app package for $id", seedPackages[i], placement.appIdentity.component.packageName)
             assertEquals(
                 "app class for $id",

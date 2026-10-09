@@ -2,6 +2,7 @@ package me.foxtails.lakehead
 
 import android.app.Activity
 import android.os.Bundle
+import android.os.Build
 import android.app.role.RoleManager
 import android.content.Context
 import androidx.activity.ComponentActivity
@@ -34,6 +35,9 @@ import me.foxtails.lakehead.platform.feed.FeedProviderResolver
 import me.foxtails.lakehead.platform.feed.FeedServiceQuery
 import me.foxtails.lakehead.platform.feed.startFeedDiagnosticsLogging
 import me.foxtails.lakehead.platform.launcherapps.AppLauncher
+import me.foxtails.lakehead.platform.media.MediaAccess
+import me.foxtails.lakehead.platform.media.MediaAccessQuery
+import me.foxtails.lakehead.platform.media.MediaStoreGateway
 import me.foxtails.lakehead.platform.launcherapps.AppIconSnapshotCache
 import me.foxtails.lakehead.platform.launcherapps.BoundedLauncherAppIconPngEncoder
 import me.foxtails.lakehead.platform.launcherapps.LauncherAppsIconActivityLookup
@@ -241,6 +245,35 @@ class MainActivity : ComponentActivity() {
     }
 
     private val widgetHosting by lazy(LazyThreadSafetyMode.NONE) { AppWidgetHosting(applicationContext) }
+    // Album slideshow (slice 6): the MediaStore gateway owns album/photo/
+    // thumbnail queries and change observation over the personal profile; the
+    // coordinator owns the offer prompt, permission gating, binding
+    // persistence and the rotation clock. Permission is requested only after
+    // the user accepts the prompt on a gallery tile.
+    private val mediaGateway: MediaStoreGateway by lazy(LazyThreadSafetyMode.NONE) {
+        MediaStoreGateway(applicationContext)
+    }
+    private val albumCoordinator: AlbumTileCoordinator by lazy(LazyThreadSafetyMode.NONE) {
+        AlbumTileCoordinator(
+            repository = placementRepository,
+            library = MediaStoreAlbumLibrary(mediaGateway),
+            accessNow = { MediaAccessQuery.accessNow(applicationContext) },
+            onRequestPermission = {
+                albumPermissionLauncher.launch(
+                    MediaAccessQuery.permissionsFor(Build.VERSION.SDK_INT).toTypedArray(),
+                )
+            },
+        )
+    }
+    private val albumPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions(),
+    ) { granted ->
+        val access = MediaAccessQuery.accessFrom(
+            granted.filterValues { it }.keys,
+            Build.VERSION.SDK_INT,
+        )
+        albumCoordinator.onPermissionResult(access)
+    }
     private val widgetCatalogue by lazy(LazyThreadSafetyMode.NONE) {
         AppWidgetProviderCatalogue(applicationContext)
     }
@@ -324,8 +357,14 @@ class MainActivity : ComponentActivity() {
                 shortcutMenuCoordinator.onHomeTilesChanged(
                     (homeState as? HomeRenderState.Loaded)?.tiles.orEmpty(),
                 )
+                albumCoordinator.onHomeTilesChanged(
+                    (homeState as? HomeRenderState.Loaded)?.tiles.orEmpty(),
+                )
             }
             val notificationsByTile = rememberNotificationsByTile(homeState)
+            val albumPrompt by albumCoordinator.prompt.collectAsState()
+            val albumPickerAlbums by albumCoordinator.pickerAlbums.collectAsState()
+            val albumPhotos by albumCoordinator.albumPhotoByTile.collectAsState()
             LauncherShell(
                 homeState = homeState,
                 notificationsByTile = notificationsByTile,
@@ -338,6 +377,15 @@ class MainActivity : ComponentActivity() {
                 onLaunchApp = { identity ->
                     (appLauncherForTest ?: productionAppLauncher).launch(identity)
                 },
+                // Home-tile taps advance a bound slideshow one photo (the
+                // caller still launches); All Apps taps keep [onLaunchApp].
+                onHomeLaunchApp = { identity ->
+                    val tileId = (homeState as? HomeRenderState.Loaded)?.tiles
+                        ?.firstOrNull { it.appIdentity == identity }?.itemId
+                    if (tileId != null) albumCoordinator.onHomeTileTapped(tileId)
+                    (appLauncherForTest ?: productionAppLauncher).launch(identity)
+                },
+                onHomeVisibleChange = albumCoordinator::setHomeVisible,
                 onAddToHome = { identity ->
                     lifecycleScope.launch(Dispatchers.IO) {
                         val result = coordinator.add(identity)
@@ -386,6 +434,16 @@ class MainActivity : ComponentActivity() {
                     lifecycleScope.launch { routeLoader.commitMove(itemId, position) }
                 },
                 onResizeTile = { itemId, span ->
+                    val tile = (homeState as? HomeRenderState.Loaded)?.tiles
+                        ?.firstOrNull { it.itemId == itemId }
+                    if (tile != null) {
+                        albumCoordinator.onResized(
+                            tile,
+                            tile.span,
+                            span,
+                            isPersonalProfile(tile.appIdentity.profileId),
+                        )
+                    }
                     lifecycleScope.launch {
                         routeLoader.commitResize(itemId, span)
                     }
@@ -421,6 +479,16 @@ class MainActivity : ComponentActivity() {
                         shortcutMenuCoordinator.execute(itemId, entryId)
                     }
                 },
+                // Album slideshow (slice 6): prompt/picker state and photo
+                // projection come from the coordinator; verbs report back.
+                albumPhotoByTile = albumPhotos,
+                albumPromptLabel = albumPrompt?.appLabel,
+                onAlbumPromptAccept = albumCoordinator::onPromptAccept,
+                onAlbumPromptDecline = albumCoordinator::onPromptDecline,
+                onAlbumPromptDismiss = albumCoordinator::onPromptDismiss,
+                albumPickerAlbums = albumPickerAlbums,
+                onAlbumPick = albumCoordinator::onAlbumPick,
+                onAlbumPickerDismiss = albumCoordinator::onPickerDismiss,
                 viewportStyle = routeViewportStyle,
                 widgetContent = widgetContent,
                 widgetProviders = widgetProviders,
@@ -439,6 +507,8 @@ class MainActivity : ComponentActivity() {
         appCatalogue.start()
         shortcutGateway.start(lifecycleScope)
         shortcutMenuCoordinator.start(lifecycleScope)
+        mediaGateway.start()
+        albumCoordinator.start(lifecycleScope)
         homeRouteLoader.start(lifecycleScope)
         allAppsRouteLoader.start(lifecycleScope)
         feedGateway.start(lifecycleScope)
@@ -449,6 +519,8 @@ class MainActivity : ComponentActivity() {
     override fun onStop() {
         widgetCatalogue.stop()
         widgetHosting.stopListening()
+        albumCoordinator.stop()
+        mediaGateway.stop()
         feedGateway.stop()
         allAppsRouteLoader.stop()
         homeRouteLoader.stop()
@@ -528,6 +600,20 @@ class MainActivity : ComponentActivity() {
         if (roleManager.isRoleAvailable(RoleManager.ROLE_HOME)) {
             requestHomeRole.launch(roleManager.createRequestRoleIntent(RoleManager.ROLE_HOME))
         }
+    }
+
+    /**
+     * Whether [profileId] names the personal (primary-user) profile, read
+     * from the serial of this process's user handle. The album offer and the
+     * `MediaStore` reads cover the personal profile only.
+     */
+    private fun isPersonalProfile(profileId: ProfileId): Boolean {
+        val userManager = getSystemService(Context.USER_SERVICE) as? android.os.UserManager
+            ?: return false
+        val serial = runCatching {
+            userManager.getSerialNumberForUser(android.os.Process.myUserHandle())
+        }.getOrNull() ?: return false
+        return profileId.value == serial.toString()
     }
 }
 

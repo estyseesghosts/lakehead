@@ -71,6 +71,7 @@ dependencies {
     implementation(project(":platform:feed"))
     implementation(project(":platform:widgets"))
     implementation(project(":platform:notifications"))
+    implementation(project(":platform:media"))
     implementation(project(":data:repository"))
     implementation(project(":data:database"))
     implementation(project(":core:model"))

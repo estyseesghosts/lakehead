@@ -36,6 +36,8 @@ import me.foxtails.lakehead.core.designsystem.GestureArbitration.LockedAxis
 import me.foxtails.lakehead.core.designsystem.ShortcutSurfaceEntry
 import me.foxtails.lakehead.core.designsystem.PinnedTileShortcut
 import me.foxtails.lakehead.core.designsystem.TileNotifications
+import me.foxtails.lakehead.core.model.AlbumRef
+import me.foxtails.lakehead.core.model.MediaAlbum
 import me.foxtails.lakehead.core.model.AppIdentity
 import me.foxtails.lakehead.core.model.ItemId
 import me.foxtails.lakehead.core.model.LogicalPosition
@@ -54,6 +56,8 @@ import me.foxtails.lakehead.feature.allapps.toAlphabetPickerState
 import me.foxtails.lakehead.feature.allapps.toAppSections
 import me.foxtails.lakehead.feature.home.HomeCanvas
 import me.foxtails.lakehead.feature.home.HomeCanvasViewportStyle
+import me.foxtails.lakehead.feature.home.AlbumPickerOverlay
+import me.foxtails.lakehead.feature.home.AlbumSlideshowPromptOverlay
 import me.foxtails.lakehead.feature.home.HomeRenderState
 import me.foxtails.lakehead.platform.feed.FeedAvailability
 import me.foxtails.lakehead.platform.feed.FeedDiagnostic
@@ -164,6 +168,25 @@ internal fun LauncherShell(
     // Album slideshow photo per tile (slice 6 wires the coordinator supplying
     // this). Missing entries render the normal icon.
     albumPhotoByTile: Map<ItemId, ImageBitmap> = emptyMap(),
+    // Album offer prompt: non-null [albumPromptLabel] opens the Yes/No prompt
+    // for that gallery label; the accept/decline/dismiss verbs belong to the
+    // caller (the coordinator). Defaults keep the shell prompt-free.
+    albumPromptLabel: String? = null,
+    onAlbumPromptAccept: () -> Unit = {},
+    onAlbumPromptDecline: () -> Unit = {},
+    onAlbumPromptDismiss: () -> Unit = {},
+    // Album picker: non-null [albumPickerAlbums] opens the list (empty means
+    // the honest empty row); the pick/dismiss verbs belong to the caller.
+    albumPickerAlbums: List<MediaAlbum>? = null,
+    onAlbumPick: (AlbumRef) -> Unit = {},
+    onAlbumPickerDismiss: () -> Unit = {},
+    // Home-tile taps (body/symbol) report here; All Apps keeps [onLaunchApp].
+    // Defaults preserve the single-callback behavior for callers that do not
+    // need the distinction (tap-advance stays with the coordinator).
+    onHomeLaunchApp: (AppIdentity) -> Unit = onLaunchApp,
+    // Settled home visibility for the album rotation ticker: true only while
+    // settled on the home tile page. Defaults to a no-op.
+    onHomeVisibleChange: (Boolean) -> Unit = {},
     onPinnedShortcutClick: (ItemId, String) -> Unit = { _, _ -> },
     onHeaderTap: (String) -> Unit = {},
     // S1 settings menu: reports the feed provider picked in the transient
@@ -327,6 +350,8 @@ internal fun LauncherShell(
         pagerState.isScrollInProgress,
         pagerState.currentPageOffsetFraction,
     )
+    // Album rotation ticker follows the same settled signal.
+    LaunchedEffect(homeVisible) { onHomeVisibleChange(homeVisible) }
 
     Box(
         modifier = modifier
@@ -414,7 +439,7 @@ internal fun LauncherShell(
                 else -> HomeCanvas(
                     state = homeState,
                     iconsByIdentity = homeIcons,
-                    onLaunchApp = onLaunchApp,
+                    onLaunchApp = onHomeLaunchApp,
                     onRequestDefaultHome = onRequestDefaultHome,
                     modifier = Modifier.fillMaxSize(),
                     viewportStyle = viewportStyle.copy(
@@ -474,6 +499,21 @@ internal fun LauncherShell(
             onExportHomeLayout = onExportHomeLayout,
             onImportHomeLayout = onImportHomeLayout,
             onOpenNotificationAccess = onOpenNotificationAccess,
+        )
+        // Album offer prompt and picker float above the pager and the pill.
+        // Both are caller-owned (the coordinator); the shell only renders.
+        AlbumSlideshowPromptOverlay(
+            isOpen = albumPromptLabel != null,
+            appLabel = albumPromptLabel ?: "",
+            onAccept = onAlbumPromptAccept,
+            onDecline = onAlbumPromptDecline,
+            onDismiss = onAlbumPromptDismiss,
+        )
+        AlbumPickerOverlay(
+            isOpen = albumPickerAlbums != null,
+            albums = albumPickerAlbums.orEmpty(),
+            onPick = onAlbumPick,
+            onDismiss = onAlbumPickerDismiss,
         )
     }
 }
