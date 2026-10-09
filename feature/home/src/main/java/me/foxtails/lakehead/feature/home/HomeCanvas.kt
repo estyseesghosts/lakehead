@@ -10,6 +10,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import me.foxtails.lakehead.core.designsystem.ShortcutSurfaceEntry
@@ -97,6 +98,9 @@ fun HomeCanvas(
     // [HomeCanvasGrid] (see its docs).  Defaults keep the canvas pin-free.
     pinnedByTile: Map<ItemId, List<PinnedTileShortcut>> = emptyMap(),
     notificationsByTile: Map<ItemId, TileNotifications> = emptyMap(),
+    // Album slideshow photo per tile, resolved by `:app`. Missing entries
+    // render the normal icon. Defaults keep the canvas photo-free.
+    albumPhotoByTile: Map<ItemId, ImageBitmap> = emptyMap(),
     onPinnedShortcutClick: (ItemId, String) -> Unit = { _, _ -> },
     onTransientHoldChange: (Boolean) -> Unit = {},
     onPagerHoldChange: (Boolean) -> Unit = {},
@@ -175,6 +179,7 @@ fun HomeCanvas(
                     onSurfaceTogglePin = onSurfaceTogglePin,
                     pinnedByTile = pinnedByTile,
                     notificationsByTile = notificationsByTile,
+                    albumPhotoByTile = albumPhotoByTile,
                     onPinnedShortcutClick = onPinnedShortcutClick,
                     onTransientHoldChange = onTransientHoldChange,
                     onPagerHoldChange = onPagerHoldChange,

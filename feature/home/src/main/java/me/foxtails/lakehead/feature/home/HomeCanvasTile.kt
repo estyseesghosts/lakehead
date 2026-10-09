@@ -100,6 +100,9 @@ internal fun HomeCanvasTile(
     editState: HomeEditState = HomeEditState.Normal,
     pinnedShortcuts: List<PinnedTileShortcut> = emptyList(),
     notifications: TileNotifications? = null,
+    // Album slideshow photo for this tile (resolved by `:app`); null renders
+    // the normal icon. The tile shows it only on spans of at least 2x2.
+    albumPhoto: ImageBitmap? = null,
     onShortcutClick: (String) -> Unit = {},
     onSelect: (ItemId) -> Unit = {},
     onEnterWiggle: (HomeRenderTile) -> Unit = {},
@@ -279,6 +282,7 @@ internal fun HomeCanvasTile(
         isEditSelected = editSelected,
         notificationCount = notifications?.count ?: 0,
         notificationPreviews = notifications?.previews.orEmpty(),
+        albumPhoto = albumPhoto,
     )
     }
 }

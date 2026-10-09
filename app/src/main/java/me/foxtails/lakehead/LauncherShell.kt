@@ -161,6 +161,9 @@ internal fun LauncherShell(
     onSurfaceTogglePin: (ItemId, String) -> Unit = { _, _ -> },
     pinnedByTile: Map<ItemId, List<PinnedTileShortcut>> = emptyMap(),
     notificationsByTile: Map<ItemId, TileNotifications> = emptyMap(),
+    // Album slideshow photo per tile (slice 6 wires the coordinator supplying
+    // this). Missing entries render the normal icon.
+    albumPhotoByTile: Map<ItemId, ImageBitmap> = emptyMap(),
     onPinnedShortcutClick: (ItemId, String) -> Unit = { _, _ -> },
     onHeaderTap: (String) -> Unit = {},
     // S1 settings menu: reports the feed provider picked in the transient
@@ -427,6 +430,7 @@ internal fun LauncherShell(
                     onSurfaceTogglePin = onSurfaceTogglePin,
                     pinnedByTile = pinnedByTile,
                     notificationsByTile = notificationsByTile,
+                    albumPhotoByTile = albumPhotoByTile,
                     onPinnedShortcutClick = onPinnedShortcutClick,
                     onTransientHoldChange = { homeHold = it },
                     onPagerHoldChange = { pagerHold = it },

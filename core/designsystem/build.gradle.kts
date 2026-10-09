@@ -20,6 +20,7 @@ android {
 dependencies {
     implementation(project(":core:grid"))
     implementation(platform("androidx.compose:compose-bom:2024.09.00"))
+    implementation("androidx.compose.animation:animation")
     implementation("androidx.compose.foundation:foundation")
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.material3:material3")

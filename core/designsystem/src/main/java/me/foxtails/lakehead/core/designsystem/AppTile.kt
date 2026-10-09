@@ -21,6 +21,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -157,6 +158,12 @@ fun isLargeTileSpan(span: GridSpan): Boolean =
  *   `onLongClick` = tile callback, [Role.Button])
  *   wrapping the [icon] slot, with `semantics(mergeDescendants = true)`.
  *   One detector per hit region; no root or competing detector.
+ * - Album photo layer (only when [albumPhoto] is supplied on a span of at
+ *   least 2x2): full-bleed cropped photo with a crossfade on change, drawn
+ *   above TileBody (which keeps the accessible name) and below glyphs and
+ *   the selection border. No app icon is shown unless pins exist, in which
+ *   case the strip draws over a bottom scrim; notification counts and
+ *   previews stay hidden while the photo shows.
  * - Pinned shortcut strip (only when [pinnedShortcuts] is non-empty): the app icon
  *   moves to its compact anchor and each visible shortcut becomes its own
  *   [Role.Button] glyph carrying [onShortcutClick] with its opaque id, its own
@@ -272,6 +279,12 @@ fun AppTile(
     isEditSelected: Boolean = false,
     notificationCount: Int = 0,
     notificationPreviews: List<TileNotificationPreview> = emptyList(),
+    // Album slideshow photo, already resolved by the caller (see AlbumTileCoordinator
+    // in `:app`). Shown full-bleed and cropped only on spans of at least 2x2
+    // ([isAlbumPhotoSpan]); smaller spans render the normal icon and keep the
+    // binding. While shown, notification counts and previews stay hidden and
+    // the pinned strip (when present) draws over a bottom scrim.
+    albumPhoto: ImageBitmap? = null,
 ) {
     require(notificationCount >= 0) { "notificationCount must be >= 0" }
     require(contentDescription == null || contentDescription.isNotBlank()) {
@@ -322,7 +335,9 @@ fun AppTile(
         }
         // Large tiles show the newest-first preview instead; the icon drops to
         // its compact anchor while previews exist (stable through edit select).
-        val hasPreview = !isCountTileSpan(state.span) && notificationPreviews.isNotEmpty()
+        // An album photo replaces both the icon and the previews.
+        val showAlbumPhoto = albumPhoto != null && isAlbumPhotoSpan(state.span)
+        val hasPreview = !showAlbumPhoto && !isCountTileSpan(state.span) && notificationPreviews.isNotEmpty()
         val countLayout = if (countText.isNotEmpty()) {
             countedSymbolLayout(
                 availableWidth = maxWidth - dimensions.tilePadding * 2,
@@ -426,6 +441,15 @@ fun AppTile(
                     },
                 ),
         )
+        // Album photo above the body (below glyphs and the selection border):
+        // full-bleed, cropped, crossfading on change. The tile body keeps the
+        // accessible name, so this layer exposes none.
+        if (showAlbumPhoto && albumPhoto != null) {
+            AlbumPhotoLayer(
+                photo = albumPhoto,
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
         if (hasPreview && !isEditSelected) {
             val region = notificationPreviewRegion(
                 tileWidth = maxWidth,
@@ -446,7 +470,7 @@ fun AppTile(
                 )
             }
         }
-        if (!hasPinned) {
+        if (!hasPinned && !showAlbumPhoto) {
             // Unpinned presentation: no strip is reserved until the first pin.
             if (isFullBleed) {
                 AppLaunchRegion(
@@ -498,7 +522,7 @@ fun AppTile(
                     ) { countedIcon?.invoke(dimensions.symbolSize) }
                 }
             }
-        } else if (ShortcutStripGeometry.isNarrow(state.span)) {
+        } else if (hasPinned && ShortcutStripGeometry.isNarrow(state.span)) {
             // Vertical strip: right edge, app bottom-most, shortcuts upward at
             // the grid-unit pitch.  Layout derives from the live bounds (the
             // control-clear bottom inset plus tile padding), so resize
@@ -506,6 +530,14 @@ fun AppTile(
             // first (top), index 0 sits nearest above the app.  The fitted
             // prefix is rendered; withheld shortcuts join the overflow count.
             val fit = stripFit!!
+            // Album tiles draw a bottom scrim behind the strip so glyphs stay
+            // legible over bright photos; plain tiles keep the bare container.
+            if (showAlbumPhoto) {
+                AlbumStripScrim(
+                    stripHeight = dimensions.tilePadding * 2 + dimensions.unitIconSize,
+                    modifier = Modifier.align(Alignment.BottomCenter),
+                )
+            }
             if (fit.showAppGlyph || fit.showOverflowNode || fit.visibleShortcutCount > 0) {
                 Column(
                     modifier = Modifier
@@ -546,14 +578,22 @@ fun AppTile(
                     }
                 }
             }
-        } else {
+        } else if (hasPinned) {
             // Horizontal strip: one bottom-centered group (app rightmost, then
             // index 0..N leftward), mid-aligned in the control-clear region
             // (the Dp form of ShortcutStripGeometry.centeredGroupStartPx), so
             // the group stays centered instead of right-aligned; the live
             // anchor recomputes the centering on every resize.  Slots sit at
             // the grid-unit pitch with glyphs at the shared extent.
+            // A photo-only album tile (no pins) reaches no branch: the photo
+            // layer above already drew it.
             val fit = stripFit!!
+            if (showAlbumPhoto) {
+                AlbumStripScrim(
+                    stripHeight = dimensions.tilePadding * 2 + dimensions.unitIconSize,
+                    modifier = Modifier.align(Alignment.BottomCenter),
+                )
+            }
             if (fit.showAppGlyph || fit.showOverflowNode || fit.visibleShortcutCount > 0) {
                 Row(
                     modifier = Modifier

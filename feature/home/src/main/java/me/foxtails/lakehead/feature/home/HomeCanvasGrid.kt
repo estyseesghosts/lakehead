@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.input.pointer.PointerInputChange
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
@@ -197,6 +198,10 @@ internal fun HomeCanvasGrid(
     // pin-free; :app joins the B2 sources when it wires this through.
     pinnedByTile: Map<ItemId, List<PinnedTileShortcut>> = emptyMap(),
     notificationsByTile: Map<ItemId, TileNotifications> = emptyMap(),
+    // Album slideshow photo per tile, resolved by `:app` (slice 6 wires the
+    // coordinator). Missing entries render the normal icon. Defaults keep
+    // previews/tests photo-free.
+    albumPhotoByTile: Map<ItemId, ImageBitmap> = emptyMap(),
     onPinnedShortcutClick: (ItemId, String) -> Unit = { _, _ -> },
     // W3 reduced-motion: when true the resize preview snaps to the validated
     // span immediately instead of animating rapidly toward it. Both branches
@@ -592,6 +597,7 @@ internal fun HomeCanvasGrid(
                         // arranged on the live preview span inside the tile.
                         pinnedShortcuts = pinnedByTile[tile.itemId].orEmpty(),
                         notifications = notificationsByTile[tile.itemId],
+                        albumPhoto = albumPhotoByTile[tile.itemId],
                         onShortcutClick = { shortcutId ->
                             onPinnedShortcutClick(tile.itemId, shortcutId)
                         },
