@@ -21,6 +21,7 @@ import me.foxtails.lakehead.core.model.LogicalPosition
 import me.foxtails.lakehead.core.model.LogicalSpan
 import me.foxtails.lakehead.core.model.ProfileId
 import me.foxtails.lakehead.core.model.ShortcutRef
+import me.foxtails.lakehead.core.model.AlbumRef
 import me.foxtails.lakehead.core.model.TileAlbumBinding
 import me.foxtails.lakehead.core.model.TileBinding
 import me.foxtails.lakehead.data.repository.HomePlacementRepository
@@ -588,6 +589,92 @@ class ShortcutMenuCoordinatorTest {
         coordinator.stop()
     }
 
+    @Test
+    fun boundTileWithoutShortcutsShowsAlbumActionRows() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val gateway = FakeGateway(emptyMap())
+        val repository = FakeBindingRepository(
+            emptyMap(),
+            albumBindings = mapOf(
+                tileA to TileAlbumBinding(
+                    tileA,
+                    AlbumRef("b1", "Camera"),
+                ),
+            ),
+        )
+        val coordinator = ShortcutMenuCoordinator(
+            gateway,
+            ShortcutSurfaceLoader(gateway, repository, dispatcher),
+            dispatcher,
+        )
+        coordinator.start(this)
+        coordinator.onHomeTilesChanged(listOf(tile(tileA, identityA)))
+        coordinator.onSelectionChanged(tileA)
+        advanceUntilIdle()
+
+        val menu = coordinator.menu.value
+        assertEquals(tileA, menu?.tileId)
+        assertEquals(listOf(ALBUM_MENU_CHANGE_ID, ALBUM_MENU_REMOVE_ID), menu?.entries?.map { it.id })
+        assertTrue(menu?.entries?.all { it.isAction } == true)
+        coordinator.stop()
+    }
+
+    @Test
+    fun refreshSelectionDropsAlbumRowsAfterBindingRemoved() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val gateway = FakeGateway(mapOf(identityA to listOf(shortcut(identityA, "s1", 0))))
+        val repository = FakeBindingRepository(
+            emptyMap(),
+            albumBindings = mapOf(
+                tileA to TileAlbumBinding(
+                    tileA,
+                    AlbumRef("b1", "Camera"),
+                ),
+            ),
+        )
+        val coordinator = ShortcutMenuCoordinator(
+            gateway,
+            ShortcutSurfaceLoader(gateway, repository, dispatcher),
+            dispatcher,
+        )
+        coordinator.start(this)
+        coordinator.onHomeTilesChanged(listOf(tile(tileA, identityA)))
+        coordinator.onSelectionChanged(tileA)
+        advanceUntilIdle()
+        assertEquals(
+            listOf("s1", ALBUM_MENU_CHANGE_ID, ALBUM_MENU_REMOVE_ID),
+            coordinator.menu.value?.entries?.map { it.id },
+        )
+
+        // The edit-menu Remove path clears the binding with no tile or
+        // selection transition; the refresh drops the action rows in place.
+        repository.setAlbumBinding(tileA, null)
+        coordinator.refreshSelection()
+        advanceUntilIdle()
+
+        assertEquals(tileA, coordinator.menu.value?.tileId)
+        assertEquals(listOf("s1"), coordinator.menu.value?.entries?.map { it.id })
+        coordinator.stop()
+    }
+
+    @Test
+    fun executeAlbumRowIdReturnsFalseWithoutLaunch() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val gateway = FakeGateway(mapOf(identityA to listOf(shortcut(identityA, "s", 0))))
+        val coordinator = ShortcutMenuCoordinator(
+            gateway,
+            ShortcutSurfaceLoader(gateway, FakeBindingRepository(emptyMap()), dispatcher),
+            dispatcher,
+        )
+        coordinator.start(this)
+        coordinator.onHomeTilesChanged(listOf(tile(tileA, identityA)))
+
+        assertFalse(coordinator.execute(tileA, ALBUM_MENU_CHANGE_ID))
+        assertFalse(coordinator.execute(tileA, ALBUM_MENU_REMOVE_ID))
+        assertTrue(gateway.launched.isEmpty())
+        coordinator.stop()
+    }
+
     private class FakeGateway(
         shortcuts: Map<AppIdentity, List<LauncherShortcut>>,
         private val refreshResults: Map<AppIdentity, List<LauncherShortcut>> = emptyMap(),
@@ -639,8 +726,10 @@ class ShortcutMenuCoordinatorTest {
 
     private class FakeBindingRepository(
         bindings: Map<ItemId, TileBinding>,
+        albumBindings: Map<ItemId, TileAlbumBinding> = emptyMap(),
     ) : HomePlacementRepository {
         private val mutableBindings = bindings.toMutableMap()
+        private val mutableAlbumBindings = albumBindings.toMutableMap()
         var bindingLoads = 0
             private set
         override fun load(homeId: HomeId, columns: Int): LoadResult = LoadResult.NotFound
@@ -678,7 +767,10 @@ class ShortcutMenuCoordinatorTest {
             mutableBindings[binding.tileId] = binding
         }
         override fun deleteBinding(tileId: ItemId) = error("menu coordinator must not write")
-        override fun loadAlbumBinding(tileId: ItemId): TileAlbumBinding? = null
+        override fun loadAlbumBinding(tileId: ItemId): TileAlbumBinding? = mutableAlbumBindings[tileId]
+        fun setAlbumBinding(tileId: ItemId, binding: TileAlbumBinding?) {
+            if (binding == null) mutableAlbumBindings.remove(tileId) else mutableAlbumBindings[tileId] = binding
+        }
         override fun saveAlbumBinding(binding: TileAlbumBinding) = error("menu coordinator must not write")
         override fun deleteAlbumBinding(tileId: ItemId) = error("menu coordinator must not write")
     }

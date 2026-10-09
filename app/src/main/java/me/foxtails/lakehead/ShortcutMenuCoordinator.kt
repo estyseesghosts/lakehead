@@ -39,6 +39,10 @@ import me.foxtails.lakehead.platform.shortcuts.ShortcutGateway
  * - Missing tile clears: tiles that leave [onHomeTilesChanged] drop a menu
  *   owned by the gone tile; the grid's lookup-miss hides it independently.
  * - Zero shortcuts yields no menu (null), never an empty box.
+ * - Album rows: a tile with a persisted album binding additionally shows
+ *   the Change/Remove action rows ([albumMenuRows][me.foxtails.lakehead.albumMenuRows],
+ *   even with zero shortcuts). [refreshSelection] re-reads the open menu
+ *   after such a binding changes with no tile or selection transition.
  * - [execute] resolves `(tile, entry)` to the gateway's [ShortcutRef][me.foxtails.lakehead.core.model.ShortcutRef]
  *   from the live snapshot — carrying the exact profile — and launches it
  *   off the caller's thread. Unknown tiles/entries report false, never throw.
@@ -242,6 +246,21 @@ internal class ShortcutMenuCoordinator(
                 if (selections.value == tileId) reload(tiles.value, tileId)
             }
         }
+    }
+
+    /**
+     * Reloads the current selection's rows without a selection or tile
+     * change (slice 7).
+     *
+     * The album binding can change while the menu stays open (edit-menu
+     * "Remove album" clears it with no tile or selection transition), so
+     * the caller asks for a re-read after such a change and the open menu
+     * drops or gains its Change/Remove rows. A null selection or a missing
+     * tile publishes no menu, exactly like [reload].
+     */
+    fun refreshSelection() {
+        synchronized(this) { scope } ?: return
+        reload(tiles.value, selections.value)
     }
 
     private fun projectPinned(

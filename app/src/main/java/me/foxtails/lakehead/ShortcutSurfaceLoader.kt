@@ -27,9 +27,15 @@ import me.foxtails.lakehead.platform.shortcuts.ShortcutGateway
  * [entriesForTile] joins the gateway's rank-ordered shortcuts for [identity]
  * with the persisted binding for [tileId]: rows keep gateway rank order,
  * `isPinned` reflects binding membership, and `isPinEnabled` reflects the
- * tile's capacity. Pin mutations are serialized per tile. A zero
- * shortcut list yields an empty list so the existing
+ * tile's capacity. Pin mutations are serialized per tile. Zero shortcuts
+ * with no album binding yield an empty list so the existing
  * `editShortcutMenuEntries` empty-hides with no menu.
+ *
+ * Album rows (slice 7): a tile with a persisted album binding additionally
+ * gets the [albumMenuRows] plain actions appended after its shortcut rows —
+ * even when it has zero shortcuts, so a bound tile always offers Change /
+ * Remove. The shortcut-binding read stays skipped when there are no
+ * shortcuts; the album binding is always read.
  */
 internal class ShortcutSurfaceLoader(
     private val gateway: ShortcutGateway,
@@ -51,8 +57,14 @@ internal class ShortcutSurfaceLoader(
     suspend fun entriesForTile(tileId: ItemId, identity: AppIdentity, span: LogicalSpan): List<ShortcutSurfaceEntry> =
         withContext(ioDispatcher) {
             val shortcuts = gateway.shortcutsFor(identity)
-            if (shortcuts.isEmpty()) return@withContext emptyList()
-            TileShortcutPolicy.entries(shortcuts, repository.loadBinding(tileId), span)
+            val albumBinding = repository.loadAlbumBinding(tileId)
+            if (shortcuts.isEmpty() && albumBinding == null) return@withContext emptyList()
+            val shortcutEntries = if (shortcuts.isEmpty()) {
+                emptyList()
+            } else {
+                TileShortcutPolicy.entries(shortcuts, repository.loadBinding(tileId), span)
+            }
+            shortcutEntries + albumMenuRows(albumBinding)
         }
 
     /** Compatibility projection for callers that have not yet resolved a tile span. */

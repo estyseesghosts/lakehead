@@ -9,6 +9,7 @@ import me.foxtails.lakehead.core.model.LogicalPosition
 import me.foxtails.lakehead.core.model.LogicalSpan
 import me.foxtails.lakehead.core.model.ProfileId
 import me.foxtails.lakehead.core.model.ShortcutRef
+import me.foxtails.lakehead.core.model.TileAlbumBinding
 import me.foxtails.lakehead.core.model.TileBinding
 import org.json.JSONArray
 import org.json.JSONObject
@@ -42,6 +43,7 @@ data class HomeLayoutJsonItem(
     val rows: Int,
     val app: HomeLayoutJsonAppRef,
     val pinnedShortcuts: List<HomeLayoutJsonShortcutRef>,
+    val album: HomeLayoutJsonAlbumRef? = null,
 )
 
 /** Profile-aware app reference inside a JSON item. */
@@ -56,6 +58,18 @@ data class HomeLayoutJsonShortcutRef(
     val packageName: String,
     val profileId: String,
     val shortcutId: String,
+)
+
+/**
+ * Album slideshow binding inside a JSON item (decision 7).
+ *
+ * The binding is an optional export field carrying only the stable bucket id
+ * and the display name — never URIs or bitmaps. Absent when the tile has no
+ * binding; on import it is dropped when the album is not on the device.
+ */
+data class HomeLayoutJsonAlbumRef(
+    val bucketId: String,
+    val name: String,
 )
 
 /** Top-level deserialized document. */
@@ -77,6 +91,8 @@ object HomeLayoutCodec {
      * @param columns the column bound used for this home.
      * @param placements current placements loaded from the repository.
      * @param bindingsByTile per-tile shortcut bindings, keyed by [ItemId].
+     * @param albumBindingsByTile per-tile album slideshow bindings, keyed by
+     *   [ItemId]; present bindings are encoded as the optional `album` field.
      * @return a complete [JSONObject] conforming to the schema.
      */
     fun encodeLayout(
@@ -84,6 +100,7 @@ object HomeLayoutCodec {
         columns: Int,
         placements: List<AppPlacement>,
         bindingsByTile: Map<ItemId, TileBinding>,
+        albumBindingsByTile: Map<ItemId, TileAlbumBinding> = emptyMap(),
     ): JSONObject {
         val items = JSONArray()
         for (placement in placements) {
@@ -96,6 +113,7 @@ object HomeLayoutCodec {
                     put("shortcutId", ref.shortcutId)
                 })
             }
+            val albumBinding = albumBindingsByTile[placement.itemId]
             items.put(JSONObject().apply {
                 put("id", placement.itemId.value)
                 put("type", placement.type.name)
@@ -109,6 +127,12 @@ object HomeLayoutCodec {
                     put("className", placement.appIdentity.component.className)
                 })
                 put("pinnedShortcuts", shortcuts)
+                if (albumBinding != null) {
+                    put("album", JSONObject().apply {
+                        put("bucketId", albumBinding.album.bucketId)
+                        put("name", albumBinding.album.name)
+                    })
+                }
             })
         }
 
@@ -197,6 +221,9 @@ object HomeLayoutCodec {
             emptyList()
         }
 
+        val albumObj = obj.optJSONObject("album")
+        val album = if (albumObj != null) decodeAlbumRef(albumObj) else null
+
         return HomeLayoutJsonItem(
             id = id,
             type = type,
@@ -206,6 +233,7 @@ object HomeLayoutCodec {
             rows = rows,
             app = HomeLayoutJsonAppRef(profileId, packageName, className),
             pinnedShortcuts = shortcuts,
+            album = album,
         )
     }
 
@@ -220,6 +248,16 @@ object HomeLayoutCodec {
             it.optString("shortcutId", "").ifBlank { null }
         }
         return HomeLayoutJsonShortcutRef(packageName, profileId, shortcutId)
+    }
+
+    private fun decodeAlbumRef(obj: JSONObject): HomeLayoutJsonAlbumRef {
+        val bucketId = requireField(obj, "bucketId") {
+            it.optString("bucketId", "").ifBlank { null }
+        }
+        val name = requireField(obj, "name") {
+            it.optString("name", "").ifBlank { null }
+        }
+        return HomeLayoutJsonAlbumRef(bucketId, name)
     }
 
     private fun <T> requireField(

@@ -346,6 +346,49 @@ class EditShortcutMenuComposeTest {
     }
 
     @Test
+    fun actionRows_renderWithoutPinToggleAndExecuteByRowId() {
+        val actions = listOf(
+            ShortcutSurfaceEntry(id = "action-change", label = "Change album", isPinned = false, isAction = true),
+            ShortcutSurfaceEntry(id = "action-remove", label = "Remove album", isPinned = false, isAction = true),
+        )
+        setMenuCanvas(loaded(listOf(tile("a", personal, "Deep App"))), listOf(entry("s1")) + actions)
+        composeRule.waitForIdle()
+        longPressBody("Deep App")
+
+        composeRule.onAllNodesWithTag(SHORTCUT_SURFACE_ROW_TAG, useUnmergedTree = true)
+            .assertCountEquals(3)
+        // Exactly one pin toggle: the shortcut row. Action rows are launch-only.
+        composeRule.onAllNodesWithTag(PIN_TOGGLE_TAG, useUnmergedTree = true)
+            .assertCountEquals(1)
+
+        composeRule.onAllNodesWithTag(ROW_LAUNCH_ZONE_TAG, useUnmergedTree = true)[2]
+            .performClick()
+        composeRule.waitForIdle()
+        composeRule.runOnIdle {
+            assertEquals(listOf(ItemId("a") to "action-remove"), executed)
+            assertEquals(emptyList<Pair<ItemId, String>>(), pinned)
+        }
+    }
+
+    @Test
+    fun actionOnlyEntries_showMenuWithZeroShortcuts() {
+        val actions = listOf(
+            ShortcutSurfaceEntry(id = "action-change", label = "Change album", isPinned = false, isAction = true),
+            ShortcutSurfaceEntry(id = "action-remove", label = "Remove album", isPinned = false, isAction = true),
+        )
+        setMenuCanvas(loaded(listOf(tile("a", personal, "Deep App"))), actions)
+        composeRule.waitForIdle()
+        longPressBody("Deep App")
+
+        composeRule.onNodeWithTag(EDIT_SHORTCUT_MENU_TAG, useUnmergedTree = true)
+            .assertIsDisplayed()
+        composeRule.onAllNodesWithTag(SHORTCUT_SURFACE_ROW_TAG, useUnmergedTree = true)
+            .assertCountEquals(2)
+        composeRule.onAllNodesWithTag(PIN_TOGGLE_TAG, useUnmergedTree = true)
+            .assertCountEquals(0)
+    }
+
+    @Test
     fun tapOther_transfersMenuToNewSelection() {
         val tiles = listOf(
             tile("a", personal, "Alpha App", column = 0),

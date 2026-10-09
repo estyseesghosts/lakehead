@@ -185,6 +185,9 @@ class MainActivity : ComponentActivity() {
             columns = 5,
             repository = placementRepository,
             ioDispatcher = Dispatchers.IO,
+            // Decision 7: import restores an album binding only when its
+            // bucket is on this device (denied permission reads as none).
+            loadDeviceAlbumBuckets = { mediaGateway.albums().map { it.album.bucketId }.toSet() },
         )
     }
 
@@ -465,9 +468,21 @@ class MainActivity : ComponentActivity() {
                 surfaceEntries = shortcutMenu?.entries.orEmpty(),
                 surfaceEntriesTileId = shortcutMenu?.tileId,
                 onSelectedTileChange = shortcutMenuCoordinator::onSelectionChanged,
+                // Album rows (slice 7) route by id: Change reopens the
+                // picker through the coordinator's pending-tile flow
+                // (re-requesting permission when denied), Remove clears the
+                // binding and refreshes the open menu so its rows drop.
+                // Anything else is a shortcut launch under its profile.
                 onSurfaceExecute = { itemId, entryId ->
                     lifecycleScope.launch {
-                        shortcutMenuCoordinator.execute(itemId, entryId)
+                        when (entryId) {
+                            ALBUM_MENU_CHANGE_ID -> albumCoordinator.openAlbumPicker(itemId)
+                            ALBUM_MENU_REMOVE_ID -> {
+                                albumCoordinator.removeAlbumBinding(itemId)
+                                shortcutMenuCoordinator.refreshSelection()
+                            }
+                            else -> shortcutMenuCoordinator.execute(itemId, entryId)
+                        }
                     }
                 },
                 // B2: pin toggles mutate only the selected tile binding and

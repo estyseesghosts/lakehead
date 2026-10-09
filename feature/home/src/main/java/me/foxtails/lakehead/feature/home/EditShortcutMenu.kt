@@ -2,10 +2,13 @@ package me.foxtails.lakehead.feature.home
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
@@ -13,6 +16,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.text.BasicText
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
@@ -20,15 +24,23 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import me.foxtails.lakehead.core.designsystem.CORNER_CONTROL_TOUCH_SIZE
 import me.foxtails.lakehead.core.designsystem.FloatingOverlayFrame
 import me.foxtails.lakehead.core.designsystem.FrameAnchor
 import me.foxtails.lakehead.core.designsystem.FrameSize
 import me.foxtails.lakehead.core.designsystem.HorizontalFrameAnchor
 import me.foxtails.lakehead.core.designsystem.PixelRect
+import me.foxtails.lakehead.core.designsystem.ROW_LAUNCH_ZONE_TAG
 import me.foxtails.lakehead.core.designsystem.SHORTCUT_SURFACE_ROW_HEIGHT
+import me.foxtails.lakehead.core.designsystem.SHORTCUT_SURFACE_ROW_TAG
 import me.foxtails.lakehead.core.designsystem.ShortcutSurfaceEntry
 import me.foxtails.lakehead.core.designsystem.ShortcutSurfaceRow
 import me.foxtails.lakehead.core.designsystem.SignedPixelFrame
@@ -58,6 +70,11 @@ import me.foxtails.lakehead.core.model.ItemId
  *   The menu itself never moves, resizes or pages tiles.
  * - None means no menu: a null/missing selection or an empty [entries] list
  *   renders nothing (no empty box, no honest-empty row).
+ * - Action rows: entries with [ShortcutSurfaceEntry.isAction] (album
+ *   "Change album" / "Remove album", appended after the shortcut rows by
+ *   the `:app` loader for bound tiles) render label-only with no pin
+ *   toggle at the shared fixed row height. Taps report [onSurfaceExecute]
+ *   with the row id and never [onSurfaceTogglePin].
  * - Geometry is overlay-only: [editShortcutMenuFrame] measures a sibling frame
  *   beside the tile (try above, flip below, roomier-side fallback) through
  *   [FloatingOverlayFrame.measure], so neighbours are overlaid and the grid
@@ -200,11 +217,18 @@ internal fun EditShortcutMenu(
                 .verticalScroll(menuScroll, enabled = needsScroll),
         ) {
             entries.forEach { entry ->
-                ShortcutSurfaceRow(
-                    entry = entry,
-                    onExecute = { onSurfaceExecute(tile.itemId, entry.id) },
-                    onTogglePin = { onSurfaceTogglePin(tile.itemId, entry.id) },
-                )
+                if (entry.isAction) {
+                    MenuActionRow(
+                        label = entry.label,
+                        onExecute = { onSurfaceExecute(tile.itemId, entry.id) },
+                    )
+                } else {
+                    ShortcutSurfaceRow(
+                        entry = entry,
+                        onExecute = { onSurfaceExecute(tile.itemId, entry.id) },
+                        onTogglePin = { onSurfaceTogglePin(tile.itemId, entry.id) },
+                    )
+                }
             }
         }
     }
@@ -212,6 +236,54 @@ internal fun EditShortcutMenu(
 
 /** Test tag on the edit-mode shortcut menu overlay (testing hook only; no behavior change). */
 internal const val EDIT_SHORTCUT_MENU_TAG: String = "edit-shortcut-menu"
+
+/**
+ * One plain action row inside the edit menu (album "Change album" / "Remove album").
+ *
+ * Same fixed [SHORTCUT_SURFACE_ROW_HEIGHT] height, label style and launch-zone
+ * semantics/tags as [ShortcutSurfaceRow] so rows measure and count uniformly,
+ * but with no pin toggle: taps execute the action and never pin. Custom
+ * Foundation/text only, like the shortcut row.
+ */
+@Composable
+private fun MenuActionRow(
+    label: String,
+    onExecute: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val scheme = MaterialTheme.colorScheme
+    Row(
+        modifier = modifier
+            .height(SHORTCUT_SURFACE_ROW_HEIGHT.dp)
+            .testTag(SHORTCUT_SURFACE_ROW_TAG),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Row(
+            modifier = Modifier
+                .weight(1f)
+                .height(SHORTCUT_SURFACE_ROW_HEIGHT.dp)
+                .testTag(ROW_LAUNCH_ZONE_TAG)
+                .semantics(mergeDescendants = true) {
+                    this.contentDescription = label
+                }
+                .clickable(
+                    onClick = onExecute,
+                    role = Role.Button,
+                ),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            BasicText(
+                text = label,
+                style = TextStyle(
+                    color = scheme.onSurface,
+                    fontSize = 16.sp,
+                ),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
 
 /**
  * Minimum menu width so a single short label never collapses toward zero.

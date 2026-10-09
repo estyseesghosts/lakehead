@@ -10,6 +10,8 @@ import me.foxtails.lakehead.core.model.LogicalPosition
 import me.foxtails.lakehead.core.model.LogicalSpan
 import me.foxtails.lakehead.core.model.ProfileId
 import me.foxtails.lakehead.core.model.ShortcutRef
+import me.foxtails.lakehead.core.model.AlbumRef
+import me.foxtails.lakehead.core.model.TileAlbumBinding
 import me.foxtails.lakehead.core.model.TileBinding
 import org.json.JSONArray
 import org.json.JSONObject
@@ -138,6 +140,55 @@ class HomeLayoutJsonTest {
         assertEquals("first", decoded[0].shortcutId)
         assertEquals("second", decoded[1].shortcutId)
         assertEquals("third", decoded[2].shortcutId)
+    }
+
+    @Test
+    fun roundTrip_withAlbumBinding() {
+        val placement = makePlacement("tile-1", column = 0, row = 0)
+        val json = HomeLayoutCodec.encodeLayout(
+            HomeId("home-main"), 5, listOf(placement), emptyMap(),
+            mapOf(
+                ItemId("tile-1") to TileAlbumBinding(
+                    ItemId("tile-1"),
+                    AlbumRef("b1", "Camera"),
+                ),
+            ),
+        )
+        val doc = HomeLayoutCodec.decodeLayout(json)
+
+        assertEquals(1, doc.items.size)
+        assertEquals(HomeLayoutJsonAlbumRef("b1", "Camera"), doc.items[0].album)
+    }
+
+    @Test
+    fun roundTrip_withoutAlbumBinding_decodesNull() {
+        val placement = makePlacement("tile-1", column = 0, row = 0)
+        val json = HomeLayoutCodec.encodeLayout(HomeId("home-main"), 5, listOf(placement), emptyMap())
+        val doc = HomeLayoutCodec.decodeLayout(json)
+
+        assertEquals(1, doc.items.size)
+        assertEquals(null, doc.items[0].album)
+    }
+
+    @Test
+    fun decodeLayout_malformedAlbum_throws() {
+        val json = makeValidDoc().apply {
+            getJSONObject("home").getJSONArray("items").put(JSONObject().apply {
+                put("id", "tile-1")
+                put("type", "APP")
+                put("column", 0); put("row", 0)
+                put("columns", 1); put("rows", 1)
+                put("app", JSONObject().apply {
+                    put("profileId", "0")
+                    put("packageName", "com.example")
+                    put("className", "com.example.Main")
+                })
+                put("album", JSONObject().apply {
+                    put("bucketId", "b1")
+                })
+            })
+        }
+        assertItemRejected(json, RejectedReason.MissingField::class.java)
     }
 
     @Test

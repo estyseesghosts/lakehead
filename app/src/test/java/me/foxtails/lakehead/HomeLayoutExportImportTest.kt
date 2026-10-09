@@ -16,6 +16,7 @@ import me.foxtails.lakehead.core.model.LogicalPosition
 import me.foxtails.lakehead.core.model.LogicalSpan
 import me.foxtails.lakehead.core.model.ProfileId
 import me.foxtails.lakehead.core.model.ShortcutRef
+import me.foxtails.lakehead.core.model.AlbumRef
 import me.foxtails.lakehead.core.model.TileAlbumBinding
 import me.foxtails.lakehead.core.model.TileBinding
 import me.foxtails.lakehead.data.repository.HomePlacementRepository
@@ -167,6 +168,7 @@ class HomeLayoutExportImportTest {
         packageName: String = "com.example",
         className: String = "com.example.Main",
         shortcuts: List<JSONObject> = emptyList(),
+        album: JSONObject? = null,
     ) = JSONObject().apply {
         put("id", id)
         put("type", "APP")
@@ -182,6 +184,14 @@ class HomeLayoutExportImportTest {
         if (shortcuts.isNotEmpty()) {
             put("pinnedShortcuts", JSONArray().apply { shortcuts.forEach { put(it) } })
         }
+        if (album != null) {
+            put("album", album)
+        }
+    }
+
+    private fun makeJsonAlbum(bucketId: String, name: String) = JSONObject().apply {
+        put("bucketId", bucketId)
+        put("name", name)
     }
 
     @Test
@@ -397,6 +407,75 @@ class HomeLayoutExportImportTest {
         assertEquals("tile-1", doc.items[0].id)
         assertEquals(2, doc.items[0].column)
         assertEquals(1, doc.items[0].pinnedShortcuts.size)
+    }
+
+    @Test
+    fun import_withAlbumPresentOnDevice_restoresBinding() = runTest(testDispatcher) {
+        val repo = FakeHomePlacementRepository(5)
+        val coordinator = HomeLayoutExportImport(
+            homeId, 5, repo, testDispatcher,
+            loadDeviceAlbumBuckets = { setOf("b1") },
+        )
+        val doc = makeJsonDoc(
+            listOf(makeJsonItem("tile-1", column = 0, row = 0, album = makeJsonAlbum("b1", "Camera"))),
+        )
+
+        val result = coordinator.importLayout(doc)
+
+        assertTrue(result is ImportResult.Applied)
+        val applied = result as ImportResult.Applied
+        assertEquals(1, applied.itemsPlaced)
+        assertEquals(1, applied.bindingsRestored)
+        assertTrue(applied.rejected.isEmpty())
+        assertEquals(
+            TileAlbumBinding(ItemId("tile-1"), AlbumRef("b1", "Camera")),
+            repo.loadAlbumBinding(ItemId("tile-1")),
+        )
+    }
+
+    @Test
+    fun import_withAlbumAbsentOnDevice_dropsBindingKeepsTile() = runTest(testDispatcher) {
+        val repo = FakeHomePlacementRepository(5)
+        val coordinator = HomeLayoutExportImport(
+            homeId, 5, repo, testDispatcher,
+            loadDeviceAlbumBuckets = { setOf("other") },
+        )
+        val doc = makeJsonDoc(
+            listOf(makeJsonItem("tile-1", column = 0, row = 0, album = makeJsonAlbum("b1", "Camera"))),
+        )
+
+        val result = coordinator.importLayout(doc)
+
+        assertTrue(result is ImportResult.Applied)
+        val applied = result as ImportResult.Applied
+        assertEquals(1, applied.itemsPlaced)
+        assertEquals(0, applied.bindingsRestored)
+        assertTrue(applied.rejected.isEmpty())
+        assertEquals(null, repo.loadAlbumBinding(ItemId("tile-1")))
+    }
+
+    @Test
+    fun export_includesAlbumBinding() = runTest(testDispatcher) {
+        val repo = FakeHomePlacementRepository(5)
+        repo.ensureHome(homeId)
+        repo.place(
+            homeId, ItemId("tile-1"),
+            AppIdentity(ProfileId("0"), ComponentIdentity("com.example", "com.example.Main")),
+            LogicalPosition(0, 0), LogicalSpan(2, 2), 5,
+        )
+        repo.saveAlbumBinding(
+            TileAlbumBinding(
+                ItemId("tile-1"),
+                AlbumRef("b1", "Camera"),
+            ),
+        )
+        val coordinator = HomeLayoutExportImport(homeId, 5, repo, testDispatcher)
+
+        val (json, _) = coordinator.exportLayout()
+
+        val doc = HomeLayoutCodec.decodeLayout(json)
+        assertEquals(1, doc.items.size)
+        assertEquals(HomeLayoutJsonAlbumRef("b1", "Camera"), doc.items[0].album)
     }
 
     private fun makeValidDoc() = JSONObject().apply {

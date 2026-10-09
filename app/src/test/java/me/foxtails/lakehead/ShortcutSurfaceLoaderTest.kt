@@ -19,6 +19,7 @@ import me.foxtails.lakehead.core.model.LogicalPosition
 import me.foxtails.lakehead.core.model.LogicalSpan
 import me.foxtails.lakehead.core.model.ProfileId
 import me.foxtails.lakehead.core.model.ShortcutRef
+import me.foxtails.lakehead.core.model.AlbumRef
 import me.foxtails.lakehead.core.model.TileAlbumBinding
 import me.foxtails.lakehead.core.model.TileBinding
 import me.foxtails.lakehead.data.repository.HomePlacementRepository
@@ -62,7 +63,7 @@ class ShortcutSurfaceLoaderTest {
     }
 
     @Test
-    fun zeroShortcutsYieldsEmptyListWithoutReadingBinding() = runTest {
+    fun zeroShortcutsWithoutAlbumBindingYieldsEmptyWithoutReadingShortcutBinding() = runTest {
         val dispatcher = StandardTestDispatcher(testScheduler)
         val gateway = FakeGateway(emptyMap())
         val repository = FakeBindingRepository(emptyMap())
@@ -70,6 +71,53 @@ class ShortcutSurfaceLoaderTest {
 
         assertTrue(loader.entriesForTile(tileId, identity).isEmpty())
         assertEquals(0, repository.bindingReads)
+        assertEquals(1, repository.albumReads)
+    }
+
+    @Test
+    fun boundTileWithZeroShortcutsYieldsOnlyAlbumRows() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val gateway = FakeGateway(emptyMap())
+        val repository = FakeBindingRepository(
+            emptyMap(),
+            albumBindings = mapOf(tileId to TileAlbumBinding(tileId, AlbumRef("b1", "Camera"))),
+        )
+        val loader = ShortcutSurfaceLoader(gateway, repository, dispatcher)
+
+        val entries = loader.entriesForTile(tileId, identity)
+        assertEquals(listOf(ALBUM_MENU_CHANGE_ID, ALBUM_MENU_REMOVE_ID), entries.map { it.id })
+        assertEquals(listOf("Change album", "Remove album"), entries.map { it.label })
+        assertTrue(entries.all { it.isAction })
+        // The shortcut binding is still skipped when there are no shortcuts.
+        assertEquals(0, repository.bindingReads)
+    }
+
+    @Test
+    fun boundTileWithShortcutsAppendsAlbumRowsAfter() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val gateway = FakeGateway(
+            mapOf(identity to listOf(shortcut("a", "A", 0), shortcut("b", "B", 1))),
+        )
+        val repository = FakeBindingRepository(
+            emptyMap(),
+            albumBindings = mapOf(tileId to TileAlbumBinding(tileId, AlbumRef("b1", "Camera"))),
+        )
+        val loader = ShortcutSurfaceLoader(gateway, repository, dispatcher)
+
+        val entries = loader.entriesForTile(tileId, identity, LogicalSpan(2, 1))
+        assertEquals(listOf("a", "b", ALBUM_MENU_CHANGE_ID, ALBUM_MENU_REMOVE_ID), entries.map { it.id })
+        assertEquals(listOf(false, false, true, true), entries.map { it.isAction })
+    }
+
+    @Test
+    fun togglePinForAlbumRowIdReturnsFalseWithoutWrite() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val gateway = FakeGateway(mapOf(identity to listOf(shortcut("a", "A", 0))))
+        val repository = FakeBindingRepository(emptyMap())
+        val loader = ShortcutSurfaceLoader(gateway, repository, dispatcher)
+
+        assertFalse(loader.togglePin(tileId, identity, LogicalSpan(2, 1), ALBUM_MENU_REMOVE_ID))
+        assertEquals(0, repository.saveCount)
     }
 
     @Test
@@ -190,11 +238,14 @@ class ShortcutSurfaceLoaderTest {
 
     private class FakeBindingRepository(
         bindings: Map<ItemId, TileBinding>,
+        albumBindings: Map<ItemId, TileAlbumBinding> = emptyMap(),
         private val delayFirstLoad: Boolean = false,
     ) : HomePlacementRepository {
         private val mutableBindings = bindings.toMutableMap()
+        private val mutableAlbumBindings = albumBindings.toMutableMap()
         private var loadCount = 0
         var bindingReads = 0
+        var albumReads = 0
         var saveCount = 0
         fun binding(tileId: ItemId): TileBinding = mutableBindings[tileId] ?: TileBinding(tileId)
         override fun load(homeId: HomeId, columns: Int): LoadResult = LoadResult.NotFound
@@ -237,7 +288,10 @@ class ShortcutSurfaceLoaderTest {
             synchronized(mutableBindings) { mutableBindings[binding.tileId] = binding }
         }
         override fun deleteBinding(tileId: ItemId) = error("surface loader must not write")
-        override fun loadAlbumBinding(tileId: ItemId): TileAlbumBinding? = null
+        override fun loadAlbumBinding(tileId: ItemId): TileAlbumBinding? {
+            albumReads++
+            return synchronized(mutableBindings) { mutableAlbumBindings[tileId] }
+        }
         override fun saveAlbumBinding(binding: TileAlbumBinding) = error("surface loader must not write")
         override fun deleteAlbumBinding(tileId: ItemId) = error("surface loader must not write")
     }

@@ -507,6 +507,150 @@ class AlbumTileCoordinatorTest {
         coordinator.stop()
     }
 
+    @Test
+    fun changeAlbumWithAccessOpensPickerAndPickRebinds() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val fixture = Fixture()
+        fixture.access = MediaAccess.FULL
+        fixture.repo.saveAlbumBinding(TileAlbumBinding(ItemId("t"), cameraAlbum))
+        val coordinator = fixture.coordinator(dispatcher, this)
+        val tile = galleryTile("t", LogicalSpan(2, 2))
+        coordinator.onHomeTilesChanged(listOf(tile))
+        advanceUntilIdle()
+
+        coordinator.openAlbumPicker(ItemId("t"))
+        advanceUntilIdle()
+
+        assertEquals(0, fixture.permissionRequests)
+        assertEquals(
+            listOf(MediaAlbum(cameraAlbum, 3, newest.contentUri)),
+            coordinator.pickerAlbums.value,
+        )
+
+        val other = AlbumRef("b2", "Screenshots")
+        fixture.library.photosByBucket["b2"] = mutableListOf(mid)
+        coordinator.onAlbumPick(other)
+        advanceUntilIdle()
+
+        assertEquals(TileAlbumBinding(ItemId("t"), other), fixture.repo.loadAlbumBinding(ItemId("t")))
+        assertNull(coordinator.pickerAlbums.value)
+        assertEquals(mapOf(ItemId("t") to mid.contentUri), coordinator.selectedPhotoByTile.value)
+        coordinator.stop()
+    }
+
+    @Test
+    fun changeAlbumWithoutAccessRequestsPermissionAndGrantOpensPicker() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val fixture = Fixture()
+        fixture.repo.saveAlbumBinding(TileAlbumBinding(ItemId("t"), cameraAlbum))
+        val coordinator = fixture.coordinator(dispatcher, this)
+        val tile = galleryTile("t", LogicalSpan(2, 2))
+        coordinator.onHomeTilesChanged(listOf(tile))
+        advanceUntilIdle()
+
+        coordinator.openAlbumPicker(ItemId("t"))
+        advanceUntilIdle()
+
+        assertEquals(1, fixture.permissionRequests)
+        assertNull(coordinator.pickerAlbums.value)
+
+        coordinator.onPermissionResult(MediaAccess.FULL)
+        advanceUntilIdle()
+
+        assertEquals(
+            listOf(MediaAlbum(cameraAlbum, 3, newest.contentUri)),
+            coordinator.pickerAlbums.value,
+        )
+        coordinator.stop()
+    }
+
+    @Test
+    fun changeAlbumDenyKeepsPickerClosedAndBindingKept() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val fixture = Fixture()
+        fixture.repo.saveAlbumBinding(TileAlbumBinding(ItemId("t"), cameraAlbum))
+        val coordinator = fixture.coordinator(dispatcher, this)
+        val tile = galleryTile("t", LogicalSpan(2, 2))
+        coordinator.onHomeTilesChanged(listOf(tile))
+        advanceUntilIdle()
+
+        coordinator.openAlbumPicker(ItemId("t"))
+        advanceUntilIdle()
+        coordinator.onPermissionResult(MediaAccess.DENIED)
+        advanceUntilIdle()
+
+        assertNull(coordinator.pickerAlbums.value)
+        assertEquals(cameraAlbum, fixture.repo.loadAlbumBinding(ItemId("t"))?.album)
+        coordinator.stop()
+    }
+
+    @Test
+    fun changeAlbumForUnknownTileIsIgnored() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val fixture = Fixture()
+        val coordinator = fixture.coordinator(dispatcher, this)
+        coordinator.onHomeTilesChanged(listOf(galleryTile("t", LogicalSpan(2, 2))))
+        advanceUntilIdle()
+
+        coordinator.openAlbumPicker(ItemId("gone"))
+        advanceUntilIdle()
+
+        assertEquals(0, fixture.permissionRequests)
+        assertNull(coordinator.pickerAlbums.value)
+        coordinator.stop()
+    }
+
+    @Test
+    fun removeAlbumBindingClearsBindingPhotoAndTapState() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val fixture = Fixture()
+        fixture.access = MediaAccess.FULL
+        fixture.repo.saveAlbumBinding(TileAlbumBinding(ItemId("t"), cameraAlbum))
+        val coordinator = fixture.coordinator(dispatcher, this)
+        val tile = galleryTile("t", LogicalSpan(2, 2))
+        coordinator.onHomeTilesChanged(listOf(tile))
+        advanceUntilIdle()
+        assertEquals(newest.contentUri, coordinator.selectedPhotoByTile.value[ItemId("t")])
+
+        coordinator.onHomeTileTapped(ItemId("t"))
+        advanceUntilIdle()
+        assertEquals(mid.contentUri, coordinator.selectedPhotoByTile.value[ItemId("t")])
+
+        coordinator.removeAlbumBinding(ItemId("t"))
+        advanceUntilIdle()
+
+        assertNull(fixture.repo.loadAlbumBinding(ItemId("t")))
+        assertTrue(coordinator.selectedPhotoByTile.value.isEmpty())
+        assertTrue(coordinator.albumPhotoByTile.value.isEmpty())
+
+        // Taps after removal stay a no-op for the slideshow.
+        coordinator.onHomeTileTapped(ItemId("t"))
+        advanceUntilIdle()
+        assertTrue(coordinator.selectedPhotoByTile.value.isEmpty())
+        coordinator.stop()
+    }
+
+    @Test
+    fun removeAlbumBindingClosesPendingPickerForSameTile() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val fixture = Fixture()
+        fixture.access = MediaAccess.FULL
+        fixture.repo.saveAlbumBinding(TileAlbumBinding(ItemId("t"), cameraAlbum))
+        val coordinator = fixture.coordinator(dispatcher, this)
+        coordinator.onHomeTilesChanged(listOf(galleryTile("t", LogicalSpan(2, 2))))
+        advanceUntilIdle()
+        coordinator.openAlbumPicker(ItemId("t"))
+        advanceUntilIdle()
+        assertEquals(1, coordinator.pickerAlbums.value?.size)
+
+        coordinator.removeAlbumBinding(ItemId("t"))
+        advanceUntilIdle()
+
+        assertNull(coordinator.pickerAlbums.value)
+        assertNull(fixture.repo.loadAlbumBinding(ItemId("t")))
+        coordinator.stop()
+    }
+
     private class FakeAlbumRepository : HomePlacementRepository {
         private val albumBindings = mutableMapOf<ItemId, TileAlbumBinding>()
         val savedBindings = mutableListOf<TileAlbumBinding>()

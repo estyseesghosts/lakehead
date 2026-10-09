@@ -35,12 +35,17 @@ import androidx.compose.ui.unit.sp
  * here. [isPinned] selects the pin toggle's filled (pinned) vs outline (unpinned)
  * visual. [isPinEnabled] is false while the tile has no visible-strip capacity left
  * (at-capacity disabled pin, §17); the toggle keeps its label but exposes no action.
+ *
+ * Plain action rows (album "Change album" / "Remove album") set [isAction]: they
+ * render label-only with no pin toggle and report taps through the same execute
+ * callback, routed by [id]. Shortcut rows keep [isAction] false.
  */
 data class ShortcutSurfaceEntry(
     val id: String,
     val label: String,
     val isPinned: Boolean,
     val isPinEnabled: Boolean = true,
+    val isAction: Boolean = false,
 ) {
     init {
         require(id.isNotBlank()) { "id must not be blank" }

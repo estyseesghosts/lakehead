@@ -5,6 +5,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import me.foxtails.lakehead.core.model.AppIdentity
 import me.foxtails.lakehead.core.model.AppPlacement
+import me.foxtails.lakehead.core.model.AlbumRef
 import me.foxtails.lakehead.core.model.ComponentIdentity
 import me.foxtails.lakehead.core.model.HomeId
 import me.foxtails.lakehead.core.model.ItemId
@@ -12,6 +13,7 @@ import me.foxtails.lakehead.core.model.LogicalPosition
 import me.foxtails.lakehead.core.model.LogicalSpan
 import me.foxtails.lakehead.core.model.ProfileId
 import me.foxtails.lakehead.core.model.ShortcutRef
+import me.foxtails.lakehead.core.model.TileAlbumBinding
 import me.foxtails.lakehead.core.model.TileBinding
 import me.foxtails.lakehead.data.repository.HomePlacementRepository
 import me.foxtails.lakehead.data.repository.LoadResult
@@ -50,12 +52,18 @@ interface HomeLayoutExportImportPort {
  * Reads placements and bindings through the [HomePlacementRepository], encodes/decodes via
  * [HomeLayoutCodec], and reflows imported items whose requested positions collide or exceed
  * the column bound.
+ *
+ * Album slideshow bindings (decision 7) export as the optional per-item `album`
+ * field (bucket id + name only). On import a binding is restored only when its
+ * bucket is in [loadDeviceAlbumBuckets]; otherwise it is dropped silently —
+ * the tile is still placed, with no binding and no rejection.
  */
 class HomeLayoutExportImport(
     private val homeId: HomeId,
     private val columns: Int,
     private val repository: HomePlacementRepository,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+    private val loadDeviceAlbumBuckets: suspend () -> Set<String> = { emptySet() },
 ) : HomeLayoutExportImportPort {
 
     override suspend fun exportLayout(): Pair<JSONObject, String> = withContext(ioDispatcher) {
@@ -65,11 +73,13 @@ class HomeLayoutExportImport(
             is LoadResult.NotFound -> emptyList()
         }
         val bindingsByTile = mutableMapOf<ItemId, TileBinding>()
+        val albumBindingsByTile = mutableMapOf<ItemId, TileAlbumBinding>()
         for (placement in placements) {
             bindingsByTile[placement.itemId] = repository.loadBinding(placement.itemId)
+            repository.loadAlbumBinding(placement.itemId)?.let { albumBindingsByTile[placement.itemId] = it }
         }
         val json = HomeLayoutCodec.encodeLayout(
-            homeId, columns, placements.filterIsInstance<AppPlacement>(), bindingsByTile,
+            homeId, columns, placements.filterIsInstance<AppPlacement>(), bindingsByTile, albumBindingsByTile,
         )
         val filename = "${homeId.value}-${System.currentTimeMillis() / 1000}.json"
         Pair(json, filename)
@@ -88,6 +98,16 @@ class HomeLayoutExportImport(
         var itemsShifted = 0
         var bindingsRestored = 0
         val rejected = mutableListOf<RejectedItem>()
+
+        // Device albums for the optional album-binding restore (decision 7):
+        // queried once per import, and only when at least one item carries a
+        // binding. A denied photo permission reads as no albums, so every
+        // binding drops honestly.
+        val deviceAlbumBuckets = if (document.items.any { it.album != null }) {
+            loadDeviceAlbumBuckets()
+        } else {
+            emptySet()
+        }
 
         // Track placed items for collision detection during reflow.
         // Each entry: (column, row, columns, rows)
@@ -231,6 +251,14 @@ class HomeLayoutExportImport(
                     )
                 }
                 repository.saveBinding(TileBinding(tileId = itemId, pinnedShortcuts = shortcutRefs))
+                bindingsRestored++
+            }
+
+            // Restore the album slideshow binding only when the album is on
+            // this device; otherwise the binding drops while the tile stays.
+            val album = item.album
+            if (album != null && album.bucketId in deviceAlbumBuckets) {
+                repository.saveAlbumBinding(TileAlbumBinding(itemId, AlbumRef(album.bucketId, album.name)))
                 bindingsRestored++
             }
         }

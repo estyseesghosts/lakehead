@@ -100,6 +100,11 @@ internal data class AlbumOfferPrompt(
  * alarms, no background work. Tap counts live only in memory, so process
  * death resets them.
  *
+ * Edit-menu undo (slice 7): [openAlbumPicker] reopens the picker for a bound
+ * tile through the same pending-tile flow (permission is re-requested here
+ * when denied — the only place it is); [removeAlbumBinding] deletes the
+ * persisted row and drops the tile's photo, selection and tap count.
+ *
  * Binding persistence stays with [HomePlacementRepository] off the caller
  * thread. Call [start] before tiles arrive (production: `onStart`) and
  * [stop] when leaving (production: `onStop`).
@@ -309,6 +314,49 @@ internal class AlbumTileCoordinator(
     fun onPickerDismiss() {
         synchronized(this) { pendingTile = null }
         mutablePickerAlbums.value = null
+    }
+
+    /**
+     * Reopens the album picker for an already-bound tile (edit-menu
+     * "Change album").
+     *
+     * Reuses the pending-tile flow: with photo access already granted the
+     * album list opens directly, otherwise the permission request fires
+     * first and [onPermissionResult] continues. This is the only place a
+     * denied permission is re-requested. Tiles not currently on Home are
+     * ignored.
+     */
+    fun openAlbumPicker(tileId: ItemId) {
+        val known = synchronized(this) { tiles.any { it.itemId == tileId } }
+        if (!known) return
+        synchronized(this) { pendingTile = tileId }
+        if (accessNow() != MediaAccess.DENIED) {
+            openPicker()
+        } else {
+            onRequestPermission()
+        }
+    }
+
+    /**
+     * Clears a tile's album binding (edit-menu "Remove album").
+     *
+     * Deletes the persisted row and drops the tile's selected photo, image
+     * and tap count, then reprojects so the tile renders its normal icon.
+     * The tile itself is untouched (removing a tile already cascades its
+     * binding separately). A picker pending for the same tile is closed.
+     * Unknown or unbound tiles are a no-op beyond reprojection.
+     */
+    suspend fun removeAlbumBinding(tileId: ItemId) {
+        withContext(ioDispatcher) { repository.deleteAlbumBinding(tileId) }
+        synchronized(this) {
+            bindings = bindings - tileId
+            tapCounts.remove(tileId)
+            if (pendingTile == tileId) {
+                pendingTile = null
+                mutablePickerAlbums.value = null
+            }
+        }
+        project()
     }
 
     /**
