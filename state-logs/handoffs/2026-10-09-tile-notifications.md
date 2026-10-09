@@ -25,12 +25,20 @@ Task spec: `docs/agents/tasks/tile-notifications.md`. Owner: tile-notifications 
 - `function_audit.py`, `compose_audit.py`, `repo_map.py`: run; review signals only, nothing acted on. Compose audit flags are comments in existing files.
 - `:core:designsystem` device class `AppTileNotificationCountTest`: PASS earlier on R5CN70E2SGV.
 
+## Slice 7 device evidence (R5CN70E2SGV, listener access granted)
+- Count: a 1x1 Instagram tile showed `1` beside its icon for one real active notification.
+- Preview: a 2x2 tile showed newest-first name + body with the icon at the compact bottom-right anchor (test notification via `cmd notification post`, temporarily mapped to a tile; mapping removed), and a 2x2 Instagram tile showed a real preview with a circular contact photo extracted from the notification.
+- Ongoing notifications (a Discord service notification, LocalSend transfer) correctly produce no count or preview; archived notifications are ignored.
+- Final clean build (no debug mapping) was installed with `installDebug`; the post-cleanup tile appearance was not re-screenshotted.
+- `./gradlew :core:designsystem:connectedDebugAndroidTest` (full): PASS, including existing `AppTileTest` and `AppTileNotificationCountTest`.
+- `./gradlew :app:testDebugUnitTest --tests ...NotificationTileJoinTest`: PASS (work/personal separation, widgets and quiet tiles skipped). Full `test`, `lint`, `assembleDebug` re-run after the join test and cleanup: PASS.
+- `./gradlew :app:assembleRelease`: PASS, `app/build/outputs/apk/release/app-release.apk` (debug-keystore signed per `release-builds-setup.md`); not installed or run on the device.
+
 ## Not verified
-- Listener access has not been granted on the device, so no real notification has been seen on a tile. Post/remove reflected in the flow, preview rendering, photo extraction, and work-profile (PLG110) notifications are all unverified on device.
-- Full `:core:designsystem:connectedDebugAndroidTest` failed earlier with "No compose hierarchies found" (launcher held focus) and was not re-run; existing `AppTileTest` is unconfirmed after the edits.
-- No unit test for `joinNotificationsToTiles`; no Compose test for the preview.
-- Selected-tile preview hiding at feature level is not tested.
-- Release APK not built.
+- Work-profile (PLG110, user 150) notifications on device: shell cannot post to or list user 150 and none were active; only the pure join is unit tested for profile separation.
+- Removal/dismissal propagating to a tile live, was only observed indirectly.
+- Selected-tile preview hiding at feature level and a Compose test for preview rendering are not written.
+- The release APK has not been run.
 
 ## Known gaps
 - No fallback compact indicator on large tiles when the preview region is too small.
@@ -39,4 +47,4 @@ Task spec: `docs/agents/tasks/tile-notifications.md`. Owner: tile-notifications 
 - Committed on `main` at the end of this session (see git log).
 
 ## Next action
-Grant listener access (Settings row "Notification access…" on the device), post notifications from a messaging app and a work-profile app, and confirm count, preview, photo and removal on tiles. Exit condition: each of those observed on R5CN70E2SGV, then re-run the full `:core:designsystem:connectedDebugAndroidTest` and build the test-signed release APK per `docs/agents/tasks/release-builds-setup.md`.
+Verify work-profile notifications on PLG110 (a work-profile app posting while a work tile is on Home) and install/run the release APK. Exit condition: the work tile shows its own count/preview separately from the personal copy, and the release build shows the same behaviour with the listener service intact under R8.
