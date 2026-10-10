@@ -151,7 +151,7 @@ private suspend fun AwaitPointerEventScope.awaitDownTile(
     val selectedInHandle = selectedTile?.let {
         isInHandle(start.x, contentY, metrics.pixelFrame(it.position, it.span), handleSizePx)
     } == true
-    if (!edit.isEditing && downTile?.isLaunchable != true) return null
+    if (!edit.isEditing && downTile?.isMovable != true) return null
     if (edit.isEditing && downTile == null && !selectedInHandle) return null
     val tile = downTile ?: selectedTile ?: return null
     val bounds = metrics.pixelFrame(tile.position, tile.span)

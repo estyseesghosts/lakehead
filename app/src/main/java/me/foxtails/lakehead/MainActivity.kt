@@ -21,6 +21,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import me.foxtails.lakehead.core.designsystem.LauncherTheme
 import me.foxtails.lakehead.core.model.HomeId
+import me.foxtails.lakehead.core.model.ItemId
 import me.foxtails.lakehead.data.database.PlacementDatabase
 import me.foxtails.lakehead.data.repository.FolderRepository
 import me.foxtails.lakehead.data.repository.HomePlacementRepository
@@ -381,16 +382,14 @@ class MainActivity : ComponentActivity() {
             val pinnedByTile by shortcutMenuCoordinator.pinnedByTile.collectAsState()
             // B1: forward loaded tiles so the coordinator can project the
             // selection to its AppIdentity and clear menus of removed tiles.
-            androidx.compose.runtime.LaunchedEffect(homeState) {
-                shortcutMenuCoordinator.onHomeTilesChanged(
-                    (homeState as? HomeRenderState.Loaded)?.tiles.orEmpty(),
-                )
-                albumCoordinator.onHomeTilesChanged(
-                    (homeState as? HomeRenderState.Loaded)?.tiles.orEmpty(),
-                )
-            }
             val openFolder by folders.openFolder.collectAsState()
             val openFolderMembers by folders.members.collectAsState()
+            androidx.compose.runtime.LaunchedEffect(homeState, openFolderMembers) {
+                val homeTiles = (homeState as? HomeRenderState.Loaded)?.tiles.orEmpty()
+                // Members of the open folder get pins and the edit menu like any Home tile.
+                shortcutMenuCoordinator.onHomeTilesChanged(homeTiles + openFolderMembers)
+                albumCoordinator.onHomeTilesChanged(homeTiles)
+            }
             val folderAddSource by folders.addSource.collectAsState()
             val folderRemovePrompt by folders.removePrompt.collectAsState()
             // A folder that disappears from Home (removed, dissolved, imported over) closes its overlay.
@@ -403,6 +402,21 @@ class MainActivity : ComponentActivity() {
             val albumPrompt by albumCoordinator.prompt.collectAsState()
             val albumPickerAlbums by albumCoordinator.pickerAlbums.collectAsState()
             val albumPhotos by albumCoordinator.albumPhotoByTile.collectAsState()
+            val onSurfaceExecute: (ItemId, String) -> Unit = { itemId, entryId ->
+                lifecycleScope.launch {
+                    when (entryId) {
+                        ALBUM_MENU_CHANGE_ID -> albumCoordinator.openAlbumPicker(itemId)
+                        ALBUM_MENU_REMOVE_ID -> {
+                            albumCoordinator.removeAlbumBinding(itemId)
+                            shortcutMenuCoordinator.refreshSelection()
+                        }
+                        else -> shortcutMenuCoordinator.execute(itemId, entryId)
+                    }
+                }
+            }
+            val onPinnedShortcutClick: (ItemId, String) -> Unit = { itemId, entryId ->
+                lifecycleScope.launch { shortcutMenuCoordinator.execute(itemId, entryId) }
+            }
             LauncherShell(
                 homeState = homeState,
                 notificationsByTile = notificationsByTile,
@@ -516,27 +530,12 @@ class MainActivity : ComponentActivity() {
                 // (re-requesting permission when denied), Remove clears the
                 // binding and refreshes the open menu so its rows drop.
                 // Anything else is a shortcut launch under its profile.
-                onSurfaceExecute = { itemId, entryId ->
-                    lifecycleScope.launch {
-                        when (entryId) {
-                            ALBUM_MENU_CHANGE_ID -> albumCoordinator.openAlbumPicker(itemId)
-                            ALBUM_MENU_REMOVE_ID -> {
-                                albumCoordinator.removeAlbumBinding(itemId)
-                                shortcutMenuCoordinator.refreshSelection()
-                            }
-                            else -> shortcutMenuCoordinator.execute(itemId, entryId)
-                        }
-                    }
-                },
+                onSurfaceExecute = onSurfaceExecute,
                 // B2: pin toggles mutate only the selected tile binding and
                 // never invoke shortcut execution.
                 onSurfaceTogglePin = shortcutMenuCoordinator::togglePin,
                 pinnedByTile = pinnedByTile,
-                onPinnedShortcutClick = { itemId, entryId ->
-                    lifecycleScope.launch {
-                        shortcutMenuCoordinator.execute(itemId, entryId)
-                    }
-                },
+                onPinnedShortcutClick = onPinnedShortcutClick,
                 // Album slideshow (slice 6): prompt/picker state and photo
                 // projection come from the coordinator; verbs report back.
                 albumPhotoByTile = albumPhotos,
@@ -557,6 +556,13 @@ class MainActivity : ComponentActivity() {
                     removePromptOpen = folderRemovePrompt != null,
                     onOpen = { id -> lifecycleScope.launch { folders.open(id) } },
                     onClose = folders::close,
+                    pinnedByTile = pinnedByTile,
+                    surfaceEntries = shortcutMenu?.entries.orEmpty(),
+                    surfaceEntriesTileId = shortcutMenu?.tileId,
+                    onSelectedTileChange = shortcutMenuCoordinator::onSelectionChanged,
+                    onSurfaceExecute = onSurfaceExecute,
+                    onSurfaceTogglePin = shortcutMenuCoordinator::togglePin,
+                    onPinnedShortcutClick = onPinnedShortcutClick,
                     onLaunchMember = { identity ->
                         folders.close()
                         (appLauncherForTest ?: productionAppLauncher).launch(identity)
@@ -567,6 +573,7 @@ class MainActivity : ComponentActivity() {
                     onMemberResize = { id, span -> lifecycleScope.launch { folders.resizeMember(id, span) } },
                     onNewFolder = { id -> lifecycleScope.launch { folders.createFolder(id) } },
                     onRequestAddToFolder = folders::requestAddToFolder,
+                    onDropOnFolder = { id, folder -> lifecycleScope.launch { folders.addToFolder(id, folder) } },
                     onPickFolder = { id -> lifecycleScope.launch { folders.pickFolder(id) } },
                     onChooserDismiss = folders::dismissChooser,
                     onRemoveConfirm = { lifecycleScope.launch { folders.confirmRemoveFolder() } },

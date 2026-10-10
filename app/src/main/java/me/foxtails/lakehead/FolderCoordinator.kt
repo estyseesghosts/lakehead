@@ -103,7 +103,12 @@ internal class FolderCoordinator(
     suspend fun pickFolder(folderId: ItemId): Boolean {
         val source = mutableAddSource.value ?: return false
         mutableAddSource.value = null
-        val result = withContext(ioDispatcher) { folders.moveIntoFolder(source, folderId, columns) }
+        return addToFolder(source, folderId)
+    }
+
+    /** Adds the Home tile [itemId] to [folderId]; used by the chooser and by dropping a tile on a folder. */
+    suspend fun addToFolder(itemId: ItemId, folderId: ItemId): Boolean {
+        val result = withContext(ioDispatcher) { folders.moveIntoFolder(itemId, folderId, columns) }
         if (result is TransferResult.Done) onHomeChanged()
         return result is TransferResult.Done
     }

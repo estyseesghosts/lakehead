@@ -119,6 +119,9 @@ data class HomeRenderTile(
     /** Folder tiles are fixed at 1×1 until a larger preview is designed. */
     val isResizable: Boolean get() = !isFolder
 
+    /** Launchable tiles and folders can be picked up and moved; unavailable app tiles stay put. */
+    val isMovable: Boolean get() = isLaunchable || isFolder
+
     /** The app identity of an app or widget tile; callers filter folders out first. */
     val requireAppIdentity: AppIdentity get() = checkNotNull(appIdentity) { "a folder tile has no app identity" }
 

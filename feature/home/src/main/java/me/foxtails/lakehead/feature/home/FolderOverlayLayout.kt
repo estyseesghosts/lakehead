@@ -36,6 +36,7 @@ internal fun folderOverlayLayout(
     paddingPx: Int,
     gapPx: Int,
     expandRows: Int = 0,
+    fillHeight: Boolean = false,
 ): FolderOverlayLayout {
     require(expandRows >= 0) { "expandRows must be non-negative" }
     require(columns > 0) { "columns must be positive" }
@@ -59,7 +60,9 @@ internal fun folderOverlayLayout(
     val baseContentHeightPx = maxOf(lowestBottomPx + paddingPx, minHeightPx)
     val contentHeightPx = baseContentHeightPx + expandRows * (geometry.cellSizePx + gapPx)
     val maxHeightPx = maxOf((viewportHeightPx * FOLDER_PANEL_MAX_HEIGHT_FRACTION).toInt(), minHeightPx)
-    val panelHeightPx = minOf(contentHeightPx, maxHeightPx).coerceAtMost(viewportHeightPx)
+    // [fillHeight] takes the whole cap: the shortcut menu of a selected member needs room to open.
+    val panelHeightPx = (if (fillHeight) maxHeightPx else minOf(contentHeightPx, maxHeightPx))
+        .coerceAtMost(viewportHeightPx)
     // The top edge stays where the unexpanded panel would sit, so growing never moves a held
     // tile's grid under the finger; extra rows extend downward and shift up only at the screen edge.
     val resting = FloatingOverlayFrame.measure(

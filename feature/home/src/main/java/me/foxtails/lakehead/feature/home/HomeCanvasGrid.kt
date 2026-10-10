@@ -240,6 +240,8 @@ internal fun HomeCanvasGrid(
     onDropOutside: (ItemId) -> Unit = {},
     onMoveActiveChange: (Boolean) -> Unit = {},
     onDragOutsideChange: (Boolean) -> Unit = {},
+    // Releasing a held tile over a folder tile adds it to that folder instead of moving it.
+    onDropOnFolder: (ItemId, ItemId) -> Unit = { _, _ -> },
 ) {
     require(usableHeightPx >= 0) { "usableHeightPx must be non-negative" }
     require(fullHeightPx >= 0) { "fullHeightPx must be non-negative" }
@@ -371,6 +373,7 @@ internal fun HomeCanvasGrid(
             val committedExtent = committed.extent
             val moveTickItemId = moveDrag?.itemId
             val latestOnDropOutside = rememberUpdatedState(onDropOutside)
+            val latestOnDropOnFolder = rememberUpdatedState(onDropOnFolder)
             val latestMoveActiveCallback = rememberUpdatedState(onMoveActiveChange)
             val latestOutsideCallback = rememberUpdatedState(onDragOutsideChange)
             val lastMoveId = remember { arrayOfNulls<ItemId>(1) }
@@ -410,6 +413,18 @@ internal fun HomeCanvasGrid(
                 isEditing = editState.isEditing,
             )
             val gridMetrics = layoutMetrics.copy(restOffsetYPx = restOffsetYPx)
+            // The folder tile under the held pointer, if a non-folder tile is being dragged.
+            val hoverFolderId = if (!interior && moveDrag != null && heldPointer != null) {
+                folderUnderPointer(
+                    tiles = loaded.tiles,
+                    metrics = gridMetrics,
+                    draggedId = moveDrag.itemId,
+                    pointer = heldPointer,
+                    scrollYPx = scrollState.value.toFloat(),
+                )
+            } else {
+                null
+            }
             LaunchedEffect(gridMetrics) {
                 editState = editState.cancelDragIfFrameChanged(gridMetrics)
             }
@@ -580,6 +595,19 @@ internal fun HomeCanvasGrid(
                         if (route == DownDragRoute.MOVE) {
                             moveEdgePointer.clear()
                         }
+                        if (!interior && route == DownDragRoute.MOVE && held != null &&
+                            !(end is HomeDragEnd.Discarded && end.reason == HomeDragDiscard.CANCELLED)
+                        ) {
+                            val snapshot = idleHitInputs.value
+                            val moved = lastMoveId[0]
+                            val folder = moved?.let {
+                                folderUnderPointer(snapshot.tiles, snapshot.metrics, it, held, snapshot.scrollYPx)
+                            }
+                            if (moved != null && folder != null) {
+                                latestOnDropOnFolder.value(moved, folder)
+                                return
+                            }
+                        }
                         if (interior && route == DownDragRoute.MOVE && held != null &&
                             !(end is HomeDragEnd.Discarded && end.reason == HomeDragDiscard.CANCELLED) &&
                             isOutsideGrid(held, availableWidthPx, scrollViewportPx.value)
@@ -658,7 +686,8 @@ internal fun HomeCanvasGrid(
                                     tile = tile,
                                     iconsByIdentity = iconsByIdentity,
                                     isEditing = editing,
-                                    isSelected = editState.selectedTileId == tile.itemId,
+                                    isSelected = editState.selectedTileId == tile.itemId ||
+                                        hoverFolderId == tile.itemId,
                                     isDragging = editState.isDragging,
                                     onOpen = { onOpenFolder(tile.itemId) },
                                     onSelect = { editState = editState.selectOnTap(tile.itemId) },
@@ -775,6 +804,23 @@ internal fun HomeCanvasGrid(
  * target.
  */
 internal const val RESIZE_TOUCH_DP: Int = CORNER_CONTROL_TOUCH_SIZE
+
+/**
+ * The folder tile under a held viewport-local [pointer] while [draggedId] is dragged, or null.
+ * A folder is never dropped onto itself or another folder (no nesting).
+ */
+internal fun folderUnderPointer(
+    tiles: List<HomeRenderTile>,
+    metrics: HomeGridMetrics,
+    draggedId: ItemId,
+    pointer: Offset,
+    scrollYPx: Float,
+): ItemId? {
+    val dragged = tiles.firstOrNull { it.itemId == draggedId } ?: return null
+    if (dragged.isFolder) return null
+    val under = metrics.tileAt(tiles, pointer.x, metrics.contentY(pointer.y, scrollYPx)) ?: return null
+    return under.takeIf { it.isFolder && it.itemId != draggedId }?.itemId
+}
 
 /** True when a viewport-local pointer lies outside the grid's own bounds (a folder drop-out). */
 internal fun isOutsideGrid(pointer: Offset, widthPx: Int, heightPx: Int): Boolean =

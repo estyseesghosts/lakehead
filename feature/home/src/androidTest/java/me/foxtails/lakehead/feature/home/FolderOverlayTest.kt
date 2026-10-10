@@ -18,7 +18,9 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeUp
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.compose.ui.test.onNodeWithContentDescription
 import me.foxtails.lakehead.core.designsystem.LauncherTheme
+import me.foxtails.lakehead.core.designsystem.PinnedTileShortcut
 import me.foxtails.lakehead.core.model.AppIdentity
 import me.foxtails.lakehead.core.model.ComponentIdentity
 import me.foxtails.lakehead.core.model.ItemAvailability
@@ -82,6 +84,8 @@ class FolderOverlayTest {
         onRemove: (ItemId) -> Unit = {},
         onDismiss: () -> Unit = {},
         widgetContent: HomeWidgetContent = NoHomeWidgetContent,
+        pinnedByTile: Map<ItemId, List<PinnedTileShortcut>> = emptyMap(),
+        onPinned: (ItemId, String) -> Unit = { _, _ -> },
     ) {
         composeRule.setContent {
             LauncherTheme {
@@ -90,6 +94,7 @@ class FolderOverlayTest {
                         isOpen = true, members = members, columns = columns, iconsByIdentity = emptyMap(),
                         onLaunchApp = onLaunch, onMoveToHome = onMove, onRemoveMember = onRemove,
                         onDismiss = onDismiss, widgetContent = widgetContent, onMoveMember = onMoveMember,
+                        pinnedByTile = pinnedByTile, onPinnedShortcutClick = onPinned,
                     )
                 }
             }
@@ -181,6 +186,18 @@ class FolderOverlayTest {
         composeRule.waitForIdle()
         composeRule.onNodeWithTag(FOLDER_DROP_HINT_TAG).assertIsDisplayed()
         gridNode().performTouchInput { up() }
+    }
+
+    @Test fun aMemberKeepsItsPinnedShortcutsAndTheyFire() {
+        val clicks = mutableListOf<Pair<ItemId, String>>()
+        show(
+            listOf(app("wide", 0, 0, 4, 2)),
+            pinnedByTile = mapOf(ItemId("wide") to listOf(PinnedTileShortcut("cam", "Camera"))),
+            onPinned = { owner, id -> clicks += owner to id },
+        )
+        composeRule.onNodeWithContentDescription("Camera, shortcut").assertIsDisplayed()
+        composeRule.onNodeWithContentDescription("Camera, shortcut").performTouchInput { click() }
+        assertEquals(listOf(ItemId("wide") to "cam"), clicks)
     }
 
     @Test fun aWidgetMemberRendersThroughTheWidgetSlotAtItsSpan() {

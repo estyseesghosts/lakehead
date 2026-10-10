@@ -86,7 +86,7 @@ data class HomeEditState(
         grabOffsetXPx: Float,
         grabOffsetYPx: Float,
     ): HomeEditState {
-        if (!isEditing || !tile.isLaunchable) return this
+        if (!isEditing || !tile.isMovable) return this
         val snapshot = placements.toGridPlacements()
         val validity = moveValidity(snapshot, tile.itemId, tile.position, metrics.columns)
         if (validity == CandidateValidity.UNKNOWN_ITEM) return this

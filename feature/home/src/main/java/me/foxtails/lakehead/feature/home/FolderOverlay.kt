@@ -33,6 +33,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import me.foxtails.lakehead.core.designsystem.LocalLauncherDimensions
 import me.foxtails.lakehead.core.designsystem.PinnedTileShortcut
+import me.foxtails.lakehead.core.designsystem.ShortcutSurfaceEntry
 import me.foxtails.lakehead.core.model.AppIdentity
 import me.foxtails.lakehead.core.grid.GridColumns
 import me.foxtails.lakehead.core.grid.GridVerticalExtent
@@ -72,6 +73,11 @@ fun FolderOverlay(
     widgetContent: HomeWidgetContent = NoHomeWidgetContent,
     pinnedByTile: Map<ItemId, List<PinnedTileShortcut>> = emptyMap(),
     onPinnedShortcutClick: (ItemId, String) -> Unit = { _, _ -> },
+    surfaceEntries: List<ShortcutSurfaceEntry> = emptyList(),
+    surfaceEntriesTileId: ItemId? = null,
+    onSelectedTileChange: (ItemId?) -> Unit = {},
+    onSurfaceExecute: (ItemId, String) -> Unit = { _, _ -> },
+    onSurfaceTogglePin: (ItemId, String) -> Unit = { _, _ -> },
 ) {
     if (!isOpen) return
     BackHandler(enabled = true, onBack = onDismiss)
@@ -82,7 +88,7 @@ fun FolderOverlay(
     BoxWithConstraints(modifier = modifier.fillMaxSize().testTag(FOLDER_OVERLAY_TAG)) {
         val density = LocalDensity.current
         val paddingPx = with(density) { dimensions.gridGap.roundToPx() }
-        val layout = remember(members, columns, constraints.maxWidth, constraints.maxHeight, moveActive) {
+        val layout = remember(members, columns, constraints.maxWidth, constraints.maxHeight, moveActive, surfaceEntries) {
             folderOverlayLayout(
                 tiles = members,
                 columns = columns,
@@ -92,6 +98,7 @@ fun FolderOverlay(
                 paddingPx = paddingPx,
                 gapPx = paddingPx,
                 expandRows = if (moveActive) 1 else 0,
+                fillHeight = surfaceEntries.isNotEmpty(),
             )
         }
         val loaded = remember(members, columns) { folderInteriorState(members, columns) }
@@ -135,6 +142,11 @@ fun FolderOverlay(
                 onRemoveTile = onRemoveMember,
                 pinnedByTile = pinnedByTile,
                 onPinnedShortcutClick = onPinnedShortcutClick,
+                surfaceEntries = surfaceEntries,
+                surfaceEntriesTileId = surfaceEntriesTileId,
+                onSelectedTileChange = onSelectedTileChange,
+                onSurfaceExecute = onSurfaceExecute,
+                onSurfaceTogglePin = onSurfaceTogglePin,
                 widgetContent = widgetContent,
                 interior = true,
                 onDropOutside = onMoveToHome,

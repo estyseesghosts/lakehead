@@ -421,6 +421,7 @@ class HomeCanvasTest {
         onPinnedShortcutClick: (ItemId, String) -> Unit = { _, _ -> },
         onSelectedTileChange: (ItemId?) -> Unit = {},
         onPagerHoldChange: (Boolean) -> Unit = {},
+        onDropOnFolder: (ItemId, ItemId) -> Unit = { _, _ -> },
     ) {
         setThemedContent {
             HomeCanvas(
@@ -434,7 +435,70 @@ class HomeCanvasTest {
                 onPinnedShortcutClick = onPinnedShortcutClick,
                 onSelectedTileChange = onSelectedTileChange,
                 onPagerHoldChange = onPagerHoldChange,
+                onDropOnFolder = onDropOnFolder,
             )
+        }
+    }
+
+    @Test
+    fun aFolderTileCanBePickedUpAndMoved() {
+        val moves = mutableListOf<Pair<ItemId, LogicalPosition>>()
+        val folder = HomeRenderTile(
+            itemId = ItemId("f"), appIdentity = null, position = LogicalPosition(0, 0),
+            span = LogicalSpan(1, 1), availability = ItemAvailability.AVAILABLE, label = "Folder",
+            icon = null, isLaunchable = false, folderPreview = emptyList(),
+        )
+        setMoveCanvas(listOf(folder), onMoveTile = { id, pos -> moves.add(id to pos) })
+        composeRule.waitForIdle()
+        val gridNode = composeRule.onNodeWithTag(HOME_CANVAS_GRID_TAG, useUnmergedTree = true)
+        val grid = gridNode.fetchSemanticsNode().boundsInRoot
+        val f = composeRule.onAllNodesWithContentDescription("Folder")[0].fetchSemanticsNode().boundsInRoot
+        val start = Offset(f.left + f.width * 0.25f - grid.left, f.top + f.height * 0.25f - grid.top)
+        val stride = grid.width / 6f
+        // One continuous touch from outside edit mode: hold, then drag two cells right.
+        gridNode.performTouchInput { down(start) }
+        composeRule.mainClock.advanceTimeBy(1_000)
+        gridNode.performTouchInput { moveTo(start + Offset(stride * 2, 0f)) }
+        composeRule.waitForIdle()
+        gridNode.performTouchInput { up() }
+        composeRule.waitForIdle()
+        composeRule.runOnIdle {
+            assertEquals(1, moves.size)
+            assertEquals(ItemId("f"), moves[0].first)
+            assertEquals(2, moves[0].second.column)
+        }
+    }
+
+    @Test
+    fun dropOnAFolderTile_addsToTheFolderInsteadOfMoving() {
+        val drops = mutableListOf<Pair<ItemId, ItemId>>()
+        val moves = mutableListOf<Pair<ItemId, LogicalPosition>>()
+        val folder = HomeRenderTile(
+            itemId = ItemId("f"), appIdentity = null, position = LogicalPosition(2, 0),
+            span = LogicalSpan(1, 1), availability = ItemAvailability.AVAILABLE, label = "Folder",
+            icon = null, isLaunchable = false, folderPreview = emptyList(),
+        )
+        setMoveCanvas(
+            listOf(tile("a", personal, "Alpha App", column = 0, row = 0), folder),
+            onMoveTile = { id, pos -> moves.add(id to pos) },
+            onDropOnFolder = { id, f -> drops.add(id to f) },
+        )
+        composeRule.waitForIdle()
+        val gridNode = composeRule.onNodeWithTag(HOME_CANVAS_GRID_TAG, useUnmergedTree = true)
+        val grid = gridNode.fetchSemanticsNode().boundsInRoot
+        val a = composeRule.onAllNodesWithContentDescription("Alpha App")[0].fetchSemanticsNode().boundsInRoot
+        val f = composeRule.onAllNodesWithContentDescription("Folder")[0].fetchSemanticsNode().boundsInRoot
+        val start = Offset(a.left + a.width * 0.25f - grid.left, a.top + a.height * 0.25f - grid.top)
+        val end = Offset(f.center.x - grid.left, f.center.y - grid.top)
+        gridNode.performTouchInput { down(start) }
+        composeRule.mainClock.advanceTimeBy(1_000)
+        gridNode.performTouchInput { moveTo(end) }
+        composeRule.waitForIdle()
+        gridNode.performTouchInput { up() }
+        composeRule.waitForIdle()
+        composeRule.runOnIdle {
+            assertEquals(listOf(ItemId("a") to ItemId("f")), drops)
+            assertTrue("a drop on a folder must not also move: $moves", moves.isEmpty())
         }
     }
 

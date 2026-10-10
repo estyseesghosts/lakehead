@@ -1,5 +1,7 @@
 package me.foxtails.lakehead
 
+import me.foxtails.lakehead.core.designsystem.PinnedTileShortcut
+import me.foxtails.lakehead.core.designsystem.ShortcutSurfaceEntry
 import me.foxtails.lakehead.core.model.AppIdentity
 import me.foxtails.lakehead.core.model.ItemId
 import me.foxtails.lakehead.core.model.LogicalPosition
@@ -23,8 +25,17 @@ internal data class FolderShell(
     val onMemberRemove: (ItemId) -> Unit = {},
     val onMemberMove: (ItemId, LogicalPosition) -> Unit = { _, _ -> },
     val onMemberResize: (ItemId, LogicalSpan) -> Unit = { _, _ -> },
+    // Shortcut data for the open folder's members, exactly as Home gets it.
+    val pinnedByTile: Map<ItemId, List<PinnedTileShortcut>> = emptyMap(),
+    val surfaceEntries: List<ShortcutSurfaceEntry> = emptyList(),
+    val surfaceEntriesTileId: ItemId? = null,
+    val onSelectedTileChange: (ItemId?) -> Unit = {},
+    val onSurfaceExecute: (ItemId, String) -> Unit = { _, _ -> },
+    val onSurfaceTogglePin: (ItemId, String) -> Unit = { _, _ -> },
+    val onPinnedShortcutClick: (ItemId, String) -> Unit = { _, _ -> },
     val onNewFolder: (ItemId) -> Unit = {},
     val onRequestAddToFolder: (ItemId) -> Unit = {},
+    val onDropOnFolder: (ItemId, ItemId) -> Unit = { _, _ -> },
     val onPickFolder: (ItemId) -> Unit = {},
     val onChooserDismiss: () -> Unit = {},
     val onRemoveConfirm: () -> Unit = {},

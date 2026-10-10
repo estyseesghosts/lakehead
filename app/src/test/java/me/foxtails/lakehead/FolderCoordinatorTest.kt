@@ -291,4 +291,20 @@ class FolderCoordinatorTest {
 
         assertEquals(listOf("resize a->2x1"), h.placements.calls)
     }
+
+    @Test fun addToFolderMovesTheTileAndReloadsHome() = runTest {
+        val h = harness { transfer = TransferResult.Done(Dissolve.None) }
+
+        assertTrue(h.coordinator.addToFolder(ItemId("a"), folder))
+
+        assertEquals(listOf("into a->f"), h.repo.calls)
+        assertEquals(1, h.homeChanges)
+    }
+
+    @Test fun addToFolderRejectedLeavesHomeAlone() = runTest {
+        val h = harness { transfer = TransferResult.NotAFolder }
+
+        assertFalse(h.coordinator.addToFolder(ItemId("a"), folder))
+        assertEquals(0, h.homeChanges)
+    }
 }

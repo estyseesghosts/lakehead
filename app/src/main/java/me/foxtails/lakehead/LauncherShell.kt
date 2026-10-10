@@ -470,6 +470,7 @@ internal fun LauncherShell(
                     onOpenFolder = folders.onOpen,
                     onNewFolder = folders.onNewFolder,
                     onRequestAddToFolder = folders.onRequestAddToFolder,
+                    onDropOnFolder = folders.onDropOnFolder,
                 )
             }
         }
@@ -503,6 +504,13 @@ internal fun LauncherShell(
             onRemoveMember = folders.onMemberRemove,
             onMoveMember = folders.onMemberMove,
             onResizeMember = folders.onMemberResize,
+            pinnedByTile = folders.pinnedByTile,
+            onPinnedShortcutClick = folders.onPinnedShortcutClick,
+            surfaceEntries = folders.surfaceEntries,
+            surfaceEntriesTileId = folders.surfaceEntriesTileId,
+            onSelectedTileChange = folders.onSelectedTileChange,
+            onSurfaceExecute = folders.onSurfaceExecute,
+            onSurfaceTogglePin = folders.onSurfaceTogglePin,
             onDismiss = folders.onClose,
             widgetContent = widgetContent,
         )
