@@ -39,6 +39,10 @@ public interface PlacementDao {
     @Query("SELECT * FROM placements WHERE homeId = :homeId AND parentFolderId = :folderId ORDER BY rowid")
     List<PlacementEntity> folderMembers(String homeId, String folderId);
 
+    /** Every folder member of a Home, for the closed folder tiles' previews. */
+    @Query("SELECT * FROM placements WHERE homeId = :homeId AND parentFolderId IS NOT NULL ORDER BY rowid")
+    List<PlacementEntity> membersForHome(String homeId);
+
     @Query("SELECT COUNT(*) FROM placements WHERE parentFolderId = :folderId")
     int folderMemberCount(String folderId);
 

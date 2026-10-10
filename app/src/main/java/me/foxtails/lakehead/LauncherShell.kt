@@ -54,6 +54,9 @@ import me.foxtails.lakehead.feature.allapps.headerItemIndex
 import me.foxtails.lakehead.feature.allapps.sectionIndexForKey
 import me.foxtails.lakehead.feature.allapps.toAlphabetPickerState
 import me.foxtails.lakehead.feature.allapps.toAppSections
+import me.foxtails.lakehead.feature.home.FolderChooserOverlay
+import me.foxtails.lakehead.feature.home.FolderOverlay
+import me.foxtails.lakehead.feature.home.FolderRemovePrompt
 import me.foxtails.lakehead.feature.home.HomeCanvas
 import me.foxtails.lakehead.feature.home.HomeCanvasViewportStyle
 import me.foxtails.lakehead.feature.home.AlbumPickerOverlay
@@ -221,6 +224,8 @@ internal fun LauncherShell(
     widgetContent: HomeWidgetContent = NoHomeWidgetContent,
     widgetProviders: List<WidgetProviderEntry> = emptyList(),
     onAddWidget: (WidgetProviderEntry) -> Unit = {},
+    // Folders: overlay, chooser and confirmation state plus their verbs, owned by the caller.
+    folders: FolderShell = FolderShell.None,
     modifier: Modifier = Modifier,
     initialPage: Int = LAUNCHER_PAGE_TILE,
     viewportStyle: HomeCanvasViewportStyle = HomeCanvasViewportStyle(),
@@ -399,7 +404,7 @@ internal fun LauncherShell(
             state = pagerState,
             modifier = Modifier.fillMaxSize(),
             beyondViewportPageCount = 1,
-            userScrollEnabled = isPagerSwipeEnabled(pickerBlocksPager, pagerWinner, homeHold, pagerHold, pagerRegionAllowed, isSettingsOpen || isWidgetPickerOpen, feedStartAllowed),
+            userScrollEnabled = isPagerSwipeEnabled(pickerBlocksPager, pagerWinner, homeHold, pagerHold, pagerRegionAllowed, isSettingsOpen || isWidgetPickerOpen || folders.holdsPager, feedStartAllowed),
         ) { page ->
             when (page) {
                 LAUNCHER_PAGE_FEED -> FeedSurface(
@@ -462,6 +467,9 @@ internal fun LauncherShell(
                     isVisible = homeVisible,
                     widgetContent = widgetContent,
                     onRequestAddWidget = { isWidgetPickerOpen = true },
+                    onOpenFolder = folders.onOpen,
+                    onNewFolder = folders.onNewFolder,
+                    onRequestAddToFolder = folders.onRequestAddToFolder,
                 )
             }
         }
@@ -483,6 +491,30 @@ internal fun LauncherShell(
                 onAddWidget(entry)
             },
             onDismiss = { isWidgetPickerOpen = false },
+        )
+        // Folder overlay, chooser and confirmation float above the pager and the pill.
+        FolderOverlay(
+            isOpen = folders.openMembers != null,
+            members = folders.openMembers.orEmpty(),
+            columns = homeColumns(homeState),
+            iconsByIdentity = homeIcons,
+            onLaunchApp = folders.onLaunchMember,
+            onMoveToHome = folders.onMemberToHome,
+            onRemoveMember = folders.onMemberRemove,
+            onDismiss = folders.onClose,
+            widgetContent = widgetContent,
+        )
+        FolderChooserOverlay(
+            isOpen = folders.chooserFolders != null,
+            folders = folders.chooserFolders.orEmpty(),
+            iconsByIdentity = homeIcons,
+            onPick = folders.onPickFolder,
+            onDismiss = folders.onChooserDismiss,
+        )
+        FolderRemovePrompt(
+            isOpen = folders.removePromptOpen,
+            onConfirm = folders.onRemoveConfirm,
+            onDismiss = folders.onRemoveDismiss,
         )
         // S1 settings menu floats above the pager and the pill. A provider pick
         // reports through onSelectFeedProvider then dismisses; Back and the scrim

@@ -83,6 +83,9 @@ interface FolderRepository {
 
     fun loadFolder(homeId: HomeId, folderId: ItemId, columns: Int): LoadFolderResult
 
+    /** Members of every folder on [homeId], grouped by folder id, for the closed tiles' previews. */
+    fun loadAllMembers(homeId: HomeId): Map<ItemId, List<HomePlacement>>
+
     /** Moves a top-level tile into the first free rectangle of the folder's grid. */
     fun moveIntoFolder(itemId: ItemId, folderId: ItemId, columns: Int): TransferResult
 
@@ -143,6 +146,14 @@ class RoomFolderRepository(
             LoadFolderResult.Loaded(
                 dao.folderMembers(homeId.value, folderId.value).map { it.toDomain(bindings[it.itemId]) },
             )
+        }
+
+    override fun loadAllMembers(homeId: HomeId): Map<ItemId, List<HomePlacement>> =
+        database.runInTransaction<Map<ItemId, List<HomePlacement>>> {
+            val bindings = dao.widgetBindingsForHome(homeId.value).associateBy { it.itemId }
+            dao.membersForHome(homeId.value)
+                .map { it.toDomain(bindings[it.itemId]) }
+                .groupBy { requireNotNull(it.parentFolderId) }
         }
 
     override fun moveIntoFolder(itemId: ItemId, folderId: ItemId, columns: Int): TransferResult =

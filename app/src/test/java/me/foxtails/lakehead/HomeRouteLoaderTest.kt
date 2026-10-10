@@ -830,6 +830,7 @@ class HomeRouteLoaderTest {
         val home = HomeRouteLoader(
             homeId = requestedHome,
             repository = repository,
+            folders = EmptyFolderRepository,
             catalogue = catalogue,
             iconRefresher = refresher,
             encodedIcons = encodedIcons,
@@ -911,6 +912,7 @@ class HomeRouteLoaderTest {
         return HomeRouteLoader(
             homeId = requestedHome,
             repository = repository,
+            folders = EmptyFolderRepository,
             catalogue = catalogue,
             iconRefresher = LauncherAppsIconSnapshotRefresher(
                 iconLookup,

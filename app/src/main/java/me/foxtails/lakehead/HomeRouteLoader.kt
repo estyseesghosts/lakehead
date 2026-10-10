@@ -23,6 +23,7 @@ import me.foxtails.lakehead.core.model.ItemId
 import me.foxtails.lakehead.core.model.LauncherAppEntry
 import me.foxtails.lakehead.core.model.LogicalPosition
 import me.foxtails.lakehead.core.model.LogicalSpan
+import me.foxtails.lakehead.data.repository.FolderRepository
 import me.foxtails.lakehead.data.repository.HomePlacementRepository
 import me.foxtails.lakehead.data.repository.LoadResult
 import me.foxtails.lakehead.data.repository.MutationResult
@@ -45,6 +46,7 @@ import java.util.Collections
 internal class HomeRouteLoader(
     private val homeId: HomeId,
     private val repository: HomePlacementRepository,
+    private val folders: FolderRepository,
     private val catalogue: AppCatalogue,
     private val iconRefresher: LauncherAppsIconSnapshotRefresher,
     private val encodedIcons: AppIconSnapshotCache,
@@ -69,6 +71,7 @@ internal class HomeRouteLoader(
     private val writeMutex = Mutex()
     private var mutationsInFlight = 0
     private var placements: List<HomePlacement>? = null
+    private var folderMembers: Map<ItemId, List<HomePlacement>> = emptyMap()
     private var notFound = false
     private var currentEntries: List<LauncherAppEntry> = emptyList()
 
@@ -108,19 +111,21 @@ internal class HomeRouteLoader(
         val requestGeneration = ++generation
         loadJob?.cancel()
         loadJob = routeScope.launch {
-            val result = withContext(ioDispatcher) {
-                repository.load(homeId, viewport.columnsBound)
+            val (result, members) = withContext(ioDispatcher) {
+                repository.load(homeId, viewport.columnsBound) to folders.loadAllMembers(homeId)
             }
             synchronized(this@HomeRouteLoader) {
                 if (requestGeneration != generation || scope !== routeScope) return@launch
                 when (result) {
                     is LoadResult.Loaded -> {
                         placements = result.placements.toList()
+                        folderMembers = members
                         notFound = false
                         projectCurrent()
                     }
                     LoadResult.NotFound -> {
                         placements = null
+                        folderMembers = emptyMap()
                         notFound = true
                         mutableState.value = HomeRenderProjection.notFound(homeId)
                         mutableIcons.value = emptyMap()
@@ -284,10 +289,15 @@ internal class HomeRouteLoader(
         }
     }
 
+    /** Catalogue labels by identity as of the last catalogue emission; used to join folder members. */
+    @Synchronized
+    fun metadataSnapshot(): Map<AppIdentity, HomeAppMetadata> =
+        currentEntries.associate { it.identity to HomeAppMetadata(it.label) }
+
     private fun projectCurrent() {
         val persisted = placements ?: return
         val metadata = currentEntries.associate { it.identity to HomeAppMetadata(it.label) }
-        val projected = HomeRenderProjection.project(homeId, persisted, metadata, viewport.inputs)
+        val projected = HomeRenderProjection.project(homeId, persisted, metadata, viewport.inputs, folderMembers)
         mutableState.value = projected.copy(tiles = Collections.unmodifiableList(ArrayList(projected.tiles)))
     }
 }

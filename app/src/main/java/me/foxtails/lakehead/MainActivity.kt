@@ -22,8 +22,10 @@ import kotlinx.coroutines.withContext
 import me.foxtails.lakehead.core.designsystem.LauncherTheme
 import me.foxtails.lakehead.core.model.HomeId
 import me.foxtails.lakehead.data.database.PlacementDatabase
+import me.foxtails.lakehead.data.repository.FolderRepository
 import me.foxtails.lakehead.data.repository.HomePlacementRepository
 import me.foxtails.lakehead.data.repository.RemoveResult
+import me.foxtails.lakehead.data.repository.RoomFolderRepository
 import me.foxtails.lakehead.data.repository.RoomHomePlacementRepository
 import me.foxtails.lakehead.feature.home.HomeCanvasViewportStyle
 import me.foxtails.lakehead.feature.home.HomeRenderState
@@ -104,6 +106,25 @@ class MainActivity : ComponentActivity() {
         RoomHomePlacementRepository(placementDatabase)
     }
 
+    private val folderRepository: FolderRepository by lazy(LazyThreadSafetyMode.NONE) {
+        RoomFolderRepository(placementDatabase)
+    }
+
+    private val folderCoordinator: FolderCoordinator by lazy(LazyThreadSafetyMode.NONE) {
+        FolderCoordinator(
+            homeId = PRODUCTION_HOME_ID,
+            folders = folderRepository,
+            columns = 5,
+            metadata = { homeRouteLoader.metadataSnapshot() },
+            onHomeChanged = {
+                homeRouteLoader.reload()
+                allAppsRouteLoader.refreshHomeMembership()
+            },
+            releaseWidget = { widgetHosting.deleteId(it) },
+            ioDispatcher = Dispatchers.IO,
+        )
+    }
+
     private val iconSnapshots by lazy(LazyThreadSafetyMode.NONE) { AppIconSnapshotCache() }
     private val iconLookup by lazy(LazyThreadSafetyMode.NONE) {
         LauncherAppsIconActivityLookup(applicationContext)
@@ -141,6 +162,7 @@ class MainActivity : ComponentActivity() {
         HomeRouteLoader(
             homeId = PRODUCTION_HOME_ID,
             repository = placementRepository,
+            folders = folderRepository,
             catalogue = appCatalogue,
             iconRefresher = iconRefresher,
             encodedIcons = iconSnapshots,
@@ -340,6 +362,7 @@ class MainActivity : ComponentActivity() {
         val routeViewportStyle = homeViewportStyle
         val productionAppLauncher = appLauncher
         val feed = feedGateway
+        val folders = folderCoordinator
         // Setprop-gated (debug.protolaunch.feed_diag); a no-op unless enabled.
         startFeedDiagnosticsLogging(feed, lifecycleScope)
         setContent {
@@ -363,6 +386,16 @@ class MainActivity : ComponentActivity() {
                 albumCoordinator.onHomeTilesChanged(
                     (homeState as? HomeRenderState.Loaded)?.tiles.orEmpty(),
                 )
+            }
+            val openFolder by folders.openFolder.collectAsState()
+            val openFolderMembers by folders.members.collectAsState()
+            val folderAddSource by folders.addSource.collectAsState()
+            val folderRemovePrompt by folders.removePrompt.collectAsState()
+            // A folder that disappears from Home (removed, dissolved, imported over) closes its overlay.
+            androidx.compose.runtime.LaunchedEffect(homeState, openFolder) {
+                val loaded = homeState as? HomeRenderState.Loaded
+                val open = openFolder
+                if (loaded != null && open != null && loaded.tiles.none { it.itemId == open }) folders.close()
             }
             val notificationsByTile = rememberNotificationsByTile(homeState)
             val albumPrompt by albumCoordinator.prompt.collectAsState()
@@ -453,8 +486,15 @@ class MainActivity : ComponentActivity() {
                     }
                 },
                 onRemoveTile = { itemId ->
-                    val widgetId = (homeState as? HomeRenderState.Loaded)?.tiles
-                        ?.firstOrNull { it.itemId == itemId }?.appWidgetId
+                    val removed = (homeState as? HomeRenderState.Loaded)?.tiles
+                        ?.firstOrNull { it.itemId == itemId }
+                    val widgetId = removed?.appWidgetId
+                    if (removed?.isFolder == true) {
+                        // A folder asks first and removes through the folder repository,
+                        // which also reports the member widgets to release.
+                        lifecycleScope.launch { folders.requestRemoveFolder(itemId) }
+                        return@LauncherShell
+                    }
                     lifecycleScope.launch {
                         val result = routeLoader.commitRemove(itemId)
                         if (result is RemoveResult.Removed) {
@@ -505,6 +545,29 @@ class MainActivity : ComponentActivity() {
                 albumPickerAlbums = albumPickerAlbums,
                 onAlbumPick = albumCoordinator::onAlbumPick,
                 onAlbumPickerDismiss = albumCoordinator::onPickerDismiss,
+                folders = FolderShell(
+                    openMembers = openFolder?.let { openFolderMembers },
+                    chooserFolders = if (folderAddSource != null) {
+                        (homeState as? HomeRenderState.Loaded)?.tiles.orEmpty().filter { it.isFolder }
+                    } else {
+                        null
+                    },
+                    removePromptOpen = folderRemovePrompt != null,
+                    onOpen = { id -> lifecycleScope.launch { folders.open(id) } },
+                    onClose = folders::close,
+                    onLaunchMember = { identity ->
+                        folders.close()
+                        (appLauncherForTest ?: productionAppLauncher).launch(identity)
+                    },
+                    onMemberToHome = { id -> lifecycleScope.launch { folders.moveToHome(id) } },
+                    onMemberRemove = { id -> lifecycleScope.launch { folders.removeMember(id) } },
+                    onNewFolder = { id -> lifecycleScope.launch { folders.createFolder(id) } },
+                    onRequestAddToFolder = folders::requestAddToFolder,
+                    onPickFolder = { id -> lifecycleScope.launch { folders.pickFolder(id) } },
+                    onChooserDismiss = folders::dismissChooser,
+                    onRemoveConfirm = { lifecycleScope.launch { folders.confirmRemoveFolder() } },
+                    onRemoveDismiss = folders::dismissRemovePrompt,
+                ),
                 viewportStyle = routeViewportStyle,
                 widgetContent = widgetContent,
                 widgetProviders = widgetProviders,

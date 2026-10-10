@@ -229,6 +229,9 @@ internal fun HomeCanvasGrid(
     // The (+) button shown while editing reports here; the caller opens the picker.
     onRequestAddWidget: () -> Unit = {},
     onOpenFolder: (ItemId) -> Unit = {},
+    // Folder actions for the selected tile while editing (see [tileEditActionsFor]).
+    onNewFolder: (ItemId) -> Unit = {},
+    onRequestAddToFolder: (ItemId) -> Unit = {},
 ) {
     require(usableHeightPx >= 0) { "usableHeightPx must be non-negative" }
     require(fullHeightPx >= 0) { "fullHeightPx must be non-negative" }
@@ -688,6 +691,30 @@ internal fun HomeCanvasGrid(
                     },
                     onSurfaceExecute = onSurfaceExecute,
                     onSurfaceTogglePin = onSurfaceTogglePin,
+                )
+            }
+            // Viewport-fixed folder actions for the selected tile, stacked above the add button.
+            val selectedTile = editState.selectedTileId?.let { selectedId ->
+                loaded.tiles.firstOrNull { it.itemId == selectedId }
+            }
+            if (editState.isEditing && !dragging && selectedTile != null) {
+                val actions = tileEditActionsFor(selectedTile, hasFolders = loaded.tiles.any { it.isFolder })
+                TileActionBar(
+                    actions = actions,
+                    onAction = { action ->
+                        when (action) {
+                            TileEditAction.NEW_FOLDER -> onNewFolder(selectedTile.itemId)
+                            TileEditAction.ADD_TO_FOLDER -> onRequestAddToFolder(selectedTile.itemId)
+                        }
+                        editState = editState.exit()
+                        moveEdgePointer.clear()
+                    },
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(
+                            end = 16.dp,
+                            bottom = with(density) { viewportStyle.bottomClearancePx.toDp() } + 16.dp + 56.dp + 8.dp,
+                        ),
                 )
             }
             // Viewport-fixed, outside the scrolling content: bottom-end above the nav pill.
