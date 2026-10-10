@@ -210,6 +210,7 @@ class MainActivity : ComponentActivity() {
             // Decision 7: import restores an album binding only when its
             // bucket is on this device (denied permission reads as none).
             loadDeviceAlbumBuckets = { mediaGateway.albums().map { it.album.bucketId }.toSet() },
+            folders = folderRepository,
         )
     }
 

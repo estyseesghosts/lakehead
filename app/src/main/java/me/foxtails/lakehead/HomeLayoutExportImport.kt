@@ -15,6 +15,11 @@ import me.foxtails.lakehead.core.model.ProfileId
 import me.foxtails.lakehead.core.model.ShortcutRef
 import me.foxtails.lakehead.core.model.TileAlbumBinding
 import me.foxtails.lakehead.core.model.TileBinding
+import me.foxtails.lakehead.core.model.FolderPlacement
+import me.foxtails.lakehead.data.repository.LoadFolderResult
+import me.foxtails.lakehead.data.repository.CreateFolderResult
+import me.foxtails.lakehead.data.repository.TransferResult
+import me.foxtails.lakehead.data.repository.FolderRepository
 import me.foxtails.lakehead.data.repository.HomePlacementRepository
 import me.foxtails.lakehead.data.repository.LoadResult
 import me.foxtails.lakehead.data.repository.MutationResult
@@ -64,6 +69,7 @@ class HomeLayoutExportImport(
     private val repository: HomePlacementRepository,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
     private val loadDeviceAlbumBuckets: suspend () -> Set<String> = { emptySet() },
+    private val folders: FolderRepository? = null,
 ) : HomeLayoutExportImportPort {
 
     override suspend fun exportLayout(): Pair<JSONObject, String> = withContext(ioDispatcher) {
@@ -78,8 +84,12 @@ class HomeLayoutExportImport(
             bindingsByTile[placement.itemId] = repository.loadBinding(placement.itemId)
             repository.loadAlbumBinding(placement.itemId)?.let { albumBindingsByTile[placement.itemId] = it }
         }
+        val members = placements.filterIsInstance<FolderPlacement>().associate { folder ->
+            val loaded = folders?.loadFolder(homeId, folder.itemId, columns) as? LoadFolderResult.Loaded
+            folder.itemId to loaded?.members.orEmpty().filterIsInstance<AppPlacement>()
+        }
         val json = HomeLayoutCodec.encodeLayout(
-            homeId, columns, placements.filterIsInstance<AppPlacement>(), bindingsByTile, albumBindingsByTile,
+            homeId, columns, placements, bindingsByTile, albumBindingsByTile, members,
         )
         val filename = "${homeId.value}-${System.currentTimeMillis() / 1000}.json"
         Pair(json, filename)
@@ -147,7 +157,109 @@ class HomeLayoutExportImport(
             return false
         }
 
+        class Outcome(val column: Int, val row: Int, val shifted: Boolean)
+
+        // Places at the requested cell, else reflows left within the row, else
+        // shifts up against prior items; null when no legal cell exists.
+        fun placeReflowing(
+            itemId: ItemId,
+            appIdentity: AppIdentity,
+            span: LogicalSpan,
+            desiredColumn: Int,
+            desiredRow: Int,
+        ): Outcome? {
+            fun tryPosition(col: Int, row: Int): Boolean =
+                col >= 0 && row >= 0 &&
+                    col + span.columns <= columns &&
+                    !overlaps(col, row, span.columns, span.rows, placedRects) &&
+                    repository.place(
+                        homeId = homeId,
+                        itemId = itemId,
+                        appIdentity = appIdentity,
+                        position = LogicalPosition(col, row),
+                        span = span,
+                        columns = columns,
+                    ) is MutationResult.Accepted
+
+            fun accept(col: Int, row: Int, shifted: Boolean): Outcome {
+                placedRects.add(PlacedRect(col, row, span.columns, span.rows))
+                return Outcome(col, row, shifted)
+            }
+
+            if (tryPosition(desiredColumn, desiredRow)) return accept(desiredColumn, desiredRow, false)
+            val maxCol = (columns - span.columns).coerceAtLeast(0)
+            for (col in maxCol downTo 0) {
+                if (col == desiredColumn) continue
+                if (tryPosition(col, desiredRow)) return accept(col, desiredRow, true)
+            }
+            for (row in 0 until desiredRow) {
+                for (col in 0..(columns - span.columns)) {
+                    if (tryPosition(col, row)) return accept(col, row, true)
+                }
+            }
+            return null
+        }
+
+        // Rebuilds a folder: the first member is placed at the folder's cell and
+        // converted, the rest are placed in free cells and moved in. Spans and
+        // in-folder cells are not carried; members land first-free. Returns the
+        // number of tiles placed (0 when the folder was rejected).
+        fun importFolder(item: HomeLayoutJsonItem): Int {
+            val repo = folders
+            if (repo == null) {
+                rejected.add(RejectedItem(item.id, "Folders are unavailable"))
+                return 0
+            }
+            val members = item.members.mapNotNull { member ->
+                try {
+                    member to AppIdentity(
+                        profileId = ProfileId(member.app.profileId),
+                        component = ComponentIdentity(member.app.packageName, member.app.className),
+                    )
+                } catch (e: IllegalArgumentException) {
+                    rejected.add(RejectedItem(member.id, "Invalid app reference: ${e.message}"))
+                    null
+                }
+            }
+            if (members.isEmpty()) {
+                rejected.add(RejectedItem(item.id, "Folder has no importable members"))
+                return 0
+            }
+            val one = LogicalSpan(1, 1)
+            val (first, firstApp) = members.first()
+            val firstAt = placeReflowing(ItemId(first.id), firstApp, one, item.column, item.row)
+            if (firstAt == null) {
+                rejected.add(RejectedItem(item.id, "No legal position found"))
+                return 0
+            }
+            if (members.size == 1) return 1 // a one-member folder is just the app
+            val folderId = ItemId(item.id)
+            if (repo.createFolder(homeId, ItemId(first.id), folderId, columns) !is CreateFolderResult.Created) {
+                rejected.add(RejectedItem(item.id, "Could not create folder"))
+                return 1
+            }
+            var placed = 1
+            for ((member, app) in members.drop(1)) {
+                val at = placeReflowing(ItemId(member.id), app, one, item.column, item.row)
+                if (at == null) {
+                    rejected.add(RejectedItem(member.id, "No legal position found"))
+                    continue
+                }
+                if (repo.moveIntoFolder(ItemId(member.id), folderId, columns) is TransferResult.Done) {
+                    placedRects.remove(PlacedRect(at.column, at.row, 1, 1))
+                    placed++
+                } else {
+                    rejected.add(RejectedItem(member.id, "Could not move into folder"))
+                }
+            }
+            return placed
+        }
+
         for (item in document.items) {
+            if (item.type == "FOLDER") {
+                itemsPlaced += importFolder(item)
+                continue
+            }
             if (item.type != "APP") {
                 rejected.add(RejectedItem(item.id, "Unknown item type '${item.type}'"))
                 continue
@@ -155,7 +267,7 @@ class HomeLayoutExportImport(
 
             val appIdentity = try {
                 AppIdentity(
-                    profileId = ProfileId(item.app.profileId),
+                    profileId = ProfileId(item.app!!.profileId),
                     component = ComponentIdentity(item.app.packageName, item.app.className),
                 )
             } catch (e: IllegalArgumentException) {
@@ -170,76 +282,14 @@ class HomeLayoutExportImport(
                 continue
             }
 
-            // Attempt placement at the requested cell first, then reflow.
-            val desiredColumn = item.column
-            val desiredRow = item.row
             val itemId = ItemId(item.id)
-            var placed = false
-            var shifted = false
-
-            // Try the original position first.
-            val tryPosition: (Int, Int) -> MutationResult? = { col, row ->
-                if (col >= 0 && row >= 0 &&
-                    col + span.columns <= columns &&
-                    !overlaps(col, row, span.columns, span.rows, placedRects)
-                ) {
-                    repository.place(
-                        homeId = homeId,
-                        itemId = itemId,
-                        appIdentity = appIdentity,
-                        position = LogicalPosition(col, row),
-                        span = span,
-                        columns = columns,
-                    )
-                } else {
-                    null
-                }
-            }
-
-            // 1. Try requested position.
-            val originalResult = tryPosition(desiredColumn, desiredRow)
-            if (originalResult is MutationResult.Accepted) {
-                placedRects.add(PlacedRect(desiredColumn, desiredRow, span.columns, span.rows))
-                placed = true
-                shifted = false
-            } else {
-                // 2. Reflow left within the same row.
-                val maxCol = (columns - span.columns).coerceAtLeast(0)
-                for (col in maxCol downTo 0) {
-                    if (col == desiredColumn) continue
-                    val result = tryPosition(col, desiredRow)
-                    if (result is MutationResult.Accepted) {
-                        placedRects.add(PlacedRect(col, desiredRow, span.columns, span.rows))
-                        placed = true
-                        shifted = true
-                        break
-                    }
-                }
-            }
-
-            // 3. If still not placed, shift up against prior imported items.
-            if (!placed) {
-                for (row in 0 until desiredRow) {
-                    for (col in 0..(columns - span.columns)) {
-                        val result = tryPosition(col, row)
-                        if (result is MutationResult.Accepted) {
-                            placedRects.add(PlacedRect(col, row, span.columns, span.rows))
-                            placed = true
-                            shifted = true
-                            break
-                        }
-                    }
-                    if (placed) break
-                }
-            }
-
-            if (!placed) {
+            val outcome = placeReflowing(itemId, appIdentity, span, item.column, item.row)
+            if (outcome == null) {
                 rejected.add(RejectedItem(item.id, "No legal position found"))
                 continue
             }
-
-            if (placed) itemsPlaced++
-            if (shifted) itemsShifted++
+            itemsPlaced++
+            if (outcome.shifted) itemsShifted++
 
             // Restore pinned shortcuts.
             if (item.pinnedShortcuts.isNotEmpty()) {

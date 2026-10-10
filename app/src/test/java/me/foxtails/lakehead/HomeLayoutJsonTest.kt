@@ -71,9 +71,9 @@ class HomeLayoutJsonTest {
         assertEquals(0, item.row)
         assertEquals(1, item.columns)
         assertEquals(1, item.rows)
-        assertEquals("0", item.app.profileId)
-        assertEquals("com.example", item.app.packageName)
-        assertEquals("com.example.Main", item.app.className)
+        assertEquals("0", item.app!!.profileId)
+        assertEquals("com.example", item.app!!.packageName)
+        assertEquals("com.example.Main", item.app!!.className)
         assertTrue(item.pinnedShortcuts.isEmpty())
     }
 
@@ -202,8 +202,8 @@ class HomeLayoutJsonTest {
         val json = HomeLayoutCodec.encodeLayout(HomeId("home-main"), 5, listOf(placement), emptyMap())
         val doc = HomeLayoutCodec.decodeLayout(json)
 
-        assertEquals("10", doc.items[0].app.profileId)
-        assertEquals("com.work.app", doc.items[0].app.packageName)
+        assertEquals("10", doc.items[0].app!!.profileId)
+        assertEquals("com.work.app", doc.items[0].app!!.packageName)
     }
 
     @Test

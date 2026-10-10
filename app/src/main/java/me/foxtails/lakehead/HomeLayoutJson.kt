@@ -3,7 +3,9 @@ package me.foxtails.lakehead
 import me.foxtails.lakehead.core.model.AppIdentity
 import me.foxtails.lakehead.core.model.AppPlacement
 import me.foxtails.lakehead.core.model.ComponentIdentity
+import me.foxtails.lakehead.core.model.FolderPlacement
 import me.foxtails.lakehead.core.model.HomeId
+import me.foxtails.lakehead.core.model.HomePlacement
 import me.foxtails.lakehead.core.model.ItemId
 import me.foxtails.lakehead.core.model.LogicalPosition
 import me.foxtails.lakehead.core.model.LogicalSpan
@@ -41,9 +43,21 @@ data class HomeLayoutJsonItem(
     val row: Int,
     val columns: Int,
     val rows: Int,
-    val app: HomeLayoutJsonAppRef,
+    /** Absent for `FOLDER` items, which carry [members] instead. */
+    val app: HomeLayoutJsonAppRef?,
     val pinnedShortcuts: List<HomeLayoutJsonShortcutRef>,
     val album: HomeLayoutJsonAlbumRef? = null,
+    val members: List<HomeLayoutJsonMember> = emptyList(),
+)
+
+/**
+ * App member of a folder item. Widget members are not exported (as Home widgets
+ * are not), and member spans and in-folder cells are not carried: import
+ * re-places members in the folder's first-free cells.
+ */
+data class HomeLayoutJsonMember(
+    val id: String,
+    val app: HomeLayoutJsonAppRef,
 )
 
 /** Profile-aware app reference inside a JSON item. */
@@ -98,12 +112,18 @@ object HomeLayoutCodec {
     fun encodeLayout(
         homeId: HomeId,
         columns: Int,
-        placements: List<AppPlacement>,
+        placements: List<HomePlacement>,
         bindingsByTile: Map<ItemId, TileBinding>,
         albumBindingsByTile: Map<ItemId, TileAlbumBinding> = emptyMap(),
+        folderMembers: Map<ItemId, List<AppPlacement>> = emptyMap(),
     ): JSONObject {
         val items = JSONArray()
         for (placement in placements) {
+            if (placement is FolderPlacement) {
+                items.put(encodeFolder(placement, folderMembers[placement.itemId].orEmpty()))
+                continue
+            }
+            if (placement !is AppPlacement) continue
             val binding = bindingsByTile[placement.itemId]
             val shortcuts = JSONArray()
             binding?.pinnedShortcuts?.forEach { ref ->
@@ -147,6 +167,29 @@ object HomeLayoutCodec {
             })
         }
     }
+
+    private fun encodeFolder(folder: FolderPlacement, members: List<AppPlacement>): JSONObject =
+        JSONObject().apply {
+            put("id", folder.itemId.value)
+            put("type", folder.type.name)
+            put("column", folder.position.column)
+            put("row", folder.position.row)
+            put("columns", folder.span.columns)
+            put("rows", folder.span.rows)
+            put("pinnedShortcuts", JSONArray())
+            put("members", JSONArray().apply {
+                members.forEach { member ->
+                    put(JSONObject().apply {
+                        put("id", member.itemId.value)
+                        put("app", JSONObject().apply {
+                            put("profileId", member.appIdentity.profileId.value)
+                            put("packageName", member.appIdentity.component.packageName)
+                            put("className", member.appIdentity.component.className)
+                        })
+                    })
+                }
+            })
+        }
 
     /**
      * Decodes a JSON document into a [HomeLayoutJsonDocument].
@@ -201,15 +244,19 @@ object HomeLayoutCodec {
         val columns = requirePositiveInt(obj, "columns")
         val rows = requirePositiveInt(obj, "rows")
 
-        val appObj = requireField(obj, "app") { it.optJSONObject("app") }
-        val profileId = requireField(appObj, "profileId") {
-            it.optString("profileId", "").ifBlank { null }
-        }
-        val packageName = requireField(appObj, "packageName") {
-            it.optString("packageName", "").ifBlank { null }
-        }
-        val className = requireField(appObj, "className") {
-            it.optString("className", "").ifBlank { null }
+        val isFolder = type == "FOLDER"
+        val app = if (isFolder) null else decodeAppRef(requireField(obj, "app") { it.optJSONObject("app") })
+        val membersArray = if (isFolder) obj.optJSONArray("members") else null
+        val members = if (membersArray != null) {
+            (0 until membersArray.length()).map { i ->
+                val member = membersArray.getJSONObject(i)
+                HomeLayoutJsonMember(
+                    id = requireField(member, "id") { it.optString("id", "").ifBlank { null } },
+                    app = decodeAppRef(requireField(member, "app") { it.optJSONObject("app") }),
+                )
+            }
+        } else {
+            emptyList()
         }
 
         val shortcutsArray = obj.optJSONArray("pinnedShortcuts")
@@ -231,10 +278,24 @@ object HomeLayoutCodec {
             row = row,
             columns = columns,
             rows = rows,
-            app = HomeLayoutJsonAppRef(profileId, packageName, className),
+            app = app,
             pinnedShortcuts = shortcuts,
             album = album,
+            members = members,
         )
+    }
+
+    private fun decodeAppRef(appObj: JSONObject): HomeLayoutJsonAppRef {
+        val profileId = requireField(appObj, "profileId") {
+            it.optString("profileId", "").ifBlank { null }
+        }
+        val packageName = requireField(appObj, "packageName") {
+            it.optString("packageName", "").ifBlank { null }
+        }
+        val className = requireField(appObj, "className") {
+            it.optString("className", "").ifBlank { null }
+        }
+        return HomeLayoutJsonAppRef(profileId, packageName, className)
     }
 
     private fun decodeShortcutRef(obj: JSONObject): HomeLayoutJsonShortcutRef {
