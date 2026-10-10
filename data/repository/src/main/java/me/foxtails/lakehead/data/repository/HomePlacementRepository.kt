@@ -1,10 +1,7 @@
 package me.foxtails.lakehead.data.repository
 
 import me.foxtails.lakehead.core.grid.GridPlacement
-import me.foxtails.lakehead.core.grid.GridPosition
-import me.foxtails.lakehead.core.grid.GridRowGapNormalizer
 import me.foxtails.lakehead.core.grid.GridRules
-import me.foxtails.lakehead.core.grid.GridSpan
 import me.foxtails.lakehead.core.model.AppIdentity
 import me.foxtails.lakehead.core.model.AppPlacement
 import me.foxtails.lakehead.core.model.HomePlacement
@@ -17,7 +14,6 @@ import me.foxtails.lakehead.core.model.LogicalSpan
 import me.foxtails.lakehead.core.model.TileAlbumBinding
 import me.foxtails.lakehead.core.model.TileBinding
 import me.foxtails.lakehead.data.database.HomeEntity
-import me.foxtails.lakehead.data.database.PlacementEntity
 import me.foxtails.lakehead.data.database.referenceIdentity
 import me.foxtails.lakehead.data.database.toBindingEntity
 import me.foxtails.lakehead.data.database.toDomain
@@ -98,6 +94,12 @@ sealed interface RemoveResult {
     data object Removed : RemoveResult
     data object NotFound : RemoveResult
     data object WrongHome : RemoveResult
+
+    /** The item sits in a folder; remove it through `FolderRepository.removeMember`. */
+    data object FolderMember : RemoveResult
+
+    /** The folder still has members; remove it through `FolderRepository.removeFolder`. */
+    data object NotEmptyFolder : RemoveResult
 }
 
 /** Caller supplies horizontal dimensions; the database remains the serialized state owner. */
@@ -105,19 +107,20 @@ class RoomHomePlacementRepository(
     private val database: me.foxtails.lakehead.data.database.PlacementDatabase,
 ) : HomePlacementRepository {
     private val dao get() = database.placementDao()
+    private val siblings get() = SiblingGrid(dao)
 
     override fun load(homeId: HomeId, columns: Int): LoadResult {
         require(columns > 0) { "columns must be positive" }
         return database.runInTransaction<LoadResult> {
             if (dao.home(homeId.value) == null) return@runInTransaction LoadResult.NotFound
             val entities = dao.topLevelPlacements(homeId.value)
-            val normalized = normalize(entities.map { it.toGridPlacement() })
-            persistShifted(entities, normalized)
+            val normalized = siblings.normalize(siblings.grid(entities))
+            siblings.persistShifted(entities, normalized)
             val bindings = dao.widgetBindingsForHome(homeId.value).associateBy { it.itemId }
             LoadResult.Loaded(entities.map { entity ->
                 entity.toDomain(bindings[entity.itemId]).let { placement ->
                     placement.withGeometry(
-                        normalized.first { it.id == placement.itemId }.position.toDomain(),
+                        normalized.first { it.id == placement.itemId }.position.toLogical(),
                         placement.span,
                     )
                 }
@@ -174,17 +177,17 @@ class RoomHomePlacementRepository(
         if (replacingId != null && replacing == null) return@runInTransaction MutationResult.NotFound
         if (replacing != null && replacing.homeId != homeId.value) return@runInTransaction MutationResult.WrongHome
 
-        val current = homeGrid(homeId)
+        val current = siblings.grid(dao.topLevelPlacements(homeId.value))
         val candidate = GridPlacement(itemId, position.toGrid(), span.toGrid())
         when (val result = GridRules.place(current, candidate, columns, replacingId)) {
             is GridRules.Result.Rejected -> MutationResult.Rejected(result)
             is GridRules.Result.Accepted -> {
                 ensureAppReference(reference)
-                val normalized = normalize(result.placements)
+                val normalized = siblings.normalize(result.placements)
                 val acceptedPlacement = normalized.first { it.id == itemId }
                 val placement = build(
-                    acceptedPlacement.position.toDomain(),
-                    acceptedPlacement.span.toDomain(),
+                    acceptedPlacement.position.toLogical(),
+                    acceptedPlacement.span.toLogical(),
                 )
                 val identity = requireNotNull(placement.referenceIdentity()) { "only apps and widgets are placed here" }
                 if (replacingId != null && replacingId != itemId) {
@@ -208,7 +211,7 @@ class RoomHomePlacementRepository(
                     dao.insertPlacement(placement.toEntity())
                 }
                 if (placement is WidgetPlacement) dao.upsertWidgetBinding(placement.toBindingEntity())
-                persistShifted(dao.topLevelPlacements(homeId.value), normalized)
+                siblings.persistShifted(dao.topLevelPlacements(homeId.value), normalized)
                 MutationResult.Accepted(GridRules.Result.Accepted(normalized))
             }
         }
@@ -219,31 +222,26 @@ class RoomHomePlacementRepository(
         itemId: ItemId,
         position: LogicalPosition,
         columns: Int,
-    ): MutationResult = edit(homeId, itemId, { current ->
+    ): MutationResult = edit(homeId, itemId) { current ->
         GridRules.move(current, itemId, position.toGrid(), columns)
-        }, { accepted ->
-        val normalized = normalize(accepted.placements)
-        persistShifted(dao.topLevelPlacements(homeId.value), normalized)
-        normalized
-    })
+    }
 
     override fun resize(
         homeId: HomeId,
         itemId: ItemId,
         span: LogicalSpan,
         columns: Int,
-    ): MutationResult = edit(homeId, itemId, { current ->
+    ): MutationResult = edit(homeId, itemId) { current ->
         GridRules.resize(current, itemId, span.toGrid(), columns)
-        }, { accepted ->
-        val normalized = normalize(accepted.placements)
-        persistShifted(dao.topLevelPlacements(homeId.value), normalized)
-        normalized
-    })
+    }
 
     override fun remove(homeId: HomeId, itemId: ItemId): RemoveResult = database.runInTransaction<RemoveResult> {
         if (dao.home(homeId.value) == null) return@runInTransaction RemoveResult.NotFound
         val target = dao.placement(itemId.value) ?: return@runInTransaction RemoveResult.NotFound
         if (target.homeId != homeId.value) return@runInTransaction RemoveResult.WrongHome
+        // Folder flows own dissolve and widget release; they have their own entry points.
+        if (target.parentFolderId != null) return@runInTransaction RemoveResult.FolderMember
+        if (dao.folderMemberCount(itemId.value) > 0) return@runInTransaction RemoveResult.NotEmptyFolder
         dao.deletePlacement(itemId.value)
         // Keep the cascade explicit as well as declared in Room, so the
         // repository contract remains correct with foreign-key enforcement
@@ -251,8 +249,7 @@ class RoomHomePlacementRepository(
         dao.deleteShortcutBinding(itemId.value)
         dao.deleteWidgetBinding(itemId.value)
         dao.deleteAlbumBinding(itemId.value)
-        val remaining = dao.topLevelPlacements(homeId.value)
-        persistShifted(remaining, normalize(remaining.map { it.toGridPlacement() }))
+        siblings.normalizePersisted(homeId.value, null)
         RemoveResult.Removed
     }
 
@@ -290,55 +287,25 @@ class RoomHomePlacementRepository(
         dao.deleteAlbumBinding(tileId.value)
     }
 
+    /** Judges the edit against the target's siblings: Home's top level, or its folder's members. */
     private fun edit(
         homeId: HomeId,
         itemId: ItemId,
         evaluate: (List<GridPlacement<ItemId>>) -> GridRules.Result<ItemId>,
-        persist: (GridRules.Result.Accepted<ItemId>) -> List<GridPlacement<ItemId>>,
     ): MutationResult = database.runInTransaction<MutationResult> {
         if (dao.home(homeId.value) == null) return@runInTransaction MutationResult.NotFound
         val target = dao.placement(itemId.value) ?: return@runInTransaction MutationResult.NotFound
         if (target.homeId != homeId.value) return@runInTransaction MutationResult.WrongHome
-        when (val result = evaluate(homeGrid(homeId))) {
+        val rows = siblings.entities(homeId.value, target.parentFolderId)
+        when (val result = evaluate(siblings.grid(rows))) {
             is GridRules.Result.Rejected -> MutationResult.Rejected(result)
             is GridRules.Result.Accepted -> {
-                MutationResult.Accepted(GridRules.Result.Accepted(persist(result)))
+                val normalized = siblings.normalize(result.placements)
+                siblings.persistShifted(rows, normalized)
+                MutationResult.Accepted(GridRules.Result.Accepted(normalized))
             }
         }
     }
-
-    private fun homeGrid(homeId: HomeId): List<GridPlacement<ItemId>> =
-        dao.topLevelPlacements(homeId.value).map { it.toGridPlacement() }
-
-    private fun <T : Any> normalize(placements: List<GridPlacement<T>>): List<GridPlacement<T>> =
-        GridRowGapNormalizer.normalize(placements)
-
-    /** Updates only rows changed by normalization; Room transaction rollback covers the trigger too. */
-    private fun persistShifted(
-        entities: List<PlacementEntity>,
-        normalized: List<GridPlacement<ItemId>>,
-    ) {
-        val byId = normalized.associateBy { it.id }
-        entities.forEach { entity ->
-            val placement = byId[ItemId(entity.itemId)] ?: return@forEach
-            val position = placement.position.toDomain()
-            val span = placement.span.toDomain()
-            if (position != LogicalPosition(entity.column, entity.row) ||
-                span != LogicalSpan(entity.columnSpan, entity.rowSpan)
-            ) {
-                dao.updatePlacement(
-                    PlacementEntity(
-                        entity.itemId, entity.homeId, entity.itemType, entity.profileId,
-                        entity.packageName, entity.className, position.column, position.row,
-                        span.columns, span.rows, entity.availability, entity.parentFolderId,
-                    ),
-                )
-            }
-        }
-    }
-
-    private fun PlacementEntity.toGridPlacement() =
-        GridPlacement(ItemId(itemId), GridPosition(column, row), GridSpan(columnSpan, rowSpan))
 
     private fun ensureAppReference(identity: AppIdentity) {
         if (dao.appReference(
@@ -351,8 +318,3 @@ class RoomHomePlacementRepository(
         }
     }
 }
-
-private fun LogicalPosition.toGrid() = GridPosition(column, row)
-private fun LogicalSpan.toGrid() = GridSpan(columns, rows)
-private fun GridPosition.toDomain() = LogicalPosition(column, row)
-private fun GridSpan.toDomain() = LogicalSpan(columns, rows)
