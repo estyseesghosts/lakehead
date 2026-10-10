@@ -97,6 +97,35 @@ class ShortcutMenuCoordinatorTest {
     }
 
     @Test
+    fun folderTilesAreIgnoredAndDoNotBreakAppTiles() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val gateway = FakeGateway(mapOf(identityA to listOf(shortcut(identityA, "s1", 0))))
+        val coordinator = ShortcutMenuCoordinator(
+            gateway,
+            ShortcutSurfaceLoader(gateway, FakeBindingRepository(emptyMap()), dispatcher),
+            dispatcher,
+        )
+        val folder = HomeRenderTile(
+            itemId = ItemId("folder"),
+            appIdentity = null,
+            position = LogicalPosition(1, 0),
+            span = LogicalSpan(1, 1),
+            availability = ItemAvailability.AVAILABLE,
+            label = "Folder",
+            icon = null,
+            isLaunchable = false,
+            folderPreview = emptyList(),
+        )
+        coordinator.start(this)
+        coordinator.onHomeTilesChanged(listOf(tile(tileA, identityA), folder))
+        coordinator.onSelectionChanged(tileA)
+        advanceUntilIdle()
+
+        assertEquals(tileA, coordinator.menu.value?.tileId)
+        coordinator.stop()
+    }
+
+    @Test
     fun switchClearsStaleImmediatelyThenLoadsNewOwner() = runTest {
         val dispatcher = StandardTestDispatcher(testScheduler)
         val gateway = FakeGateway(

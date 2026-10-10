@@ -182,12 +182,13 @@ internal class ShortcutMenuCoordinator(
      */
     fun onHomeTilesChanged(currentTiles: List<HomeRenderTile>) {
         // Folder tiles have no app identity, so no shortcut menu or pins.
-        tiles.value = currentTiles.filterNot { it.isFolder }
-        projectPinned(currentTiles)
+        val appTiles = currentTiles.filterNot { it.isFolder }
+        tiles.value = appTiles
+        projectPinned(appTiles)
         if (pinnedProjectionBlocked) {
-            refreshPinnedMetadataForRestart(currentTiles)
+            refreshPinnedMetadataForRestart(appTiles)
         } else {
-            refreshPinnedMetadata(currentTiles)
+            refreshPinnedMetadata(appTiles)
         }
         val current = mutableMenu.value
         if (current != null && currentTiles.none { it.itemId == current.tileId }) {
