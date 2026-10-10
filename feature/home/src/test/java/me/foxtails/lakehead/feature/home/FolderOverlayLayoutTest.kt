@@ -76,4 +76,33 @@ class FolderOverlayLayoutTest {
         val result = layout(emptyList())
         assertTrue(result.panel.bottom - result.panel.top > 0)
     }
+
+    @Test fun expandingAddsOneRowDownwardAndKeepsTheTopFixed() {
+        val tiles = listOf(tile("a", 0, 0))
+        val resting = layout(tiles)
+        val expanded = folderOverlayLayout(
+            tiles, 5, 1080, 2200, marginPx = 48, paddingPx = 24, gapPx = 24, expandRows = 1,
+        )
+        assertEquals(resting.panel.top, expanded.panel.top)
+        val rowPx = (resting.metrics.cellHeightPx + 24).toInt()
+        assertEquals(resting.panel.bottom + rowPx, expanded.panel.bottom)
+    }
+
+    @Test fun expandingNeverLeavesTheScreen() {
+        val tiles = (0 until 40).map { tile("t$it", it % 5, it / 5) }
+        val expanded = folderOverlayLayout(
+            tiles, 5, 1080, 2200, marginPx = 48, paddingPx = 24, gapPx = 24, expandRows = 1,
+        )
+        assertTrue(expanded.panel.top >= 0)
+        assertTrue(expanded.panel.bottom <= 2200)
+    }
+
+    @Test fun releaseOutsideTheGridIsDetected() {
+        val inside = androidx.compose.ui.geometry.Offset(100f, 100f)
+        assertTrue(!isOutsideGrid(inside, 900, 600))
+        assertTrue(isOutsideGrid(androidx.compose.ui.geometry.Offset(-1f, 100f), 900, 600))
+        assertTrue(isOutsideGrid(androidx.compose.ui.geometry.Offset(901f, 100f), 900, 600))
+        assertTrue(isOutsideGrid(androidx.compose.ui.geometry.Offset(100f, 601f), 900, 600))
+        assertTrue(isOutsideGrid(androidx.compose.ui.geometry.Offset(100f, -5f), 900, 600))
+    }
 }

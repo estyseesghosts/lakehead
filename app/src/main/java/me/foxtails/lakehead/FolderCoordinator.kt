@@ -11,7 +11,11 @@ import me.foxtails.lakehead.core.model.HomeId
 import me.foxtails.lakehead.data.repository.CreateFolderResult
 import me.foxtails.lakehead.core.model.ItemId
 import me.foxtails.lakehead.data.repository.Dissolve
+import me.foxtails.lakehead.core.model.LogicalPosition
+import me.foxtails.lakehead.core.model.LogicalSpan
 import me.foxtails.lakehead.data.repository.FolderRepository
+import me.foxtails.lakehead.data.repository.HomePlacementRepository
+import me.foxtails.lakehead.data.repository.MutationResult
 import me.foxtails.lakehead.data.repository.LoadFolderResult
 import me.foxtails.lakehead.data.repository.RemoveFolderResult
 import me.foxtails.lakehead.data.repository.RemoveMemberResult
@@ -36,6 +40,7 @@ import java.util.UUID
 internal class FolderCoordinator(
     private val homeId: HomeId,
     private val folders: FolderRepository,
+    private val placements: HomePlacementRepository,
     private val columns: Int,
     private val metadata: () -> Map<AppIdentity, HomeAppMetadata>,
     private val onHomeChanged: () -> Unit,
@@ -108,6 +113,20 @@ internal class FolderCoordinator(
         if (result !is TransferResult.Done) return false
         afterMemberLeft(result.dissolve)
         return true
+    }
+
+    /** Moves a member inside the open folder; the folder is re-read either way, so a rejected drop snaps back. */
+    suspend fun moveMember(itemId: ItemId, position: LogicalPosition): Boolean {
+        val result = withContext(ioDispatcher) { placements.move(homeId, itemId, position, columns) }
+        refreshOpen()
+        return result is MutationResult.Accepted
+    }
+
+    /** Resizes a member inside the open folder, with the same re-read as [moveMember]. */
+    suspend fun resizeMember(itemId: ItemId, span: LogicalSpan): Boolean {
+        val result = withContext(ioDispatcher) { placements.resize(homeId, itemId, span, columns) }
+        refreshOpen()
+        return result is MutationResult.Accepted
     }
 
     suspend fun removeMember(itemId: ItemId): Boolean {

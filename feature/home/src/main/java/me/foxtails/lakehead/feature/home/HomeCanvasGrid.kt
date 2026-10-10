@@ -232,6 +232,14 @@ internal fun HomeCanvasGrid(
     // Folder actions for the selected tile while editing (see [tileEditActionsFor]).
     onNewFolder: (ItemId) -> Unit = {},
     onRequestAddToFolder: (ItemId) -> Unit = {},
+    // Folder interior mode: no add-widget button and no folder actions (a folder holds no
+    // folders), and a MOVE released outside the grid bounds reports [onDropOutside] instead
+    // of committing. [onMoveActiveChange] and [onDragOutsideChange] let the host grow its
+    // frame while a tile is held and show where a release would go.
+    interior: Boolean = false,
+    onDropOutside: (ItemId) -> Unit = {},
+    onMoveActiveChange: (Boolean) -> Unit = {},
+    onDragOutsideChange: (Boolean) -> Unit = {},
 ) {
     require(usableHeightPx >= 0) { "usableHeightPx must be non-negative" }
     require(fullHeightPx >= 0) { "fullHeightPx must be non-negative" }
@@ -362,6 +370,18 @@ internal fun HomeCanvasGrid(
             )
             val committedExtent = committed.extent
             val moveTickItemId = moveDrag?.itemId
+            val latestOnDropOutside = rememberUpdatedState(onDropOutside)
+            val latestMoveActiveCallback = rememberUpdatedState(onMoveActiveChange)
+            val latestOutsideCallback = rememberUpdatedState(onDragOutsideChange)
+            val lastMoveId = remember { arrayOfNulls<ItemId>(1) }
+            if (moveTickItemId != null) lastMoveId[0] = moveTickItemId
+            LaunchedEffect(moveTickItemId != null) {
+                latestMoveActiveCallback.value(moveTickItemId != null)
+            }
+            val heldPointer = moveEdgePointer.position
+            val isOutside = interior && heldPointer != null &&
+                isOutsideGrid(heldPointer, availableWidthPx, fullViewportPx)
+            LaunchedEffect(isOutside) { latestOutsideCallback.value(isOutside) }
             // Transient edit workspace: set when a MOVE starts, held through the
             // release settle (the scroll animates back inside the committed range
             // first) and then dropped. It sizes the measured content only;
@@ -556,8 +576,16 @@ internal fun HomeCanvasGrid(
                     // a commit is only an intent. Acknowledgement and reconciliation
                     // belong to the caller that owns the placements.
                     override fun onDragEnded(route: DownDragRoute, end: HomeDragEnd) {
+                        val held = moveEdgePointer.position
                         if (route == DownDragRoute.MOVE) {
                             moveEdgePointer.clear()
+                        }
+                        if (interior && route == DownDragRoute.MOVE && held != null &&
+                            !(end is HomeDragEnd.Discarded && end.reason == HomeDragDiscard.CANCELLED) &&
+                            isOutsideGrid(held, availableWidthPx, scrollViewportPx.value)
+                        ) {
+                            lastMoveId[0]?.let { latestOnDropOutside.value(it) }
+                            return
                         }
                         if (end !is HomeDragEnd.Commit) return
                         when (val commit = end.commit) {
@@ -697,7 +725,7 @@ internal fun HomeCanvasGrid(
             val selectedTile = editState.selectedTileId?.let { selectedId ->
                 loaded.tiles.firstOrNull { it.itemId == selectedId }
             }
-            if (editState.isEditing && !dragging && selectedTile != null) {
+            if (!interior && editState.isEditing && !dragging && selectedTile != null) {
                 val actions = tileEditActionsFor(selectedTile, hasFolders = loaded.tiles.any { it.isFolder })
                 TileActionBar(
                     actions = actions,
@@ -718,7 +746,7 @@ internal fun HomeCanvasGrid(
                 )
             }
             // Viewport-fixed, outside the scrolling content: bottom-end above the nav pill.
-            if (editState.isEditing && !dragging) {
+            if (!interior && editState.isEditing && !dragging) {
                 AddButton(
                     description = "Add widget",
                     onClick = onRequestAddWidget,
@@ -747,6 +775,10 @@ internal fun HomeCanvasGrid(
  * target.
  */
 internal const val RESIZE_TOUCH_DP: Int = CORNER_CONTROL_TOUCH_SIZE
+
+/** True when a viewport-local pointer lies outside the grid's own bounds (a folder drop-out). */
+internal fun isOutsideGrid(pointer: Offset, widthPx: Int, heightPx: Int): Boolean =
+    pointer.x < 0f || pointer.x > widthPx || pointer.y < 0f || pointer.y > heightPx
 
 /** Test tag on the scrolling canvas grid (testing hook only; no behavior change). */
 internal const val HOME_CANVAS_GRID_TAG: String = "home-canvas-grid"

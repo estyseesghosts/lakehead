@@ -39,6 +39,24 @@ class FolderOverlayTest {
 
     private fun member(label: String) = composeRule.onAllNodesWithContentDescription(label)[0]
 
+    private fun gridNode() = composeRule.onNodeWithTag(HOME_CANVAS_GRID_TAG, useUnmergedTree = true)
+
+    /** Pointer-down point (grid-local) on the quarter of [label]'s tile, as Home's own drag tests do. */
+    private fun grab(label: String): Offset {
+        val tile = member(label).fetchSemanticsNode().boundsInRoot
+        val grid = gridNode().fetchSemanticsNode().boundsInRoot
+        return Offset(
+            tile.left + tile.width * 0.25f - grid.left,
+            tile.top + tile.height * 0.25f - grid.top,
+        )
+    }
+
+    // The long-press pickup waits on the Compose test clock, not on injected event time.
+    private fun holdPastLongPress() {
+        composeRule.mainClock.advanceTimeBy(1_000)
+        composeRule.waitForIdle()
+    }
+
     private fun id(name: String, profile: String = "0") =
         AppIdentity(ProfileId(profile), ComponentIdentity("org.$name", "org.$name.Main"))
 
@@ -60,6 +78,7 @@ class FolderOverlayTest {
         columns: Int = 5,
         onLaunch: (AppIdentity) -> Unit = {},
         onMove: (ItemId) -> Unit = {},
+        onMoveMember: (ItemId, LogicalPosition) -> Unit = { _, _ -> },
         onRemove: (ItemId) -> Unit = {},
         onDismiss: () -> Unit = {},
         widgetContent: HomeWidgetContent = NoHomeWidgetContent,
@@ -70,7 +89,7 @@ class FolderOverlayTest {
                     FolderOverlay(
                         isOpen = true, members = members, columns = columns, iconsByIdentity = emptyMap(),
                         onLaunchApp = onLaunch, onMoveToHome = onMove, onRemoveMember = onRemove,
-                        onDismiss = onDismiss, widgetContent = widgetContent,
+                        onDismiss = onDismiss, widgetContent = widgetContent, onMoveMember = onMoveMember,
                     )
                 }
             }
@@ -93,33 +112,75 @@ class FolderOverlayTest {
         assertEquals(1, dismissed)
     }
 
-    @Test fun longPressOpensTheMemberMenuAndMoveToHomeReportsTheMember() {
-        var moved: ItemId? = null
-        show(listOf(app("a", 0, 0), app("b", 1, 0)), onMove = { moved = it })
+    @Test fun longPressEntersStandardEditModeInsteadOfAMenu() {
+        var removed: ItemId? = null
+        show(listOf(app("a", 0, 0), app("b", 1, 0)), onRemove = { removed = it })
         member("App b").performTouchInput { longClick() }
-        composeRule.onNodeWithTag(FOLDER_MEMBER_MENU_TAG).assertIsDisplayed()
-        composeRule.onNodeWithTag(FOLDER_MENU_MOVE_TAG).performClick()
+        composeRule.onAllNodesWithContentDescription("Remove App b").assertCountEquals(1)
+        composeRule.onAllNodesWithContentDescription("Add widget").assertCountEquals(0)
+        composeRule.onAllNodesWithContentDescription("Remove App b")[0].performClick()
+        assertEquals(ItemId("b"), removed)
+    }
+
+    @Test fun draggingAMemberOutOfThePanelMovesItToHome() {
+        var moved: ItemId? = null
+        var repositioned: ItemId? = null
+        show(
+            listOf(app("a", 0, 0), app("b", 1, 0)),
+            onMove = { moved = it },
+            onMoveMember = { id, _ -> repositioned = id },
+        )
+        val start = grab("App b")
+        gridNode().performTouchInput { down(start) }
+        holdPastLongPress()
+        gridNode().performTouchInput {
+            moveTo(start + Offset(0f, 60f))
+            moveTo(start + Offset(0f, 2200f))
+            up()
+        }
+        composeRule.waitForIdle()
         assertEquals(ItemId("b"), moved)
-        composeRule.onAllNodesWithTag(FOLDER_MEMBER_MENU_TAG).assertCountEquals(0)
+        assertEquals(null, repositioned)
     }
 
-    @Test fun menuRemoveReportsTheMember() {
-        var removed: ItemId? = null
-        show(listOf(app("a", 0, 0)), onRemove = { removed = it })
-        member("App a").performTouchInput { longClick() }
-        composeRule.onNodeWithTag(FOLDER_MENU_REMOVE_TAG).performClick()
-        assertEquals(ItemId("a"), removed)
+    @Test fun draggingWithinThePanelMovesTheMemberToTheDroppedCell() {
+        var moved: Pair<ItemId, LogicalPosition>? = null
+        var toHome: ItemId? = null
+        show(
+            listOf(app("a", 0, 0), app("b", 1, 0)),
+            onMove = { toHome = it },
+            onMoveMember = { id, at -> moved = id to at },
+        )
+        val cellStep = member("App a").fetchSemanticsNode().boundsInRoot.width * 1.2f
+        val start = grab("App a")
+        gridNode().performTouchInput { down(start) }
+        holdPastLongPress()
+        gridNode().performTouchInput {
+            moveTo(start + Offset(cellStep * 2, 4f))
+            up()
+        }
+        composeRule.waitForIdle()
+        assertEquals(ItemId("a"), moved?.first)
+        assertEquals(2, moved?.second?.column)
+        assertEquals(null, toHome)
     }
 
-    @Test fun cancelClosesTheMenuWithoutReportingAndItCanReopen() {
-        var removed: ItemId? = null
-        show(listOf(app("a", 0, 0)), onRemove = { removed = it })
-        member("App a").performTouchInput { longClick() }
-        composeRule.onNodeWithTag(FOLDER_MENU_CANCEL_TAG).performClick()
-        composeRule.onAllNodesWithTag(FOLDER_MEMBER_MENU_TAG).assertCountEquals(0)
-        assertEquals(null, removed)
-        member("App a").performTouchInput { longClick() }
-        composeRule.onAllNodesWithTag(FOLDER_MEMBER_MENU_TAG).assertCountEquals(1)
+    @Test fun panelGrowsWhileAMemberIsHeldAndShowsTheReleaseHint() {
+        show(listOf(app("a", 0, 0)))
+        val panel = composeRule.onNodeWithTag(FOLDER_OVERLAY_PANEL_TAG)
+        val resting = panel.fetchSemanticsNode().boundsInRoot
+        val start = grab("App a")
+        gridNode().performTouchInput { down(start) }
+        holdPastLongPress()
+        gridNode().performTouchInput { moveTo(start + Offset(0f, 40f)) }
+        composeRule.waitForIdle()
+        val held = panel.fetchSemanticsNode().boundsInRoot
+        assertTrue("panel must grow downward: ${resting.height} -> ${held.height}", held.height > resting.height)
+        assertEquals(resting.top, held.top, 1f)
+        gridNode().performTouchInput { moveTo(start + Offset(0f, 2200f)) }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag(FOLDER_DROP_HINT_TAG).assertIsDisplayed()
+        gridNode().performTouchInput { up() }
     }
 
     @Test fun aWidgetMemberRendersThroughTheWidgetSlotAtItsSpan() {

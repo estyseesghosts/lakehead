@@ -35,7 +35,9 @@ internal fun folderOverlayLayout(
     marginPx: Int,
     paddingPx: Int,
     gapPx: Int,
+    expandRows: Int = 0,
 ): FolderOverlayLayout {
+    require(expandRows >= 0) { "expandRows must be non-negative" }
     require(columns > 0) { "columns must be positive" }
     require(viewportWidthPx > 2 * marginPx) { "viewport is narrower than the panel margins" }
     val panelWidthPx = viewportWidthPx - 2 * marginPx
@@ -54,13 +56,18 @@ internal fun folderOverlayLayout(
     )
     val lowestBottomPx = tiles.maxOfOrNull { metrics.pixelFrame(it.position, it.span).bottom } ?: paddingPx
     val minHeightPx = geometry.cellSizePx + 2 * paddingPx
-    val contentHeightPx = maxOf(lowestBottomPx + paddingPx, minHeightPx)
+    val baseContentHeightPx = maxOf(lowestBottomPx + paddingPx, minHeightPx)
+    val contentHeightPx = baseContentHeightPx + expandRows * (geometry.cellSizePx + gapPx)
     val maxHeightPx = maxOf((viewportHeightPx * FOLDER_PANEL_MAX_HEIGHT_FRACTION).toInt(), minHeightPx)
     val panelHeightPx = minOf(contentHeightPx, maxHeightPx).coerceAtMost(viewportHeightPx)
-    val panel = FloatingOverlayFrame.measure(
+    // The top edge stays where the unexpanded panel would sit, so growing never moves a held
+    // tile's grid under the finger; extra rows extend downward and shift up only at the screen edge.
+    val resting = FloatingOverlayFrame.measure(
         viewport = PixelRect(0, 0, viewportWidthPx, viewportHeightPx),
-        size = FrameSize(panelWidthPx, panelHeightPx),
+        size = FrameSize(panelWidthPx, minOf(baseContentHeightPx, maxHeightPx).coerceAtMost(viewportHeightPx)),
         anchor = FrameAnchor(HorizontalFrameAnchor.CENTER, VerticalFrameAnchor.CENTER),
     )
+    val top = minOf(resting.top, viewportHeightPx - panelHeightPx)
+    val panel = PixelRect(resting.left, top, resting.right, top + panelHeightPx)
     return FolderOverlayLayout(panel, metrics, contentHeightPx)
 }

@@ -114,6 +114,7 @@ class MainActivity : ComponentActivity() {
         FolderCoordinator(
             homeId = PRODUCTION_HOME_ID,
             folders = folderRepository,
+            placements = placementRepository,
             columns = 5,
             metadata = { homeRouteLoader.metadataSnapshot() },
             onHomeChanged = {
@@ -562,6 +563,8 @@ class MainActivity : ComponentActivity() {
                     },
                     onMemberToHome = { id -> lifecycleScope.launch { folders.moveToHome(id) } },
                     onMemberRemove = { id -> lifecycleScope.launch { folders.removeMember(id) } },
+                    onMemberMove = { id, at -> lifecycleScope.launch { folders.moveMember(id, at) } },
+                    onMemberResize = { id, span -> lifecycleScope.launch { folders.resizeMember(id, span) } },
                     onNewFolder = { id -> lifecycleScope.launch { folders.createFolder(id) } },
                     onRequestAddToFolder = folders::requestAddToFolder,
                     onPickFolder = { id -> lifecycleScope.launch { folders.pickFolder(id) } },

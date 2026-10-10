@@ -2,6 +2,8 @@ package me.foxtails.lakehead
 
 import me.foxtails.lakehead.core.model.AppIdentity
 import me.foxtails.lakehead.core.model.ItemId
+import me.foxtails.lakehead.core.model.LogicalPosition
+import me.foxtails.lakehead.core.model.LogicalSpan
 import me.foxtails.lakehead.feature.home.HomeRenderTile
 
 /**
@@ -19,6 +21,8 @@ internal data class FolderShell(
     val onLaunchMember: (AppIdentity) -> Unit = {},
     val onMemberToHome: (ItemId) -> Unit = {},
     val onMemberRemove: (ItemId) -> Unit = {},
+    val onMemberMove: (ItemId, LogicalPosition) -> Unit = { _, _ -> },
+    val onMemberResize: (ItemId, LogicalSpan) -> Unit = { _, _ -> },
     val onNewFolder: (ItemId) -> Unit = {},
     val onRequestAddToFolder: (ItemId) -> Unit = {},
     val onPickFolder: (ItemId) -> Unit = {},

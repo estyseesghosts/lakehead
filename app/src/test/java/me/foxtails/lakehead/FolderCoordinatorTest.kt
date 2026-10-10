@@ -15,6 +15,9 @@ import me.foxtails.lakehead.core.model.ProfileId
 import me.foxtails.lakehead.data.repository.CreateFolderResult
 import me.foxtails.lakehead.data.repository.Dissolve
 import me.foxtails.lakehead.data.repository.FolderRepository
+import me.foxtails.lakehead.data.repository.HomePlacementRepository
+import me.foxtails.lakehead.data.repository.MutationResult
+import me.foxtails.lakehead.core.grid.GridRules
 import me.foxtails.lakehead.data.repository.LoadFolderResult
 import me.foxtails.lakehead.data.repository.RemoveFolderResult
 import me.foxtails.lakehead.data.repository.RemoveMemberResult
@@ -77,12 +80,27 @@ class FolderCoordinatorTest {
         }
     }
 
-    private class Harness(val repo: FakeFolders) {
+    private class RecordingPlacements(
+        var result: MutationResult = MutationResult.NotFound,
+    ) : HomePlacementRepository by FakeHomePlacementRepository() {
+        val calls = mutableListOf<String>()
+        override fun move(homeId: HomeId, itemId: ItemId, position: LogicalPosition, columns: Int): MutationResult {
+            calls += "move ${itemId.value}->${position.column},${position.row}"
+            return result
+        }
+        override fun resize(homeId: HomeId, itemId: ItemId, span: LogicalSpan, columns: Int): MutationResult {
+            calls += "resize ${itemId.value}->${span.columns}x${span.rows}"
+            return result
+        }
+    }
+
+    private class Harness(val repo: FakeFolders, val placements: RecordingPlacements = RecordingPlacements()) {
         var homeChanges = 0
         val released = mutableListOf<Int>()
         val coordinator = FolderCoordinator(
             homeId = HomeId("home"),
             folders = repo,
+            placements = placements,
             columns = 5,
             metadata = { mapOf(AppIdentity(ProfileId("0"), ComponentIdentity("org.a", "org.a.Main")) to HomeAppMetadata("A")) },
             onHomeChanged = { homeChanges++ },
@@ -239,5 +257,38 @@ class FolderCoordinatorTest {
         h.repo.loadResult = LoadFolderResult.NotFound
         h.coordinator.refreshOpen()
         assertNull(h.coordinator.openFolder.value)
+    }
+
+    @Test fun moveMemberWritesThenRereadsTheOpenFolder() = runTest {
+        val h = harness { members = listOf(member("a"), member("b", 1)) }
+        h.coordinator.open(folder)
+        h.repo.members = listOf(member("a", 2), member("b", 1))
+        h.placements.result = MutationResult.Accepted(
+            GridRules.Result.Accepted(emptyList()),
+        )
+
+        val moved = h.coordinator.moveMember(ItemId("a"), LogicalPosition(2, 0))
+
+        assertTrue(moved)
+        assertEquals(listOf("move a->2,0"), h.placements.calls)
+        assertEquals(2, h.coordinator.members.value.first { it.itemId == ItemId("a") }.position.column)
+    }
+
+    @Test fun rejectedMoveStillRereadsSoTheTileSnapsBack() = runTest {
+        val h = harness { members = listOf(member("a")) }
+        h.coordinator.open(folder)
+        h.placements.result = MutationResult.Rejected(GridRules.Result.Rejected(GridRules.Rejection.COLLISION))
+
+        assertFalse(h.coordinator.moveMember(ItemId("a"), LogicalPosition(1, 0)))
+        assertEquals(0, h.coordinator.members.value.single().position.column)
+    }
+
+    @Test fun resizeMemberWritesThroughTheRepository() = runTest {
+        val h = harness { members = listOf(member("a")) }
+        h.coordinator.open(folder)
+
+        h.coordinator.resizeMember(ItemId("a"), LogicalSpan(2, 1))
+
+        assertEquals(listOf("resize a->2x1"), h.placements.calls)
     }
 }

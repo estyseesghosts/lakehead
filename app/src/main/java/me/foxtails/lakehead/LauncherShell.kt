@@ -501,6 +501,8 @@ internal fun LauncherShell(
             onLaunchApp = folders.onLaunchMember,
             onMoveToHome = folders.onMemberToHome,
             onRemoveMember = folders.onMemberRemove,
+            onMoveMember = folders.onMemberMove,
+            onResizeMember = folders.onMemberResize,
             onDismiss = folders.onClose,
             widgetContent = widgetContent,
         )

@@ -34,20 +34,27 @@ import androidx.compose.ui.unit.sp
 import me.foxtails.lakehead.core.designsystem.LocalLauncherDimensions
 import me.foxtails.lakehead.core.designsystem.PinnedTileShortcut
 import me.foxtails.lakehead.core.model.AppIdentity
+import me.foxtails.lakehead.core.grid.GridColumns
+import me.foxtails.lakehead.core.grid.GridVerticalExtent
+import me.foxtails.lakehead.core.model.HomeId
 import me.foxtails.lakehead.core.model.ItemId
+import me.foxtails.lakehead.core.model.LogicalPosition
+import me.foxtails.lakehead.core.model.LogicalSpan
 
 /**
  * Floating overlay for one open folder, drawn over the current Home page.
  *
- * [members] are the folder's app and widget tiles at their persisted cells and spans; the panel
- * lays them out on [columns] square cells across (an input, five on a normal phone) and scrolls
- * vertically on its own. App members launch through [onLaunchApp]; widget members render through
- * [widgetContent], the same slot Home uses. A long-press on a member opens a small menu:
- * [onMoveToHome] and [onRemoveMember] report the member id. The scrim and Back call [onDismiss];
- * while the member menu is open Back closes only the menu.
+ * [members] are the folder's app and widget tiles at their persisted cells and spans. The panel
+ * hosts the same [HomeCanvasGrid] as Home in its interior mode, so editing is the standard edit
+ * mode: long-press a member to select it, drag it to move ([onMoveMember]), use the handle to
+ * resize widgets ([onResizeMember]) and the remove button for [onRemoveMember]. Dragging a member
+ * out of the panel and releasing moves it back to Home ([onMoveToHome]); while a member is held
+ * the panel grows one row downward so it can be placed lower. Outside edit mode a tap launches an
+ * app through [onLaunchApp]. The scrim and Back call [onDismiss]; while editing Back leaves edit
+ * mode first.
  *
- * Presentation only: no catalogue, database or platform access. In-folder move and resize are
- * not part of this overlay; members sit where the first-free search put them.
+ * Presentation only: no catalogue, database or platform access. Persistence and reconciliation
+ * stay with the caller, which feeds the changed [members] back in.
  */
 @Composable
 fun FolderOverlay(
@@ -60,32 +67,34 @@ fun FolderOverlay(
     onRemoveMember: (ItemId) -> Unit,
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
+    onMoveMember: (ItemId, LogicalPosition) -> Unit = { _, _ -> },
+    onResizeMember: (ItemId, LogicalSpan) -> Unit = { _, _ -> },
     widgetContent: HomeWidgetContent = NoHomeWidgetContent,
     pinnedByTile: Map<ItemId, List<PinnedTileShortcut>> = emptyMap(),
     onPinnedShortcutClick: (ItemId, String) -> Unit = { _, _ -> },
 ) {
     if (!isOpen) return
-    var menuTarget by remember { mutableStateOf<ItemId?>(null) }
-    BackHandler(enabled = true) {
-        if (menuTarget != null) menuTarget = null else onDismiss()
-    }
+    BackHandler(enabled = true, onBack = onDismiss)
     val scheme = MaterialTheme.colorScheme
     val dimensions = LocalLauncherDimensions.current
+    var moveActive by remember { mutableStateOf(false) }
+    var dropOutside by remember { mutableStateOf(false) }
     BoxWithConstraints(modifier = modifier.fillMaxSize().testTag(FOLDER_OVERLAY_TAG)) {
         val density = LocalDensity.current
-        val layout = remember(members, columns, constraints.maxWidth, constraints.maxHeight) {
-            with(density) {
-                folderOverlayLayout(
-                    tiles = members,
-                    columns = columns,
-                    viewportWidthPx = constraints.maxWidth,
-                    viewportHeightPx = constraints.maxHeight,
-                    marginPx = dimensions.gridGap.roundToPx() * 2,
-                    paddingPx = dimensions.gridGap.roundToPx(),
-                    gapPx = dimensions.gridGap.roundToPx(),
-                )
-            }
+        val paddingPx = with(density) { dimensions.gridGap.roundToPx() }
+        val layout = remember(members, columns, constraints.maxWidth, constraints.maxHeight, moveActive) {
+            folderOverlayLayout(
+                tiles = members,
+                columns = columns,
+                viewportWidthPx = constraints.maxWidth,
+                viewportHeightPx = constraints.maxHeight,
+                marginPx = paddingPx * 2,
+                paddingPx = paddingPx,
+                gapPx = paddingPx,
+                expandRows = if (moveActive) 1 else 0,
+            )
         }
+        val loaded = remember(members, columns) { folderInteriorState(members, columns) }
         Box(
             Modifier
                 .fillMaxSize()
@@ -94,6 +103,7 @@ fun FolderOverlay(
                 .clickable(role = Role.Button, onClick = onDismiss),
         )
         val panel = layout.panel
+        val innerHeightPx = (panel.bottom - panel.top - 2 * paddingPx).coerceAtLeast(0)
         Box(
             modifier = Modifier
                 .offset { IntOffset(panel.left, panel.top) }
@@ -106,110 +116,59 @@ fun FolderOverlay(
                 // Taps on empty panel area must not reach the dismissing scrim underneath.
                 .pointerInput(Unit) { detectTapGestures { } },
         ) {
-            Box(
-                Modifier
+            HomeCanvasGrid(
+                loaded = loaded,
+                iconsByIdentity = iconsByIdentity,
+                onLaunchApp = onLaunchApp,
+                viewportStyle = HomeCanvasViewportStyle(
+                    horizontalPaddingPx = paddingPx,
+                    columnGapPx = paddingPx,
+                    rowGapPx = paddingPx,
+                ),
+                usableHeightPx = innerHeightPx,
+                modifier = Modifier
                     .fillMaxSize()
-                    .verticalScroll(rememberScrollState())
+                    .padding(vertical = with(density) { paddingPx.toDp() })
                     .testTag(FOLDER_OVERLAY_SCROLL_TAG),
-            ) {
-                HomeGridLayout(
-                    tiles = members,
-                    metrics = layout.metrics,
-                    renderedSpan = { it.span },
-                    minHeightPx = layout.contentHeightPx,
-                    tailPx = 0,
-                ) { tile, span ->
-                    HomeCanvasTile(
-                        tile = if (span != tile.span) tile.copy(span = span) else tile,
-                        iconBitmap = tile.appIdentity?.let { iconsByIdentity[it] },
-                        onLaunchApp = onLaunchApp,
-                        pinnedShortcuts = pinnedByTile[tile.itemId].orEmpty(),
-                        onShortcutClick = { onPinnedShortcutClick(tile.itemId, it) },
-                        onEnterWiggle = { menuTarget = it.itemId },
-                        content = if (tile.isWidget) {
-                            { editing ->
-                                WidgetTileBody(
-                                    tile = tile,
-                                    isEditing = editing,
-                                    widgetContent = widgetContent,
-                                    onSelect = {},
-                                    onLongPress = { menuTarget = tile.itemId },
-                                )
-                            }
-                        } else {
-                            null
-                        },
-                    )
-                }
-            }
-        }
-        val target = menuTarget
-        if (target != null) {
-            // The menu lives at overlay level, not inside the panel: a one-row panel is shorter
-            // than the menu and would clip its rows out of reach.
-            Box(
-                Modifier
-                    .fillMaxSize()
-                    .clickable(role = Role.Button) { menuTarget = null },
+                onMoveTile = onMoveMember,
+                onResizeTile = onResizeMember,
+                onRemoveTile = onRemoveMember,
+                pinnedByTile = pinnedByTile,
+                onPinnedShortcutClick = onPinnedShortcutClick,
+                widgetContent = widgetContent,
+                interior = true,
+                onDropOutside = onMoveToHome,
+                onMoveActiveChange = { moveActive = it },
+                onDragOutsideChange = { dropOutside = it },
             )
-            FolderMemberMenu(
-                onMoveToHome = {
-                    menuTarget = null
-                    onMoveToHome(target)
-                },
-                onRemove = {
-                    menuTarget = null
-                    onRemoveMember(target)
-                },
-                onDismiss = { menuTarget = null },
-                modifier = Modifier.align(Alignment.Center),
+        }
+        if (dropOutside) {
+            BasicText(
+                text = "Release to move to Home",
+                style = TextStyle(color = scheme.onSurface, fontSize = 14.sp),
+                modifier = Modifier
+                    .offset { IntOffset(panel.left, panel.bottom + paddingPx) }
+                    .testTag(FOLDER_DROP_HINT_TAG),
             )
         }
     }
 }
 
-/** Actions on one folder member, centred over the open panel. */
-@Composable
-internal fun FolderMemberMenu(
-    onMoveToHome: () -> Unit,
-    onRemove: () -> Unit,
-    onDismiss: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val scheme = MaterialTheme.colorScheme
-    Column(
-        modifier = modifier
-            .padding(16.dp)
-            .fillMaxWidth()
-            .background(scheme.surfaceContainerHigh)
-            .padding(8.dp)
-            .testTag(FOLDER_MEMBER_MENU_TAG),
-    ) {
-        MenuRow("Move to Home", FOLDER_MENU_MOVE_TAG, onMoveToHome)
-        MenuRow("Remove", FOLDER_MENU_REMOVE_TAG, onRemove)
-        MenuRow("Cancel", FOLDER_MENU_CANCEL_TAG, onDismiss)
-    }
-}
-
-@Composable
-private fun MenuRow(text: String, tag: String, onClick: () -> Unit) {
-    val scheme = MaterialTheme.colorScheme
-    BasicText(
-        text = text,
-        style = TextStyle(color = scheme.onSurface, fontSize = 16.sp),
-        modifier = Modifier
-            .fillMaxWidth()
-            .testTag(tag)
-            .clickable(role = Role.Button, onClick = onClick)
-            .padding(vertical = 14.dp, horizontal = 12.dp),
+/** The folder interior as a loaded Home grid: same tiles, [columns] across, measured extent. */
+internal fun folderInteriorState(members: List<HomeRenderTile>, columns: Int): HomeRenderState.Loaded {
+    val bottom = members.maxOfOrNull { it.position.row + it.span.rows }?.toLong() ?: 0L
+    return HomeRenderState.Loaded(
+        requestedHomeId = HomeId(FOLDER_INTERIOR_ID),
+        tiles = members,
+        columns = GridColumns(columns),
+        extent = GridVerticalExtent(occupiedBottomRowExclusive = bottom, totalScrollableRows = bottom),
     )
 }
+
+private const val FOLDER_INTERIOR_ID: String = "folder-interior"
 
 const val FOLDER_OVERLAY_TAG: String = "folder-overlay"
 const val FOLDER_OVERLAY_SCRIM_TAG: String = "folder-overlay-scrim"
 const val FOLDER_OVERLAY_PANEL_TAG: String = "folder-overlay-panel"
 const val FOLDER_OVERLAY_SCROLL_TAG: String = "folder-overlay-scroll"
-const val FOLDER_MEMBER_MENU_TAG: String = "folder-member-menu"
-const val FOLDER_MENU_MOVE_TAG: String = "folder-menu-move"
-const val FOLDER_MENU_REMOVE_TAG: String = "folder-menu-remove"
-const val FOLDER_MENU_CANCEL_TAG: String = "folder-menu-cancel"
+const val FOLDER_DROP_HINT_TAG: String = "folder-drop-hint"
