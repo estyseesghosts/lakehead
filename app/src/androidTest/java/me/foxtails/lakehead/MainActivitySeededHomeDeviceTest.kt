@@ -274,9 +274,13 @@ class MainActivitySeededHomeDeviceTest {
         database.runInTransaction {
             dao.insertHome(HomeEntity(PRODUCTION_HOME_ID.value))
             placements.forEach { placement ->
-                dao.insertAppReference(
-                    AppReferenceEntity(placement.profileId, placement.packageName, placement.className),
-                )
+                val profileId = placement.profileId
+                val packageName = placement.packageName
+                val className = placement.className
+                // Folder placements carry no app reference.
+                if (profileId != null && packageName != null && className != null) {
+                    dao.insertAppReference(AppReferenceEntity(profileId, packageName, className))
+                }
                 dao.insertPlacement(placement)
             }
         }

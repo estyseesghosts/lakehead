@@ -73,19 +73,20 @@ Each slice is one verifiable change with its own validation run (AGENTS.md §6) 
 | # | Title | Module(s) | Status |
 |---|-------|-----------|--------|
 | 0 | Spec and doc fixes | docs | done |
-| 1 | Domain model | `:core:model` | not started |
-| 2 | Schema v5 | `:data:database` | not started |
-| 3 | Parent-scoped Home repository | `:data:repository` | not started |
-| 4 | Folder repository: create, load, transfer | `:data:repository` | not started |
-| 5 | Auto-dissolve and folder remove | `:data:repository` | not started |
-| 6 | Folder tile primitive | `:core:designsystem` | not started |
-| 7 | Closed folder tile on Home | `:feature:home` | not started |
-| 8 | Grid canvas reuse audit | `:feature:home` (read-only) | not started |
-| 9 | Folder overlay | `:feature:home` | not started |
-| 10 | Wiring, launch and dismissal | `:app` | not started |
-| 11 | Edit-menu actions | `:feature:home`, `:app` | not started |
-| 12 | Catalogue reconciliation and export | `:app` | not started |
-| 13 | Exit check | all | not started |
+| 1 | Domain model | `:core:model` | done |
+| 2 | Schema v5 | `:data:database` | done |
+| 3 | Parent-scoped Home repository | `:data:repository` | done |
+| 4 | Folder repository: create, load, transfer | `:data:repository` | done |
+| 5 | Auto-dissolve and folder remove | `:data:repository` | done |
+| 6 | Folder tile primitive | `:core:designsystem` | done |
+| 7 | Closed folder tile on Home | `:feature:home` | done |
+| 8 | Grid canvas reuse audit | `:feature:home` (read-only) | done |
+| 9 | Folder overlay | `:feature:home` | done |
+| 10 | Wiring, launch and dismissal | `:app` | done |
+| 11 | Edit-menu actions | `:feature:home`, `:app` | done |
+| 12 | Catalogue reconciliation and export | `:app` | done |
+| 13 | Exit check | all | done |
+| 14 | Folder members use standard edit mode (added after the plan) | `:feature:home`, `:app` | done |
 
 ### Slice 0 — Spec and doc fixes
 
@@ -234,3 +235,20 @@ One question: can `HomeCanvasGrid`, `HomeGridEditor` and the gesture files rende
 ## Suggested order
 
 0 → 1 → 2 → 3 → 4 → 5, then 6 → 7, then 8 → 9 → 10 → 11 → 12 → 13. Slices 6 and 8 touch no persisted code and can run alongside 2–5 if a second agent is available. After Slice 10 folders persist, open and launch; after Slice 11 the exit gate is reachable.
+
+## Deviations and notes (recorded at close-out)
+
+- Slice 12: the export format stays `proto-launch.home-layout/v1`. Folders add an optional
+  `members` array on `type: FOLDER` items (member id + app reference); `app` is absent on folders.
+  Older documents import unchanged. Widget members are not exported (as Home widgets are not).
+  Member spans and in-folder cells are not carried: import places members first-free. Folders need
+  a `FolderRepository`; without one they are rejected per item. A one-member folder imports as the app.
+- Slice 12 reconciliation: no code writes `UNAVAILABLE` for any tile today; Home projects
+  launchability from live catalogue metadata, and folder members use the same projection, so an
+  uninstalled member renders unavailable and is never deleted.
+- Slice 14 (user request): the member popup menu is gone. The folder panel hosts `HomeCanvasGrid`
+  in `interior` mode, so edit mode, move, resize and remove are the Home ones. Releasing a MOVE
+  outside the grid bounds moves the member to Home (first-free cell, auto-dissolve applies). While
+  a member is held the panel grows one row downward (top fixed, capped at 70% of the screen).
+- Fix found on device: `ShortcutMenuCoordinator` ignores folder tiles (they have no app identity).
+- Known cosmetic issue: the resize handle of a bottom-row member is half clipped at the panel edge.
