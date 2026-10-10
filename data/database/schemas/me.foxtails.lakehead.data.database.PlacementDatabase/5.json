@@ -1,0 +1,363 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 5,
+    "identityHash": "1f30e489e86cfda689e230b8f4253fc8",
+    "entities": [
+      {
+        "tableName": "homes",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`homeId` TEXT NOT NULL, PRIMARY KEY(`homeId`))",
+        "fields": [
+          {
+            "fieldPath": "homeId",
+            "columnName": "homeId",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "homeId"
+          ]
+        }
+      },
+      {
+        "tableName": "app_references",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`profileId` TEXT NOT NULL, `packageName` TEXT NOT NULL, `className` TEXT NOT NULL, PRIMARY KEY(`profileId`, `packageName`, `className`))",
+        "fields": [
+          {
+            "fieldPath": "profileId",
+            "columnName": "profileId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "packageName",
+            "columnName": "packageName",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "className",
+            "columnName": "className",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "profileId",
+            "packageName",
+            "className"
+          ]
+        }
+      },
+      {
+        "tableName": "placements",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`itemId` TEXT NOT NULL, `homeId` TEXT NOT NULL, `itemType` TEXT NOT NULL, `profileId` TEXT, `packageName` TEXT, `className` TEXT, `column` INTEGER NOT NULL, `row` INTEGER NOT NULL, `columnSpan` INTEGER NOT NULL, `rowSpan` INTEGER NOT NULL, `availability` TEXT NOT NULL, `parentFolderId` TEXT, PRIMARY KEY(`itemId`), FOREIGN KEY(`homeId`) REFERENCES `homes`(`homeId`) ON UPDATE NO ACTION ON DELETE CASCADE , FOREIGN KEY(`profileId`, `packageName`, `className`) REFERENCES `app_references`(`profileId`, `packageName`, `className`) ON UPDATE NO ACTION ON DELETE NO ACTION , FOREIGN KEY(`parentFolderId`) REFERENCES `placements`(`itemId`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "itemId",
+            "columnName": "itemId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "homeId",
+            "columnName": "homeId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "itemType",
+            "columnName": "itemType",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "profileId",
+            "columnName": "profileId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "packageName",
+            "columnName": "packageName",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "className",
+            "columnName": "className",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "column",
+            "columnName": "column",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "row",
+            "columnName": "row",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "columnSpan",
+            "columnName": "columnSpan",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "rowSpan",
+            "columnName": "rowSpan",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "availability",
+            "columnName": "availability",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "parentFolderId",
+            "columnName": "parentFolderId",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "itemId"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_placements_homeId",
+            "unique": false,
+            "columnNames": [
+              "homeId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_placements_homeId` ON `${TABLE_NAME}` (`homeId`)"
+          },
+          {
+            "name": "index_placements_profileId_packageName_className",
+            "unique": false,
+            "columnNames": [
+              "profileId",
+              "packageName",
+              "className"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_placements_profileId_packageName_className` ON `${TABLE_NAME}` (`profileId`, `packageName`, `className`)"
+          },
+          {
+            "name": "index_placements_parentFolderId",
+            "unique": false,
+            "columnNames": [
+              "parentFolderId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_placements_parentFolderId` ON `${TABLE_NAME}` (`parentFolderId`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "homes",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "homeId"
+            ],
+            "referencedColumns": [
+              "homeId"
+            ]
+          },
+          {
+            "table": "app_references",
+            "onDelete": "NO ACTION",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "profileId",
+              "packageName",
+              "className"
+            ],
+            "referencedColumns": [
+              "profileId",
+              "packageName",
+              "className"
+            ]
+          },
+          {
+            "table": "placements",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "parentFolderId"
+            ],
+            "referencedColumns": [
+              "itemId"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "shortcut_bindings",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`tileId` TEXT NOT NULL, `pinnedShortcutIds` TEXT NOT NULL, PRIMARY KEY(`tileId`), FOREIGN KEY(`tileId`) REFERENCES `placements`(`itemId`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "tileId",
+            "columnName": "tileId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "pinnedShortcutIds",
+            "columnName": "pinnedShortcutIds",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "tileId"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_shortcut_bindings_tileId",
+            "unique": false,
+            "columnNames": [
+              "tileId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_shortcut_bindings_tileId` ON `${TABLE_NAME}` (`tileId`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "placements",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "tileId"
+            ],
+            "referencedColumns": [
+              "itemId"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "widget_bindings",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`itemId` TEXT NOT NULL, `appWidgetId` INTEGER NOT NULL, PRIMARY KEY(`itemId`), FOREIGN KEY(`itemId`) REFERENCES `placements`(`itemId`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "itemId",
+            "columnName": "itemId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "appWidgetId",
+            "columnName": "appWidgetId",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "itemId"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_widget_bindings_itemId",
+            "unique": false,
+            "columnNames": [
+              "itemId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_widget_bindings_itemId` ON `${TABLE_NAME}` (`itemId`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "placements",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "itemId"
+            ],
+            "referencedColumns": [
+              "itemId"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "tile_album_bindings",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`tileId` TEXT NOT NULL, `bucketId` TEXT NOT NULL, `albumName` TEXT NOT NULL, PRIMARY KEY(`tileId`), FOREIGN KEY(`tileId`) REFERENCES `placements`(`itemId`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "tileId",
+            "columnName": "tileId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "bucketId",
+            "columnName": "bucketId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "albumName",
+            "columnName": "albumName",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "tileId"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_tile_album_bindings_tileId",
+            "unique": false,
+            "columnNames": [
+              "tileId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_tile_album_bindings_tileId` ON `${TABLE_NAME}` (`tileId`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "placements",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "tileId"
+            ],
+            "referencedColumns": [
+              "itemId"
+            ]
+          }
+        ]
+      }
+    ],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '1f30e489e86cfda689e230b8f4253fc8')"
+    ]
+  }
+}

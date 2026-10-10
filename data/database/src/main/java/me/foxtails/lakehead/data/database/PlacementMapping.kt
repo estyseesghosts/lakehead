@@ -3,6 +3,7 @@ package me.foxtails.lakehead.data.database
 import me.foxtails.lakehead.core.model.AlbumRef
 import me.foxtails.lakehead.core.model.AppIdentity
 import me.foxtails.lakehead.core.model.AppPlacement
+import me.foxtails.lakehead.core.model.FolderPlacement
 import me.foxtails.lakehead.core.model.ComponentIdentity
 import me.foxtails.lakehead.core.model.HomeId
 import me.foxtails.lakehead.core.model.HomeItemType
@@ -30,10 +31,11 @@ fun AppReferenceEntity.toDomain() = AppIdentity(
     component = ComponentIdentity(packageName, className),
 )
 
-/** The app or widget-provider reference a placement row points at. */
-fun HomePlacement.referenceIdentity(): AppIdentity = when (this) {
+/** The app or widget-provider reference a placement row points at; a folder has none. */
+fun HomePlacement.referenceIdentity(): AppIdentity? = when (this) {
     is AppPlacement -> appIdentity
     is WidgetPlacement -> provider
+    is FolderPlacement -> null
 }
 
 fun HomePlacement.toEntity(): PlacementEntity {
@@ -42,14 +44,15 @@ fun HomePlacement.toEntity(): PlacementEntity {
         itemId.value,
         homeId.value,
         type.name,
-        reference.profileId.value,
-        reference.component.packageName,
-        reference.component.className,
+        reference?.profileId?.value,
+        reference?.component?.packageName,
+        reference?.component?.className,
         position.column,
         position.row,
         span.columns,
         span.rows,
         availability.name,
+        parentFolderId?.value,
     )
 }
 
@@ -58,31 +61,51 @@ fun WidgetPlacement.toBindingEntity() = WidgetBindingEntity(itemId.value, appWid
 /**
  * Reject schema/domain boundary values unknown to this slice rather than reinterpret them.
  * A widget row needs its [widgetBinding]; a missing binding is a corrupt row, not an app.
+ * An APP or WIDGET row needs a full app reference and a FOLDER row must have none; a folder
+ * with a parent (nesting) is corrupt.
  */
 fun PlacementEntity.toDomain(widgetBinding: WidgetBindingEntity? = null): HomePlacement {
-    val reference = AppIdentity(
-        profileId = ProfileId(profileId),
-        component = ComponentIdentity(packageName, className),
-    )
+    val hasReference = profileId != null && packageName != null && className != null
+    val hasPartialReference = !hasReference && (profileId != null || packageName != null || className != null)
+    require(!hasPartialReference) { "Placement $itemId has a partial app reference" }
+    val reference = if (hasReference) {
+        AppIdentity(ProfileId(profileId!!), ComponentIdentity(packageName!!, className!!))
+    } else {
+        null
+    }
+    val parent = parentFolderId?.let(::ItemId)
     return when (itemType) {
         HomeItemType.APP.name -> AppPlacement(
             homeId = HomeId(homeId),
             itemId = ItemId(itemId),
-            appIdentity = reference,
+            appIdentity = requireNotNull(reference) { "App placement $itemId has no app reference" },
             position = LogicalPosition(column, row),
             span = LogicalSpan(columnSpan, rowSpan),
             availability = ItemAvailability.valueOf(availability),
+            parentFolderId = parent,
         )
         HomeItemType.WIDGET.name -> WidgetPlacement(
             homeId = HomeId(homeId),
             itemId = ItemId(itemId),
-            provider = reference,
+            provider = requireNotNull(reference) { "Widget placement $itemId has no provider reference" },
             appWidgetId = requireNotNull(widgetBinding) { "Widget placement $itemId has no binding" }
                 .appWidgetId,
             position = LogicalPosition(column, row),
             span = LogicalSpan(columnSpan, rowSpan),
             availability = ItemAvailability.valueOf(availability),
+            parentFolderId = parent,
         )
+        HomeItemType.FOLDER.name -> {
+            require(reference == null) { "Folder placement $itemId has an app reference" }
+            require(parent == null) { "Folder placement $itemId is nested" }
+            FolderPlacement(
+                homeId = HomeId(homeId),
+                itemId = ItemId(itemId),
+                position = LogicalPosition(column, row),
+                span = LogicalSpan(columnSpan, rowSpan),
+                availability = ItemAvailability.valueOf(availability),
+            )
+        }
         else -> throw IllegalArgumentException("Unsupported placement type: $itemType")
     }
 }

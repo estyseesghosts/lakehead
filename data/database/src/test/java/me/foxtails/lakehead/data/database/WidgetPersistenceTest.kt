@@ -109,7 +109,7 @@ class WidgetPersistenceTest {
     private fun openMigrated(): PlacementDatabase =
         Room.databaseBuilder(context, PlacementDatabase::class.java, DB_NAME)
             .addMigrations(PlacementDatabase.MIGRATION_1_2, PlacementDatabase.MIGRATION_2_3,
-                PlacementDatabase.MIGRATION_3_4)
+                PlacementDatabase.MIGRATION_3_4, PlacementDatabase.MIGRATION_4_5)
             .allowMainThreadQueries().build().also { database = it }
 
     /** A database shaped exactly as exported schema 2.json, holding one app placement. */

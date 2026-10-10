@@ -31,8 +31,28 @@ public interface PlacementDao {
     @Query("SELECT * FROM placements ORDER BY itemId")
     List<PlacementEntity> placements();
 
-    @Query("SELECT * FROM placements WHERE homeId = :homeId ORDER BY rowid")
-    List<PlacementEntity> placementsForHome(String homeId);
+    /** Home occupancy: top-level rows only. Folder members are never Home occupancy. */
+    @Query("SELECT * FROM placements WHERE homeId = :homeId AND parentFolderId IS NULL ORDER BY rowid")
+    List<PlacementEntity> topLevelPlacements(String homeId);
+
+    /** The interior of one folder: rows whose parent is [folderId]. */
+    @Query("SELECT * FROM placements WHERE homeId = :homeId AND parentFolderId = :folderId ORDER BY rowid")
+    List<PlacementEntity> folderMembers(String homeId, String folderId);
+
+    @Query("SELECT COUNT(*) FROM placements WHERE parentFolderId = :folderId")
+    int folderMemberCount(String folderId);
+
+    @Query("UPDATE placements SET parentFolderId = :parentFolderId, `column` = :column, `row` = :row "
+            + "WHERE itemId = :itemId")
+    int reparentPlacement(String itemId, String parentFolderId, int column, int row);
+
+    /** Folders only, for the "Add to folder" chooser. */
+    @Query("SELECT * FROM placements WHERE homeId = :homeId AND itemType = 'FOLDER' ORDER BY rowid")
+    List<PlacementEntity> folders(String homeId);
+
+    @Query("SELECT wb.appWidgetId FROM widget_bindings wb INNER JOIN placements p ON p.itemId = wb.itemId "
+            + "WHERE p.parentFolderId = :folderId")
+    List<Integer> folderMemberWidgetIds(String folderId);
 
     @Query("UPDATE placements SET itemId = :itemId, homeId = :homeId, itemType = :itemType, " +
             "profileId = :profileId, packageName = :packageName, className = :className, " +

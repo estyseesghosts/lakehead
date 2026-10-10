@@ -127,6 +127,7 @@ class AlbumPersistenceTest {
                 PlacementDatabase.MIGRATION_1_2,
                 PlacementDatabase.MIGRATION_2_3,
                 PlacementDatabase.MIGRATION_3_4,
+                PlacementDatabase.MIGRATION_4_5,
             )
             .allowMainThreadQueries().build().also { database = it }
 

@@ -37,8 +37,8 @@ class ShortcutBindingPersistenceTest {
     fun closeDatabase() = database.close()
 
     @Test
-    fun schemaVersionIsFour() {
-        assertEquals(4, DatabaseSchema.VERSION)
+    fun schemaVersionIsFive() {
+        assertEquals(5, DatabaseSchema.VERSION)
         assertEquals(DatabaseSchema.VERSION, database.openHelper.readableDatabase.version)
     }
 

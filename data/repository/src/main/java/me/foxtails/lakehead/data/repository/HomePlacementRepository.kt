@@ -110,7 +110,7 @@ class RoomHomePlacementRepository(
         require(columns > 0) { "columns must be positive" }
         return database.runInTransaction<LoadResult> {
             if (dao.home(homeId.value) == null) return@runInTransaction LoadResult.NotFound
-            val entities = dao.placementsForHome(homeId.value)
+            val entities = dao.topLevelPlacements(homeId.value)
             val normalized = normalize(entities.map { it.toGridPlacement() })
             persistShifted(entities, normalized)
             val bindings = dao.widgetBindingsForHome(homeId.value).associateBy { it.itemId }
@@ -186,7 +186,7 @@ class RoomHomePlacementRepository(
                     acceptedPlacement.position.toDomain(),
                     acceptedPlacement.span.toDomain(),
                 )
-                val identity = placement.referenceIdentity()
+                val identity = requireNotNull(placement.referenceIdentity()) { "only apps and widgets are placed here" }
                 if (replacingId != null && replacingId != itemId) {
                     dao.replacePlacement(
                         replacingId.value,
@@ -208,7 +208,7 @@ class RoomHomePlacementRepository(
                     dao.insertPlacement(placement.toEntity())
                 }
                 if (placement is WidgetPlacement) dao.upsertWidgetBinding(placement.toBindingEntity())
-                persistShifted(dao.placementsForHome(homeId.value), normalized)
+                persistShifted(dao.topLevelPlacements(homeId.value), normalized)
                 MutationResult.Accepted(GridRules.Result.Accepted(normalized))
             }
         }
@@ -223,7 +223,7 @@ class RoomHomePlacementRepository(
         GridRules.move(current, itemId, position.toGrid(), columns)
         }, { accepted ->
         val normalized = normalize(accepted.placements)
-        persistShifted(dao.placementsForHome(homeId.value), normalized)
+        persistShifted(dao.topLevelPlacements(homeId.value), normalized)
         normalized
     })
 
@@ -236,7 +236,7 @@ class RoomHomePlacementRepository(
         GridRules.resize(current, itemId, span.toGrid(), columns)
         }, { accepted ->
         val normalized = normalize(accepted.placements)
-        persistShifted(dao.placementsForHome(homeId.value), normalized)
+        persistShifted(dao.topLevelPlacements(homeId.value), normalized)
         normalized
     })
 
@@ -251,7 +251,7 @@ class RoomHomePlacementRepository(
         dao.deleteShortcutBinding(itemId.value)
         dao.deleteWidgetBinding(itemId.value)
         dao.deleteAlbumBinding(itemId.value)
-        val remaining = dao.placementsForHome(homeId.value)
+        val remaining = dao.topLevelPlacements(homeId.value)
         persistShifted(remaining, normalize(remaining.map { it.toGridPlacement() }))
         RemoveResult.Removed
     }
@@ -308,7 +308,7 @@ class RoomHomePlacementRepository(
     }
 
     private fun homeGrid(homeId: HomeId): List<GridPlacement<ItemId>> =
-        dao.placementsForHome(homeId.value).map { it.toGridPlacement() }
+        dao.topLevelPlacements(homeId.value).map { it.toGridPlacement() }
 
     private fun <T : Any> normalize(placements: List<GridPlacement<T>>): List<GridPlacement<T>> =
         GridRowGapNormalizer.normalize(placements)
@@ -330,7 +330,7 @@ class RoomHomePlacementRepository(
                     PlacementEntity(
                         entity.itemId, entity.homeId, entity.itemType, entity.profileId,
                         entity.packageName, entity.className, position.column, position.row,
-                        span.columns, span.rows, entity.availability,
+                        span.columns, span.rows, entity.availability, entity.parentFolderId,
                     ),
                 )
             }

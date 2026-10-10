@@ -34,8 +34,8 @@ class PlacementDatabaseTest {
     fun closeDatabase() = database.close()
 
     @Test
-    fun freshDatabaseCreatesVersionFourSchemaWithAllTablesAndReferentialKeys() {
-        assertEquals(4, DatabaseSchema.VERSION)
+    fun freshDatabaseCreatesVersionFiveSchemaWithAllTablesAndReferentialKeys() {
+        assertEquals(5, DatabaseSchema.VERSION)
         assertEquals(DatabaseSchema.VERSION, database.openHelper.readableDatabase.version)
         assertEquals(
             setOf("homeId"),
@@ -48,7 +48,7 @@ class PlacementDatabaseTest {
         assertEquals(
             setOf(
                 "itemId", "homeId", "itemType", "profileId", "packageName", "className",
-                "column", "row", "columnSpan", "rowSpan", "availability",
+                "column", "row", "columnSpan", "rowSpan", "availability", "parentFolderId",
             ),
             columns("placements"),
         )
@@ -58,7 +58,7 @@ class PlacementDatabaseTest {
         )
         assertEquals(
             setOf("homeId->homes.homeId", "profileId->app_references.profileId",
-                "packageName->app_references.packageName", "className->app_references.className"),
+                "packageName->app_references.packageName", "className->app_references.className", "parentFolderId->placements.itemId"),
             foreignKeyEdges("placements"),
         )
         assertEquals(

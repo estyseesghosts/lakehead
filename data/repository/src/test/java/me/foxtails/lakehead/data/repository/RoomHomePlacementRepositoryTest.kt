@@ -460,7 +460,7 @@ class RoomHomePlacementRepositoryTest {
         database.query(SimpleSQLiteQuery(sql)).use { cursor ->
             buildList {
                 while (cursor.moveToNext()) {
-                    add("$table:${(0 until cursor.columnCount).joinToString("|") { index -> cursor.getString(index) }}")
+                    add("$table:${(0 until cursor.columnCount).joinToString("|") { index -> cursor.getString(index) ?: "null" }}")
                 }
             }
         }
