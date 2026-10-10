@@ -41,7 +41,7 @@ One owner for each mutable state stream: installed-app catalogue in the platform
 
 ## 4. Launcher-specific invariants
 
-- On an average non-folding phone, home and opened floating folders use **six square 1×1 cells across**. Support spans 1×1, 2×1, 1×2, 2×2 and 4×2 without changing the persistence model; use variable column counts for wider viewports. Do not implement a second packing system in a feature.
+- On an average non-folding phone, home and opened floating folders use **five square 1×1 cells across**. Support spans 1×1, 2×1, 1×2, 2×2 and 4×2 without changing the persistence model; use variable column counts for wider viewports. Do not implement a second packing system in a feature.
 - Placement and rendering are separate. Custom expanded app tiles are **not** system widgets. A folder opens as an independently scrollable floating overlay over the current page, not as a navigation destination.
 - Launcher-owned UI uses Kotlin and Compose with custom components built from Foundation, graphics, text, animation and gestures. Do not build core product surfaces around high-level Material NavigationBar, Card, FAB, SearchBar or stock chips and promise to replace them later.
 - HOME eligibility, default-role prompting, catalogue, launches and callbacks belong to 0B. Use `LauncherApps` as the launcher-facing inventory across accessible profiles; `PackageManager` alone is not the complete catalogue. Keep profile identity through launch and persistence.

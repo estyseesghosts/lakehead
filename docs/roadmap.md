@@ -393,7 +393,7 @@ Implement:
 
 `GridColumns` and `GridViewportAdaptation.columnsFor` expose pure column-count adaptation using the documented viewport/inset/padding formula. The API does not rewrite placements.
 
-Six square cells across is the normal-phone reference/sweet spot, not a minimum. Narrow or split viewports may use fewer columns, and wider viewports may use more.
+Five square cells across is the normal-phone reference/sweet spot, not a minimum. Narrow or split viewports may use fewer columns, and wider viewports may use more.
 
 ### Tests
 
@@ -431,7 +431,7 @@ Do not implement every component named in the report at once.
 
 - Implement reusable custom Compose geometry/layout primitives and small contracts in `:core:designsystem`, separate from screen-specific arrangement owned by `:feature:*`.
 - Provide inputs/contracts for measured geometry, explicit anchors or regions, and insets so screen arrangements can position controls and overlays at bottom, top, side or floating locations without fixed-coordinate or bottom-navigation assumptions.
-- Preserve the six-small-tile-wide Home layout as the normal-phone baseline/test arrangement, not a hard-coded screen contract. Support alternate screen shapes and grid widths through layout inputs while retaining stable logical content.
+- Preserve the five-small-tile-wide Home layout as the normal-phone baseline/test arrangement, not a hard-coded screen contract. Support alternate screen shapes and grid widths through layout inputs while retaining stable logical content.
 - Geometry may describe tile bounds, span containers, floating overlay frames and safe insets/control regions, but must not define a second placement/packing system. `:core:grid` remains the sole owner of placement legality, extent and projection; B3 remains pure count adaptation.
 - This slice implements geometry/layout primitives only. It does not implement navigation destinations or prescribe a fixed navigation/control placement.
 
@@ -536,7 +536,7 @@ Repository delegates all legality to `:core:grid` and preserves unrelated rows/o
 
 Requirements:
 
-- Six square columns are a baseline example for an average phone, not a fixed minimum; the renderer must use the adapted column count and must not re-clamp it to six.
+- Five square columns are a baseline example for an average phone, not a fixed minimum; the renderer must use the adapted column count and must not re-clamp it to five.
 - One vertically scrolling canvas.
 - Floating chrome above the scrolling grid.
 - Only visible and near-visible items composed.
@@ -579,11 +579,13 @@ Support the required spans incrementally, beginning with the spans the UI actual
 
 ### Phase exit gate
 
-A phone user sees six-column Home tiles, launches them, moves/resizes/removes them, and sees the same logical Home after restart without unrelated tiles shifting.
+A phone user sees five-column Home tiles, launches them, moves/resizes/removes them, and sees the same logical Home after restart without unrelated tiles shifting.
 
 ---
 
 # Phase E — 1D folders
+
+> **Spec override:** `docs/agents/tasks/folders.md` is authoritative for folders. It overrides E1–E4 on member spans (any span, widgets included), menu-based transfer (no drag between Home and a folder), auto-dissolve, and the overlay living in `:feature:home`.
 
 **Outcome:** Persistent folders open as floating, independently scrollable overlays over the current Home.
 
@@ -621,7 +623,7 @@ Folder is not a navigation destination.
 - Opens over the current Home.
 - Home remains underneath.
 - Folder is independently scrollable.
-- Six square cells across on a normal phone.
+- Five square cells across on a normal phone.
 - Back and outside-tap dismissal follow the defined overlay policy.
 - Accessibility focus remains coherent.
 
@@ -1139,7 +1141,7 @@ All available surfaces can be reached predictably without accidental gesture con
 
 Prerequisites: pure B3 adaptation.
 
-- Fewer or more than six columns where appropriate.
+- Fewer or more than five columns where appropriate.
 - Stable logical-to-visual projection.
 - No source-coordinate rewrite.
 - Back-and-forth restoration.
@@ -1155,7 +1157,7 @@ Prerequisites: pure B3 adaptation.
 
 Clarify and implement:
 
-- Six-column folder behavior on wide viewports.
+- Five-column folder behavior on wide viewports.
 - Split-pane behavior.
 - Overlay versus pane behavior.
 
@@ -1420,7 +1422,7 @@ ProtoLaunch is complete only when:
 - A selected entry launches in the correct profile.
 - Installs/removals update the visible list without restart.
 - Basic settings persist.
-- Normal phone Home uses six square cells across.
+- Normal phone Home uses five square cells across.
 - Required spans work.
 - Home scrolls vertically.
 - Normal placement preserves holes and unrelated tiles.

@@ -697,7 +697,7 @@ Recent Texts
 Frequent Apps
 ```
 
-On a six-unit phone layout, the intended form is three `2x2` groups across one row when dimensions allow.
+On a five-unit phone layout, the intended form is three `2x2` groups across one row when dimensions allow.
 
 ### Recent Files
 
@@ -1087,7 +1087,7 @@ ui-components/
 
 The grid engine must own:
 
-* six-column geometry;
+* five-column geometry;
 * conversion from cell → pixel coordinates;
 * collision checking;
 * vacant-space checking;
@@ -1151,7 +1151,7 @@ Implement:
 
 Implement:
 
-* six-column geometry;
+* five-column geometry;
 * free placement;
 * collisions;
 * dynamically extending vertical bounds;
@@ -1160,7 +1160,7 @@ Implement:
 
 Exit condition:
 
-> Arbitrary rectangles can be freely positioned anywhere in an indefinitely extendable vertical six-column canvas.
+> Arbitrary rectangles can be freely positioned anywhere in an indefinitely extendable vertical five-column canvas.
 
 ### Phase 3 — dual Home layouts
 
@@ -1187,7 +1187,7 @@ Add proper Android shortcut discovery and invocation.
 
 ### Phase 6 — folders
 
-Add six-wide floating folder overlays.
+Add five-wide floating folder overlays.
 
 ### Phase 7 — widgets
 
@@ -1243,7 +1243,7 @@ can be selected and reached by the same Home swipe.
 
 A normal phone implementation is complete when:
 
-* Home is **six cells wide**.
+* Home is **five cells wide**.
 * Home is a **single vertically scrolling canvas**, not pages.
 * It can extend downward as far as required.
 * Tiles remain exactly where the user places them unless there is a collision.
@@ -1258,7 +1258,7 @@ A normal phone implementation is complete when:
 * Their parent positioning container is visually invisible.
 * Apps expand from 1x1 into shortcut/information surfaces.
 * Large app tiles can become real Android widgets.
-* Folders open as floating six-column overlays.
+* Folders open as floating five-column overlays.
 * All Apps begins with grouped tiles, not an ordinary drawer.
 * Message Center maintains its own captured history.
 * Search spans more than applications.
