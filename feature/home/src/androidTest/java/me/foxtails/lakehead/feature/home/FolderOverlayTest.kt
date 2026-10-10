@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.click
@@ -20,7 +21,11 @@ import androidx.compose.ui.test.swipeUp
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.compose.ui.test.onNodeWithContentDescription
 import me.foxtails.lakehead.core.designsystem.LauncherTheme
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.hasStateDescription
 import me.foxtails.lakehead.core.designsystem.PinnedTileShortcut
+import me.foxtails.lakehead.core.designsystem.TileNotificationPreview
+import me.foxtails.lakehead.core.designsystem.TileNotifications
 import me.foxtails.lakehead.core.model.AppIdentity
 import me.foxtails.lakehead.core.model.ComponentIdentity
 import me.foxtails.lakehead.core.model.ItemAvailability
@@ -86,15 +91,18 @@ class FolderOverlayTest {
         widgetContent: HomeWidgetContent = NoHomeWidgetContent,
         pinnedByTile: Map<ItemId, List<PinnedTileShortcut>> = emptyMap(),
         onPinned: (ItemId, String) -> Unit = { _, _ -> },
+        notifications: Map<ItemId, TileNotifications> = emptyMap(),
+        icons: Map<AppIdentity, ImageBitmap> = emptyMap(),
     ) {
         composeRule.setContent {
             LauncherTheme {
                 Box(Modifier.fillMaxSize()) {
                     FolderOverlay(
-                        isOpen = true, members = members, columns = columns, iconsByIdentity = emptyMap(),
+                        isOpen = true, members = members, columns = columns, iconsByIdentity = icons,
                         onLaunchApp = onLaunch, onMoveToHome = onMove, onRemoveMember = onRemove,
                         onDismiss = onDismiss, widgetContent = widgetContent, onMoveMember = onMoveMember,
                         pinnedByTile = pinnedByTile, onPinnedShortcutClick = onPinned,
+                        notificationsByTile = notifications,
                     )
                 }
             }
@@ -198,6 +206,25 @@ class FolderOverlayTest {
         composeRule.onNodeWithContentDescription("Camera, shortcut").assertIsDisplayed()
         composeRule.onNodeWithContentDescription("Camera, shortcut").performTouchInput { click() }
         assertEquals(listOf(ItemId("wide") to "cam"), clicks)
+    }
+
+    @Test fun membersShowNotificationCountsAndPreviewsLikeHome() {
+        show(
+            listOf(app("small", 0, 0), app("big", 1, 0, 4, 2)),
+            icons = mapOf(id("small") to ImageBitmap(32, 32), id("big") to ImageBitmap(32, 32)),
+            notifications = mapOf(
+                ItemId("small") to TileNotifications(count = 7),
+                ItemId("big") to TileNotifications(
+                    count = 2,
+                    previews = listOf(TileNotificationPreview("Ada", "see you at noon")),
+                ),
+            ),
+        )
+        // Small tile: the count glyph and its announcement. Large tile: the newest preview rows.
+        composeRule.onNodeWithTag("tile-notification-count", useUnmergedTree = true).assertIsDisplayed()
+        composeRule.onNode(hasStateDescription("7 notifications")).assertExists()
+        composeRule.onNodeWithText("Ada", useUnmergedTree = true).assertIsDisplayed()
+        composeRule.onNodeWithText("see you at noon", useUnmergedTree = true).assertIsDisplayed()
     }
 
     @Test fun aWidgetMemberRendersThroughTheWidgetSlotAtItsSpan() {

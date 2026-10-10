@@ -33,7 +33,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import me.foxtails.lakehead.core.designsystem.LocalLauncherDimensions
 import me.foxtails.lakehead.core.designsystem.PinnedTileShortcut
+import androidx.compose.ui.graphics.ImageBitmap
 import me.foxtails.lakehead.core.designsystem.ShortcutSurfaceEntry
+import me.foxtails.lakehead.core.designsystem.TileNotifications
 import me.foxtails.lakehead.core.model.AppIdentity
 import me.foxtails.lakehead.core.grid.GridColumns
 import me.foxtails.lakehead.core.grid.GridVerticalExtent
@@ -73,6 +75,8 @@ fun FolderOverlay(
     widgetContent: HomeWidgetContent = NoHomeWidgetContent,
     pinnedByTile: Map<ItemId, List<PinnedTileShortcut>> = emptyMap(),
     onPinnedShortcutClick: (ItemId, String) -> Unit = { _, _ -> },
+    notificationsByTile: Map<ItemId, TileNotifications> = emptyMap(),
+    albumPhotoByTile: Map<ItemId, ImageBitmap> = emptyMap(),
     surfaceEntries: List<ShortcutSurfaceEntry> = emptyList(),
     surfaceEntriesTileId: ItemId? = null,
     onSelectedTileChange: (ItemId?) -> Unit = {},
@@ -142,6 +146,8 @@ fun FolderOverlay(
                 onRemoveTile = onRemoveMember,
                 pinnedByTile = pinnedByTile,
                 onPinnedShortcutClick = onPinnedShortcutClick,
+                notificationsByTile = notificationsByTile,
+                albumPhotoByTile = albumPhotoByTile,
                 surfaceEntries = surfaceEntries,
                 surfaceEntriesTileId = surfaceEntriesTileId,
                 onSelectedTileChange = onSelectedTileChange,

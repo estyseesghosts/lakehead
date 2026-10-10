@@ -388,7 +388,7 @@ class MainActivity : ComponentActivity() {
                 val homeTiles = (homeState as? HomeRenderState.Loaded)?.tiles.orEmpty()
                 // Members of the open folder get pins and the edit menu like any Home tile.
                 shortcutMenuCoordinator.onHomeTilesChanged(homeTiles + openFolderMembers)
-                albumCoordinator.onHomeTilesChanged(homeTiles)
+                albumCoordinator.onHomeTilesChanged(homeTiles + openFolderMembers)
             }
             val folderAddSource by folders.addSource.collectAsState()
             val folderRemovePrompt by folders.removePrompt.collectAsState()
@@ -398,7 +398,7 @@ class MainActivity : ComponentActivity() {
                 val open = openFolder
                 if (loaded != null && open != null && loaded.tiles.none { it.itemId == open }) folders.close()
             }
-            val notificationsByTile = rememberNotificationsByTile(homeState)
+            val notificationsByTile = rememberNotificationsByTile(homeState, openFolderMembers)
             val albumPrompt by albumCoordinator.prompt.collectAsState()
             val albumPickerAlbums by albumCoordinator.pickerAlbums.collectAsState()
             val albumPhotos by albumCoordinator.albumPhotoByTile.collectAsState()
@@ -563,7 +563,12 @@ class MainActivity : ComponentActivity() {
                     onSurfaceExecute = onSurfaceExecute,
                     onSurfaceTogglePin = shortcutMenuCoordinator::togglePin,
                     onPinnedShortcutClick = onPinnedShortcutClick,
+                    notificationsByTile = notificationsByTile,
+                    albumPhotoByTile = albumPhotos,
                     onLaunchMember = { identity ->
+                        // Like a Home tap: a bound slideshow advances one photo, then the app launches.
+                        openFolderMembers.firstOrNull { it.appIdentity == identity }
+                            ?.let { albumCoordinator.onHomeTileTapped(it.itemId) }
                         folders.close()
                         (appLauncherForTest ?: productionAppLauncher).launch(identity)
                     },

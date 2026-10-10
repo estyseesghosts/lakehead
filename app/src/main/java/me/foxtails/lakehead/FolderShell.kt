@@ -1,6 +1,8 @@
 package me.foxtails.lakehead
 
+import androidx.compose.ui.graphics.ImageBitmap
 import me.foxtails.lakehead.core.designsystem.PinnedTileShortcut
+import me.foxtails.lakehead.core.designsystem.TileNotifications
 import me.foxtails.lakehead.core.designsystem.ShortcutSurfaceEntry
 import me.foxtails.lakehead.core.model.AppIdentity
 import me.foxtails.lakehead.core.model.ItemId
@@ -27,6 +29,8 @@ internal data class FolderShell(
     val onMemberResize: (ItemId, LogicalSpan) -> Unit = { _, _ -> },
     // Shortcut data for the open folder's members, exactly as Home gets it.
     val pinnedByTile: Map<ItemId, List<PinnedTileShortcut>> = emptyMap(),
+    val notificationsByTile: Map<ItemId, TileNotifications> = emptyMap(),
+    val albumPhotoByTile: Map<ItemId, ImageBitmap> = emptyMap(),
     val surfaceEntries: List<ShortcutSurfaceEntry> = emptyList(),
     val surfaceEntriesTileId: ItemId? = null,
     val onSelectedTileChange: (ItemId?) -> Unit = {},

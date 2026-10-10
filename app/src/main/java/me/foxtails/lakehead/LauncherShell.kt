@@ -505,6 +505,8 @@ internal fun LauncherShell(
             onMoveMember = folders.onMemberMove,
             onResizeMember = folders.onMemberResize,
             pinnedByTile = folders.pinnedByTile,
+            notificationsByTile = folders.notificationsByTile,
+            albumPhotoByTile = folders.albumPhotoByTile,
             onPinnedShortcutClick = folders.onPinnedShortcutClick,
             surfaceEntries = folders.surfaceEntries,
             surfaceEntriesTileId = folders.surfaceEntriesTileId,

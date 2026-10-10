@@ -51,7 +51,10 @@ internal fun joinNotificationsToTiles(
 
 /** Collects the shared summaries, decodes their photos off the main thread and joins them to [homeState]. */
 @Composable
-internal fun rememberNotificationsByTile(homeState: HomeRenderState): Map<ItemId, TileNotifications> {
+internal fun rememberNotificationsByTile(
+    homeState: HomeRenderState,
+    extraTiles: List<HomeRenderTile> = emptyList(),
+): Map<ItemId, TileNotifications> {
     val context = LocalContext.current
     val summaries by NotificationSummaryStore.shared.summaries.collectAsState()
     var photos by remember { mutableStateOf<Map<String, ImageBitmap>>(emptyMap()) }
@@ -72,6 +75,6 @@ internal fun rememberNotificationsByTile(homeState: HomeRenderState): Map<ItemId
             }
         }
     }
-    val tiles = (homeState as? HomeRenderState.Loaded)?.tiles.orEmpty()
+    val tiles = (homeState as? HomeRenderState.Loaded)?.tiles.orEmpty() + extraTiles
     return remember(tiles, summaries, photos) { joinNotificationsToTiles(tiles, summaries, photos) }
 }
