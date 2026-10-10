@@ -110,6 +110,8 @@ fun HomeCanvas(
     isVisible: Boolean = true,
     widgetContent: HomeWidgetContent = NoHomeWidgetContent,
     onRequestAddWidget: () -> Unit = {},
+    // Tap on a folder tile outside edit mode; the caller owns which folder is open.
+    onOpenFolder: (ItemId) -> Unit = {},
 ) {
     // P0 stale-hold guard: Loading/NotFound never compose HomeCanvasGrid, so
     // the grid's hold emission cannot run to reset shell `homeHold`. Hoist a
@@ -186,6 +188,7 @@ fun HomeCanvas(
                     isVisible = isVisible,
                     widgetContent = widgetContent,
                     onRequestAddWidget = onRequestAddWidget,
+                    onOpenFolder = onOpenFolder,
                 )
             }
         }

@@ -224,10 +224,11 @@ internal class AlbumTileCoordinator(
         isPersonalProfile: Boolean,
     ) {
         val routeScope = synchronized(this) { scope } ?: return
+        val identity = tile.appIdentity ?: return
         routeScope.launch {
             val binding = withContext(ioDispatcher) { repository.loadAlbumBinding(tile.itemId) }
             if (!shouldOfferAlbum(
-                    tile.appIdentity.component.packageName,
+                    identity.component.packageName,
                     tile.isWidget,
                     isPersonalProfile,
                     binding != null,
@@ -238,7 +239,7 @@ internal class AlbumTileCoordinator(
                 return@launch
             }
             val label = tile.label?.takeIf { it.isNotBlank() }
-                ?: tile.appIdentity.component.packageName
+                ?: identity.component.packageName
             mutablePrompt.value = AlbumOfferPrompt(tile.itemId, label)
         }
     }

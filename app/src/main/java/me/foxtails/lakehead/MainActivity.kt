@@ -439,12 +439,13 @@ class MainActivity : ComponentActivity() {
                 onResizeTile = { itemId, span ->
                     val tile = (homeState as? HomeRenderState.Loaded)?.tiles
                         ?.firstOrNull { it.itemId == itemId }
-                    if (tile != null) {
+                    val tileIdentity = tile?.appIdentity
+                    if (tile != null && tileIdentity != null) {
                         albumCoordinator.onResized(
                             tile,
                             tile.span,
                             span,
-                            isPersonalProfile(tile.appIdentity.profileId),
+                            isPersonalProfile(tileIdentity.profileId),
                         )
                     }
                     lifecycleScope.launch {

@@ -35,8 +35,9 @@ internal fun joinNotificationsToTiles(
     if (summaries.isEmpty()) return emptyMap()
     val joined = HashMap<ItemId, TileNotifications>()
     for (tile in tiles) {
-        if (tile.isWidget) continue
-        val key = NotificationSourceKey(tile.appIdentity.component.packageName, tile.appIdentity.profileId)
+        if (tile.isWidget || tile.isFolder) continue
+        val identity = tile.requireAppIdentity
+        val key = NotificationSourceKey(identity.component.packageName, identity.profileId)
         val summary = summaries[key]?.takeIf { it.count > 0 } ?: continue
         joined[tile.itemId] = TileNotifications(
             count = summary.count,

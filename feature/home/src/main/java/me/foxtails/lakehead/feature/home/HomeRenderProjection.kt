@@ -9,6 +9,8 @@ import me.foxtails.lakehead.core.grid.GridVerticalLayout
 import me.foxtails.lakehead.core.grid.GridViewportAdaptation
 import me.foxtails.lakehead.core.model.AppIdentity
 import me.foxtails.lakehead.core.model.AppPlacement
+import me.foxtails.lakehead.core.model.FolderPlacement
+import me.foxtails.lakehead.core.model.ItemId
 import me.foxtails.lakehead.core.model.HomePlacement
 import me.foxtails.lakehead.core.model.HomeId
 import me.foxtails.lakehead.core.model.ItemAvailability
@@ -24,6 +26,9 @@ import me.foxtails.lakehead.core.model.WidgetPlacement
  */
 /** Accessible label of a widget tile; the provider label is not persisted. */
 internal const val WIDGET_LABEL: String = "Widget"
+
+/** Accessible label of a folder tile; folders have no name yet. */
+internal const val FOLDER_LABEL: String = "Folder"
 
 object HomeRenderProjection {
     /**
@@ -80,8 +85,22 @@ object HomeRenderProjection {
     fun resolveTiles(
         placements: List<HomePlacement>,
         metadataByIdentity: Map<AppIdentity, HomeAppMetadata>,
+        folderMembers: Map<ItemId, List<HomePlacement>> = emptyMap(),
     ): List<HomeRenderTile> =
         placements.map { placement ->
+            if (placement is FolderPlacement) {
+                return@map HomeRenderTile(
+                    itemId = placement.itemId,
+                    appIdentity = null,
+                    position = placement.position,
+                    span = placement.span,
+                    availability = placement.availability,
+                    label = FOLDER_LABEL,
+                    icon = null,
+                    isLaunchable = false,
+                    folderPreview = folderPreview(folderMembers[placement.itemId].orEmpty()),
+                )
+            }
             if (placement is WidgetPlacement) {
                 return@map HomeRenderTile(
                     itemId = placement.itemId,
@@ -112,6 +131,23 @@ object HomeRenderProjection {
         }
 
     /**
+     * The identities a closed folder tile previews: the first [FOLDER_PREVIEW_MAX] members in
+     * row-major order (row, then column) of the folder's interior grid. Every member takes one
+     * cell whatever its span; a widget member shows its provider's identity.
+     */
+    fun folderPreview(members: List<HomePlacement>): List<AppIdentity> =
+        members
+            .sortedWith(compareBy({ it.position.row }, { it.position.column }))
+            .take(FOLDER_PREVIEW_MAX)
+            .mapNotNull { member ->
+                when (member) {
+                    is AppPlacement -> member.appIdentity
+                    is WidgetPlacement -> member.provider
+                    is FolderPlacement -> null
+                }
+            }
+
+    /**
      * Projects persisted [placements] for [requestedHomeId] into [HomeRenderState.Loaded].
      *
      * @throws IllegalArgumentException if any placement's `homeId` differs from [requestedHomeId].
@@ -121,6 +157,7 @@ object HomeRenderProjection {
         placements: List<HomePlacement>,
         metadataByIdentity: Map<AppIdentity, HomeAppMetadata>,
         inputs: HomeViewportInputs,
+        folderMembers: Map<ItemId, List<HomePlacement>> = emptyMap(),
     ): HomeRenderState.Loaded {
         placements.forEach { placement ->
             require(placement.homeId == requestedHomeId) {
@@ -128,7 +165,7 @@ object HomeRenderProjection {
             }
         }
         val columns = adaptColumns(inputs)
-        val tiles = resolveTiles(placements, metadataByIdentity)
+        val tiles = resolveTiles(placements, metadataByIdentity, folderMembers)
         val extent = measureExtent(
             placements = placements,
             viewportRows = inputs.viewportRows,

@@ -225,14 +225,14 @@ internal fun HomeCanvasTile(
             if (isEffectiveEditing) {
                 onSelect(tile.itemId)
             } else if (!isEditActive && tile.isLaunchable) {
-                onLaunchApp(tile.appIdentity)
+                tile.appIdentity?.let(onLaunchApp)
             }
         },
         onSymbolClick = {
             if (isEffectiveEditing) {
                 onSelect(tile.itemId)
             } else if (!isEditActive && tile.isLaunchable) {
-                onLaunchApp(tile.appIdentity)
+                tile.appIdentity?.let(onLaunchApp)
             }
         },
         modifier = tileModifier,

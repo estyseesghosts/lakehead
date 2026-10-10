@@ -94,10 +94,14 @@ data class HomeViewportInputs(
  * metadata for the complete [appIdentity], or null when no metadata was supplied. The icon is
  * optional. [isLaunchable] is true only when the placement is [ItemAvailability.AVAILABLE] and
  * metadata (including its label) is present; an icon is not required to launch.
+ *
+ * A folder tile has no [appIdentity]: [folderPreview] holds the identities of up to four members
+ * in row-major order of the folder's interior grid (one per preview cell, whatever the member's
+ * span), and a folder is never launchable.
  */
 data class HomeRenderTile(
     val itemId: ItemId,
-    val appIdentity: AppIdentity,
+    val appIdentity: AppIdentity?,
     val position: LogicalPosition,
     val span: LogicalSpan,
     val availability: ItemAvailability,
@@ -106,15 +110,30 @@ data class HomeRenderTile(
     val isLaunchable: Boolean,
     /** Non-null for a hosted widget tile; [appIdentity] is then the widget provider. */
     val appWidgetId: Int? = null,
+    /** Non-null for a folder tile; up to [FOLDER_PREVIEW_MAX] member identities, row-major. */
+    val folderPreview: List<AppIdentity>? = null,
 ) {
     val isWidget: Boolean get() = appWidgetId != null
+    val isFolder: Boolean get() = folderPreview != null
+
+    /** Folder tiles are fixed at 1×1 until a larger preview is designed. */
+    val isResizable: Boolean get() = !isFolder
+
+    /** The app identity of an app or widget tile; callers filter folders out first. */
+    val requireAppIdentity: AppIdentity get() = checkNotNull(appIdentity) { "a folder tile has no app identity" }
 
     init {
-        require(isLaunchable == (availability == ItemAvailability.AVAILABLE && label != null)) {
-            "isLaunchable must be true only when AVAILABLE with metadata label present"
+        require(isFolder == (appIdentity == null)) { "a folder tile has no app identity and every other tile has one" }
+        require(!(isFolder && isWidget)) { "a tile cannot be both a folder and a widget" }
+        require((folderPreview?.size ?: 0) <= FOLDER_PREVIEW_MAX) { "a folder previews at most $FOLDER_PREVIEW_MAX members" }
+        require(isLaunchable == (availability == ItemAvailability.AVAILABLE && label != null && !isFolder)) {
+            "isLaunchable must be true only when AVAILABLE with metadata label present and not a folder"
         }
     }
 }
+
+/** Member symbols a closed folder tile previews: a 2×2 grid. */
+const val FOLDER_PREVIEW_MAX: Int = 4
 
 /**
  * Pure render states for one requested home.

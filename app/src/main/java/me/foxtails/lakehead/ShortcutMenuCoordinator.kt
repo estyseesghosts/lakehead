@@ -181,7 +181,8 @@ internal class ShortcutMenuCoordinator(
      * new tiles through [start]'s combine.
      */
     fun onHomeTilesChanged(currentTiles: List<HomeRenderTile>) {
-        tiles.value = currentTiles.toList()
+        // Folder tiles have no app identity, so no shortcut menu or pins.
+        tiles.value = currentTiles.filterNot { it.isFolder }
         projectPinned(currentTiles)
         if (pinnedProjectionBlocked) {
             refreshPinnedMetadataForRestart(currentTiles)
@@ -203,7 +204,7 @@ internal class ShortcutMenuCoordinator(
      */
     suspend fun execute(tileId: ItemId, entryId: String): Boolean = withContext(ioDispatcher) {
         val tile = tiles.value.firstOrNull { it.itemId == tileId } ?: return@withContext false
-        val ref = gateway.shortcutsFor(tile.appIdentity)
+        val ref = gateway.shortcutsFor(tile.requireAppIdentity)
             .firstOrNull { it.ref.shortcutId == entryId }?.ref
             ?: return@withContext false
         surfaceLoader.execute(ref)
@@ -227,7 +228,7 @@ internal class ShortcutMenuCoordinator(
                 return@launch
             }
             val entries = withContext(ioDispatcher) {
-                surfaceLoader.entriesForTile(selected, tile.appIdentity, tile.span)
+                surfaceLoader.entriesForTile(selected, tile.requireAppIdentity, tile.span)
             }
             synchronized(this@ShortcutMenuCoordinator) {
                 if (requestGeneration != generation || selections.value != selected) return@launch
@@ -240,7 +241,7 @@ internal class ShortcutMenuCoordinator(
         val routeScope = synchronized(this) { scope } ?: return
         routeScope.launch {
             val tile = tiles.value.firstOrNull { it.itemId == tileId } ?: return@launch
-            if (surfaceLoader.togglePin(tileId, tile.appIdentity, tile.span, entryId)) {
+            if (surfaceLoader.togglePin(tileId, tile.requireAppIdentity, tile.span, entryId)) {
                 projectPinned(tiles.value.filter { it.itemId == tileId }, false)
                 refreshPinnedMetadata(tiles.value)
                 if (selections.value == tileId) reload(tiles.value, tileId)
@@ -273,10 +274,10 @@ internal class ShortcutMenuCoordinator(
         pinnedJob?.cancel()
         pinnedJob = routeScope.launch {
             val projected = currentTiles.associate { tile ->
-                tile.itemId to surfaceLoader.pinnedForTile(tile.itemId, tile.appIdentity)
+                tile.itemId to surfaceLoader.pinnedForTile(tile.itemId, tile.requireAppIdentity)
             }
             val identities = currentTiles.associate { tile ->
-                tile.itemId to tile.appIdentity
+                tile.itemId to tile.requireAppIdentity
             }
             pinnedIdentityByTile = if (replaceAll) {
                 val pinned = surfaceLoader.pinnedIdentitiesForTiles(currentTiles).toSet()
@@ -302,8 +303,8 @@ internal class ShortcutMenuCoordinator(
         pinnedMetadataJob = routeScope.launch {
             val identities = surfaceLoader.pinnedIdentitiesForTiles(currentTiles).distinct()
             pinnedIdentityByTile = currentTiles
-                .filter { it.appIdentity in identities }
-                .associate { it.itemId to it.appIdentity }
+                .filter { it.requireAppIdentity in identities }
+                .associate { it.itemId to it.requireAppIdentity }
             identities.forEach(gateway::refresh)
         }
     }

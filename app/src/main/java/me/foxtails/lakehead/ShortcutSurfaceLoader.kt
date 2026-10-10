@@ -100,7 +100,7 @@ internal class ShortcutSurfaceLoader(
     suspend fun pinnedIdentitiesForTiles(tiles: List<HomeRenderTile>): List<AppIdentity> =
         withContext(ioDispatcher) {
             tiles.filter { repository.loadBinding(it.itemId).pinnedShortcuts.isNotEmpty() }
-                .map { it.appIdentity }
+                .map { it.requireAppIdentity }
                 .distinct()
         }
 

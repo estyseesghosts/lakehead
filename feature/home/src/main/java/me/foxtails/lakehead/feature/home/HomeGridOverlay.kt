@@ -104,18 +104,21 @@ internal fun HomeGridOverlay(
             } else {
                 activeTile.label
             }
-            Box(
-                modifier = Modifier
-                    .offset { handleOffset }
-                    .size(RESIZE_TOUCH_DP.dp),
-            ) {
-                ResizeHandle(
-                    label = handleLabel,
-                    armed = editState.isResizeArmedFor(controlItemId),
-                    onToggleArmed = {
-                        onToggleResizeArmed(controlItemId)
-                    },
-                )
+            // Folder tiles are 1x1 and not resizable: no handle.
+            if (activeTile.isResizable) {
+                Box(
+                    modifier = Modifier
+                        .offset { handleOffset }
+                        .size(RESIZE_TOUCH_DP.dp),
+                ) {
+                    ResizeHandle(
+                        label = handleLabel,
+                        armed = editState.isResizeArmedFor(controlItemId),
+                        onToggleArmed = {
+                            onToggleResizeArmed(controlItemId)
+                        },
+                    )
+                }
             }
             // Remove affordance: sibling overlay over the active tile in
             // both MOVE and RESIZE modes. Tracks the live candidate span

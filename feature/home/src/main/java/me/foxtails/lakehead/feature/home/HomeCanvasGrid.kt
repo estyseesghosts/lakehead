@@ -228,6 +228,7 @@ internal fun HomeCanvasGrid(
     widgetContent: HomeWidgetContent = NoHomeWidgetContent,
     // The (+) button shown while editing reports here; the caller opens the picker.
     onRequestAddWidget: () -> Unit = {},
+    onOpenFolder: (ItemId) -> Unit = {},
 ) {
     require(usableHeightPx >= 0) { "usableHeightPx must be non-negative" }
     require(fullHeightPx >= 0) { "fullHeightPx must be non-negative" }
@@ -590,7 +591,7 @@ internal fun HomeCanvasGrid(
                 ) { tile, renderedSpan ->
                     HomeCanvasTile(
                         tile = if (renderedSpan != tile.span) tile.copy(span = renderedSpan) else tile,
-                        iconBitmap = iconsByIdentity[tile.appIdentity],
+                        iconBitmap = tile.appIdentity?.let { iconsByIdentity[it] },
                         onLaunchApp = onLaunchApp,
                         editState = editState,
                         // C1: per-tile joined pins (empty = centered icon);
@@ -616,6 +617,19 @@ internal fun HomeCanvasGrid(
                                     tile = tile,
                                     isEditing = editing,
                                     widgetContent = widgetContent,
+                                    onSelect = { editState = editState.selectOnTap(tile.itemId) },
+                                    onLongPress = { editState = editState.enterOnLongPress(tile.itemId) },
+                                )
+                            }
+                        } else if (tile.isFolder) {
+                            { editing ->
+                                FolderTileBody(
+                                    tile = tile,
+                                    iconsByIdentity = iconsByIdentity,
+                                    isEditing = editing,
+                                    isSelected = editState.selectedTileId == tile.itemId,
+                                    isDragging = editState.isDragging,
+                                    onOpen = { onOpenFolder(tile.itemId) },
                                     onSelect = { editState = editState.selectOnTap(tile.itemId) },
                                     onLongPress = { editState = editState.enterOnLongPress(tile.itemId) },
                                 )
