@@ -1,1 +1,0 @@
-Gradle Android project using Kotlin and Jetpack Compose. Modules and versions are defined in Gradle catalogs/build scripts; use checked-in ./gradlew wrapper.

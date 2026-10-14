@@ -1,1 +1,0 @@
-ProtoLaunch Android launcher. Modules: app wiring; core:model domain IDs; core:grid pure placement; core:designsystem Compose; platform:launcherapps framework gateway; feature:home presentation. Stable profile-aware app identity and separation of placement/rendering are key invariants.

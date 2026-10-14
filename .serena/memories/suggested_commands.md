@@ -1,1 +1,0 @@
-Run one command per invocation from project root. Use ./gradlew <task>; Python audits under tools/scripts. On Darwin, use git status --short and git diff for worktree inspection.
